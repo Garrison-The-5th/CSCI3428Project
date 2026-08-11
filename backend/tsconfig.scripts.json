@@ -1,0 +1,9 @@
+{
+  // The check scripts are not part of the shipped build — tsconfig.json's
+  // `include` deliberately omits them so they stay out of ./build — but they
+  // still import the whole service layer, so they have to be typechecked or a
+  // rename in src breaks them silently and only at runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["scripts/**/*", "src/**/*", "prisma/**/*"]
+}

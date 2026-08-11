@@ -1,0 +1,37 @@
+# Applies to builds that use frontend/Dockerfile.
+#
+# The backend has had one of these for a while; the frontend did not, so it fell
+# back to the root .dockerignore — which excludes only a top-level `node_modules`
+# and `.git`. Two consequences, both real:
+#
+# 1. `COPY frontend/ .` copied `frontend/.env` into the image. Only a feature
+#    flag today, but nothing stopped the next value added there from being a
+#    secret, and a value baked into a layer is in the image forever.
+# 2. The build context was 210MB, almost all of it `frontend/node_modules` and
+#    `backend/node_modules` being shipped to the daemon on every build, only to
+#    be overwritten by `npm install` a moment later.
+#
+# Patterns are relative to the BUILD CONTEXT root, which docker-compose sets to
+# the repo root — not to frontend/. That is why every rule below is written with
+# `**/` rather than as a bare filename.
+#
+# Configuration reaches the build through --build-arg (see KEYCLOAK_CONFIG) and
+# the container through the environment, never by being copied in.
+
+**/node_modules/
+**/.env
+**/.env.*
+**/*.env
+.git/
+
+# Build output — regenerated inside the image, and stale copies only confuse.
+**/dist/
+**/build/
+**/coverage/
+
+# Test and CI material: not needed to build or serve the app.
+**/playwright-report/
+**/test-results/
+frontend/e2e/
+frontend/tests/
+backend/tests/

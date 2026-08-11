@@ -1,0 +1,19 @@
+{
+  // Test compilation. Separate from tsconfig.json only because tests need the
+  // Jest globals, which the application build deliberately excludes.
+  //
+  // Module settings are inherited rather than overridden: the package has no
+  // `"type": "module"`, so the base `nodenext` already emits CommonJS, which is
+  // what ts-jest wants. Forcing `moduleResolution: node` here instead tripped
+  // TS6's deprecation of node10 resolution.
+  //
+  // `include` covers src as well as tests so that `tsc -p tsconfig.test.json`
+  // typechecks the tests against the real source, which is what stops a
+  // refactor from silently leaving a test compiling against a stale signature.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    "noEmit": true
+  },
+  "include": ["src/**/*", "tests/**/*", "prisma/**/*", "jest.config.ts"]
+}

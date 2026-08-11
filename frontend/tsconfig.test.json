@@ -1,0 +1,20 @@
+{
+  // Test compilation: the Jest globals plus the DOM, which the app tsconfig
+  // already has. Kept separate so the production build never sees test types.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["node", "jest", "@testing-library/jest-dom"],
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "verbatimModuleSyntax": false,
+    "erasableSyntaxOnly": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    // keycloak.json is imported directly by utils/keycloak.ts.
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src/**/*", "tests/**/*", "e2e/**/*", "jest.config.ts", "playwright.config.ts"]
+}

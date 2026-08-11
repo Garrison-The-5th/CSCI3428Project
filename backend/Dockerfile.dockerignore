@@ -1,0 +1,19 @@
+# Applies to builds that use backend/Dockerfile.
+#
+# Two things to know, both of which this file previously got wrong:
+#
+# 1. Patterns are relative to the BUILD CONTEXT root, which docker-compose sets
+#    to the repo root — not to backend/. A bare `.env` therefore only ever
+#    matched a root-level .env, while `COPY backend/ .` happily copied
+#    backend/.env, baking DATABASE_URL and PUBLICKEY into the image.
+# 2. There are no trailing comments. `.env*  # ignore env files` is one literal
+#    pattern including the '#' and everything after it, so it matches nothing.
+#
+# Secrets reach the container through the environment (see docker-compose), never
+# by being copied in.
+
+**/node_modules/
+**/.env
+**/.env.*
+**/*.env
+.git/

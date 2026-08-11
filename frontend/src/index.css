@@ -1,0 +1,381 @@
+@import 'tailwindcss';
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: var(--color-light-gray);
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #153243;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #153243;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
+  --accent: #e2e8f0;
+  --accent-foreground: #0f172a;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #cbd5e1;
+  --ring: #153243;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: #1a1a1a;
+  --foreground: #e2e8f0;
+  --card: #111827;
+  --card-foreground: #e2e8f0;
+  --popover: #111827;
+  --popover-foreground: #e2e8f0;
+  --primary: #7bb863;
+  --primary-foreground: #0f172a;
+  --secondary: #1f2937;
+  --secondary-foreground: #e2e8f0;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #334155;
+  --accent-foreground: #e2e8f0;
+  --destructive: #f87171;
+  --destructive-foreground: #0f172a;
+  --border: #334155;
+  --input: #334155;
+  --ring: #7bb863;
+}
+
+/* Global Styles & Color Palette */
+@theme {
+  /* Responsive breakpoints */
+  --breakpoint-xs: 0px;
+  --breakpoint-sm: 481px;
+  --breakpoint-md: 835px;
+  --breakpoint-lg: 1025px;
+  --breakpoint-xl: 1441px;
+
+  /* Typography */
+  --font-sans:
+    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Color Palette */
+  --color-navy: #153243;
+  --color-navy-hover: #1a3d52;
+  --color-dark-gray: #333333;
+  --color-purple: #737acb;
+  --color-green: #7bb863;
+  --color-green-hover: #6ba855;
+  --color-white: #ffffff;
+  --color-light-gray: #f5f5f5;
+  --color-border: var(--border);
+  --color-text-muted: #757575;
+  --color-text-light: #e0e0e0;
+  --color-text-secondary: #b0b0b0;
+  --color-navbar-bg: #1a1a1a;
+  --color-navbar-hover: #252525;
+  --color-danger: #e57373;
+  --color-danger-hover: #ef5350;
+  /*
+   * The "New" marker on freshly published content.
+   *
+   * Deep enough that white text on it clears 4.5:1, which a lighter orange does
+   * not — the pill carries small text, so it has to be readable rather than just
+   * orange. Distinct from --color-danger so "new" never reads as "wrong".
+   */
+  --color-new: #b45309;
+  --color-new-soft: #fef3c7;
+  --color-card-border: #4a5565;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --animate-slideInRight: slideInRight 0.3s ease-out;
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dark .page-container {
+  color-scheme: dark;
+  background-color: var(--color-navbar-bg);
+  color: var(--color-text-light);
+}
+
+.dark .page-container .bg-light-gray,
+.dark .page-container .bg-white {
+  background-color: var(--color-navbar-hover);
+}
+
+.dark .page-container .text-dark-gray,
+.dark .page-container .text-heading {
+  color: var(--color-text-light);
+}
+
+.dark .page-container .text-text-secondary,
+.dark .page-container .text-text-muted,
+.dark .page-container .text-muted {
+  color: var(--color-text-secondary);
+}
+
+.dark .page-container .border-gray-200,
+.dark .page-container .border-gray-300,
+.dark .page-container .border-border,
+.dark .page-container .divide-gray-300 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-card-border);
+}
+
+.dark .page-container input,
+.dark .page-container textarea,
+.dark .page-container select {
+  background-color: var(--color-navbar-bg);
+  border-color: var(--color-card-border);
+  color: var(--color-text-light);
+}
+
+.dark .page-container input::placeholder,
+.dark .page-container textarea::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.dark .page-container .shadow-lg,
+.dark .page-container .shadow-md\/40,
+.dark .page-container .shadow-sm,
+.dark .page-container .shadow-xs {
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+}
+
+.dark .page-container hr {
+  border-color: var(--color-card-border);
+}
+
+#root {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+
+/* Shared responsive layout */
+:root {
+  --appbar-height: 4rem;
+  --sidebar-width: 16rem;
+  --page-gutter: 2rem;
+}
+
+.app-main {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.app-main--authenticated {
+  min-height: calc(100dvh - var(--appbar-height));
+  margin-top: var(--appbar-height);
+  transition: margin-left 0.3s ease-in-out;
+}
+
+.page-container {
+  width: 100%;
+  min-width: 0;
+  padding: var(--page-gutter);
+}
+
+.page-title {
+  font-size: 2.25rem;
+  line-height: 2.5rem;
+}
+
+.page-hero-title {
+  font-size: 3rem;
+  line-height: 1.1;
+}
+
+.page-subtitle {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.section-title {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+
+@media (max-width: 480px) {
+  :root {
+    --page-gutter: 1rem;
+  }
+
+  .page-title {
+    font-size: 1.75rem;
+    line-height: 2.125rem;
+  }
+
+  .page-hero-title {
+    font-size: 2rem;
+  }
+
+  .page-subtitle {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  .section-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+}
+
+@media (min-width: 481px) and (max-width: 834px) {
+  :root {
+    --page-gutter: 1.5rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    line-height: 2.375rem;
+  }
+
+  .page-hero-title {
+    font-size: 2.5rem;
+  }
+}
+
+@media (min-width: 835px) and (max-width: 1024px) {
+  :root {
+    --sidebar-width: 14rem;
+    --page-gutter: 1.75rem;
+  }
+
+  .app-main--sidebar-open {
+    margin-left: var(--sidebar-width);
+  }
+}
+
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .app-main--sidebar-open {
+    margin-left: var(--sidebar-width);
+  }
+}
+
+@media (min-width: 1441px) {
+  :root {
+    --page-gutter: 2.5rem;
+  }
+
+  .app-main--sidebar-open {
+    margin-left: var(--sidebar-width);
+  }
+}
+
+@layer base {
+  button:not([disabled]),
+  [role='button']:not([disabled]) {
+    cursor: pointer;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+/* Rich lesson text — used by the editor surface and the learner view.
+   The markup only ever contains the tags the server allowlist permits. */
+.rich-text h2 { font-size: 1.5rem; font-weight: 700; margin: 0.75rem 0 0.35rem; }
+.rich-text h3 { font-size: 1.2rem; font-weight: 650; margin: 0.65rem 0 0.3rem; }
+.rich-text p { margin: 0 0 0.65rem; }
+.rich-text ul { list-style: disc; padding-left: 1.4rem; margin: 0 0 0.65rem; }
+.rich-text ol { list-style: decimal; padding-left: 1.4rem; margin: 0 0 0.65rem; }
+.rich-text li { margin: 0.15rem 0; }
+.rich-text blockquote {
+  border-left: 3px solid var(--color-navy);
+  padding-left: 0.9rem;
+  margin: 0 0 0.65rem;
+  font-style: italic;
+}
+.rich-text a { color: var(--color-green); text-decoration: underline; }
+.rich-text code {
+  font-family: ui-monospace, Menlo, monospace;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+}
+/* Tables can be wider than the column, so they scroll inside their own box. */
+.rich-text table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 0.75rem;
+  display: block;
+  overflow-x: auto;
+}
+.rich-text th,
+.rich-text td {
+  border: 1px solid var(--color-gray-300, #d1d5db);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+.rich-text th { background: rgba(21, 50, 67, 0.06); font-weight: 650; }
+.dark .rich-text th { background: rgba(255, 255, 255, 0.06); }

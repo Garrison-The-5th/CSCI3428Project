@@ -1,0 +1,36 @@
+# Dependency directories
+*/node_modules/
+/node_modules
+**/node_modules
+.vscode/
+**/coverage/
+
+# Environment variables and anything derived from them.
+#
+# These patterns have no leading slash, so they match at any depth — backend/.env
+# and frontend/.env are covered as well as the root one.
+.env
+.env.*
+*.env
+
+# Lockfiles are deliberately NOT ignored.
+#
+# `package-lock.json` used to be listed here, which meant the repository had no
+# lockfile at all. Two consequences: every install resolved dependencies afresh,
+# so no two environments were guaranteed the same tree (§3.10.2 asks for exactly
+# the opposite), and `npm ci` — which the CI pipeline uses and which *requires* a
+# lockfile — could never have run.
+
+.vscode
+
+# directories
+/example_docs
+.DS_Store
+
+# Build output
+backend/build
+frontend/dist
+
+# Test artefacts
+**/playwright-report/
+**/test-results/

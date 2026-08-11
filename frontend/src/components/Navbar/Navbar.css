@@ -1,0 +1,63 @@
+.app-sidebar {
+  width: var(--sidebar-width);
+}
+
+.theme-toggle__track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.5rem;
+  height: 1.25rem;
+  padding: 0.125rem;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 999px;
+  background-color: rgb(255 255 255 / 0.1);
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.theme-toggle__track--active {
+  border-color: var(--color-green);
+  background-color: rgb(123 184 99 / 0.35);
+}
+
+.theme-toggle__thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  background-color: var(--color-text-secondary);
+  transform: translateX(0);
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease;
+}
+
+.theme-toggle:hover .theme-toggle__thumb,
+.theme-toggle__track--active .theme-toggle__thumb {
+  background-color: var(--color-green);
+}
+
+.theme-toggle__track--active .theme-toggle__thumb {
+  transform: translateX(1.25rem);
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .app-header img {
+    max-width: min(11rem, calc(100vw - 5rem));
+  }
+
+  .app-sidebar {
+    width: min(16rem, 86vw);
+  }
+}
+
+@media (min-width: 481px) and (max-width: 834px) {
+  .app-sidebar {
+    width: 16rem;
+  }
+}

@@ -1,0 +1,20 @@
+-- Intentionally empty. This migration is superseded and must not run.
+--
+-- It was written against the original Module -> Lesson -> Element schema: it dropped and
+-- re-added foreign keys on "Lesson" and "Element", and created the first "Quiz",
+-- "Question" and "Option" tables.
+--
+-- It was applied before 20260727190000_courses_and_progress existed. That migration was
+-- authored later but given an earlier timestamp, so it now sorts ahead of this one. It
+-- drops every table this file touched (Option, Question, Quiz, Element, Lesson, Module)
+-- and rebuilds the schema around Course -> Module -> Element, creating Quiz, Question and
+-- Option itself in their current shape.
+--
+-- So on any replay the statements here ran against tables that no longer existed and
+-- failed with: relation "Lesson" does not exist. That made the whole history
+-- un-replayable, which broke `prisma migrate dev` and `prisma migrate reset` (both use a
+-- shadow database) and meant a fresh database could not be built from migrations.
+--
+-- Emptying it is safe precisely because 20260727190000 supersedes all of it. Databases
+-- that already applied the original are unaffected: everything this file built was
+-- dropped and rebuilt by the migration that now precedes it.

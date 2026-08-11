@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: dev-postgres
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - '${DB_PORT}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    container_name: keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      # Bound to localhost only - this dev instance is not for outside access.
+      - '127.0.0.1:4000:8080'
+    volumes:
+      # Keeps the realm, users, clients and signing keys across container removal.
+      # Without this, `docker compose down` loses the realm and PUBLICKEY changes.
+      - keycloak_data:/opt/keycloak/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: boilerplate-backend:v1.0.0         # update version tag for each new release
+    ports:
+      - '5002:5002'
+    container_name: backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      # Secrets are passed in, never baked into the image — backend/.env is
+      # excluded by backend/Dockerfile.dockerignore. Set these in the root .env,
+      # which is the file compose substitutes from.
+      PUBLICKEY: ${PUBLICKEY}
+      # Where links in outgoing email should point.
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # Optional: leave unset and assignment emails are logged instead of sent.
+      GOOGLE_GMAIL_API_CONFIG: ${GOOGLE_GMAIL_API_CONFIG:-}
+
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: boilerplate-frontend:v1.0.0           # update version tag for each new release
+    container_name: frontend
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
+
+
+volumes:
+  postgres_data:
+  keycloak_data:
+
+# ============================================================================
+# DEVELOPMENT SETUP - TWO OPTIONS
+# ============================================================================
+#
+# OPTION 1: Run ALL services in Docker (PostgreSQL + Backend + Frontend)
+#   docker compose -f docker-compose-dev.yml build backend
+#   docker compose -f docker-compose-dev.yml build frontend
+#   docker compose -f docker-compose-dev.yml up -d
+#
+# OPTION 2: Run ONLY PostgreSQL in Docker (recommended for development)
+#   npm install       # Installs root dependencies
+#   cd frontend && npm install      # Installs frontend dependencies
+#   cd ../backend && npm install    # Installs backend dependencies
+#   cd ..
+#   npm run setup    # Starts postgres & runs migrations
+#   npm run dev      # Starts backend & frontend locally
+# ============================================================================

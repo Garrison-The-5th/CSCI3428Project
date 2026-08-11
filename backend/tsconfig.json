@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "nodenext",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "outDir": "./build",
+    "rootDir": "./",
+    // Absolute imports (TTG Technology Standards §1.10). Declared without
+    // `baseUrl`, which TypeScript 6 deprecates — paths now resolve relative to
+    // this file. `tsc` only rewrites types, so the emitted JS still contains
+    // `@/...`; `tsc-alias` turns those into real relative paths after the
+    // build, and ts-node resolves them in development via
+    // `tsconfig-paths/register`.
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "moduleResolution": "nodenext",
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "skipDefaultLibCheck": true,
+    "noImplicitAny": false
+  },
+  "include": ["src/**/*", "prisma/**/*", "prisma/prisma.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

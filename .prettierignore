@@ -1,0 +1,10 @@
+# Build artifacts and generated code — formatting them is noise, and the Prisma
+# client is regenerated on every install.
+node_modules
+backend/build
+backend/generated
+frontend/dist
+package-lock.json
+
+# Migrations are SQL history: once applied they must never be rewritten.
+backend/prisma/migrations

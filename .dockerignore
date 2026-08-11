@@ -1,0 +1,23 @@
+# Fallback for any build that does not have its own <Dockerfile>.dockerignore.
+# backend/ and frontend/ each have one; this is the safety net.
+#
+# `node_modules/` alone matches only a top-level directory, so the nested ones
+# were being shipped to the daemon on every build. `**/` fixes that.
+
+**/node_modules/
+
+# Never ship environment files into a build context — secrets belong in the
+# container's environment, not in an image layer.
+**/.env
+**/.env.*
+**/*.env
+
+# Ignore Git-related files
+.git/
+
+# Build output and test artefacts.
+**/dist/
+**/build/
+**/coverage/
+**/playwright-report/
+**/test-results/

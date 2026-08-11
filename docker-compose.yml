@@ -1,0 +1,151 @@
+# The whole application, startable with one command.
+#
+# TTG Technology Standards §1.13: "Developers must ensure that the full
+# application stack can be started using a single command: docker compose up",
+# and "the application must be fully testable locally using the containerized
+# environment before deployment."
+#
+# This file previously defined only `frontend` and `backend` — no database and no
+# identity provider — so `docker compose up` produced a backend that could not
+# reach PostgreSQL and a frontend nobody could sign in to. The working stack
+# lived in docker-compose-dev.yml behind a non-default `-f` flag.
+#
+# Every value below has a default, so `docker compose up` works on a clean
+# checkout with no .env file. Those defaults are placeholders for local use
+# only — the database is published on a mapped port, so set real values in
+# .env for anything beyond a laptop. Secrets are never baked into an image.
+#
+#   docker compose up          # build if needed, then run the whole stack
+#   docker compose up -d       # same, in the background
+#   docker compose down -v     # stop and discard the data volumes
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: learning-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-learning_dev}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdev_change_me}
+      POSTGRES_DB: ${DB_NAME:-learning_app}
+    ports:
+      # Host port differs from 5432 so it cannot collide with a local install.
+      - '${DB_PORT:-5433}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-learning_dev} -d ${DB_NAME:-learning_app}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    container_name: learning-keycloak
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      # Bound to localhost only — this instance is not for outside access.
+      - '127.0.0.1:4000:8080'
+    volumes:
+      # Keeps the realm, users, clients and signing keys across container
+      # removal. Without this, `docker compose down` loses the realm and the
+      # PUBLICKEY the backend was configured with stops matching.
+      - keycloak_data:/opt/keycloak/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: tartigrade/boilerplate-backend:v1.1.0
+    container_name: learning-backend
+    restart: unless-stopped
+    ports:
+      - '5002:5002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${DB_USERNAME:-learning_dev}:${DB_PASSWORD:-localdev_change_me}@postgres:5432/${DB_NAME:-learning_app}?schema=public
+      # Secrets are passed in, never baked into the image — backend/.env is
+      # excluded by backend/Dockerfile.dockerignore. Set these in the root .env,
+      # which is the file compose substitutes from.
+      PUBLICKEY: ${PUBLICKEY:-}
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://localhost:4000}
+      # Where links in outgoing email should point.
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # Optional: leave unset and assignment emails are logged instead of sent.
+      GOOGLE_GMAIL_API_CONFIG: ${GOOGLE_GMAIL_API_CONFIG:-}
+      # How many proxy hops to believe for the caller's IP. Unset is correct
+      # locally; production must set it or every visitor shares a rate-limit
+      # bucket. See backend/src/config/client-address.ts.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    healthcheck:
+      # `/table-members/` — note the exact path. This read `/table/members`,
+      # which does not exist, so the check hit the 404 handler and the container
+      # never reported healthy. Any unauthenticated route works here; the point
+      # is only that the process is listening and the router is mounted.
+      test:
+        [
+          'CMD-SHELL',
+          "node -e \"fetch('http://127.0.0.1:5002/table-members/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Which Keycloak client config to bake in. The default is the local
+        # realm, so a plain `docker compose up` is signed-in-able; the deploy
+        # pipeline overrides it with keycloak_ttg.json.
+        KEYCLOAK_CONFIG: ${KEYCLOAK_CONFIG:-keycloak.json}
+    image: tartigrade/boilerplate-frontend:v1.1.0
+    container_name: learning-frontend
+    restart: unless-stopped
+    ports:
+      - '5173:5173'
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  keycloak_data:
+# ============================================================================
+# FIRST RUN
+# ============================================================================
+#
+# 1) docker compose up -d
+# 2) Configure the Keycloak realm — see docs/keycloak.md — then copy the realm
+#    public key into PUBLICKEY in a root .env file.
+# 3) docker compose restart backend
+# 4) (optional) docker compose exec backend npm run db:seed
+#
+# Migrations run automatically when the backend container starts, so there is no
+# manual database step. See backend/Dockerfile.
+# ============================================================================

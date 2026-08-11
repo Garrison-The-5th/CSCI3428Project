@@ -1,0 +1,8 @@
+{
+  "realm": "learningapp",
+  "auth-server-url": "http://localhost:4000/",
+  "ssl-required": "external",
+  "resource": "learning-client",
+  "public-client": true,
+  "confidential-port": 0
+}

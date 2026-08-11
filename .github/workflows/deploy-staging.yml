@@ -1,0 +1,27 @@
+name: Deploy to Staging
+
+# Thin wrapper around the fleet reusable staging workflow in TTGteams/k8s-gitops
+# (pinned @main — versioned inside k8s-gitops, never repinned here). Per-repo
+# image build config lives in ./docker-bake.hcl.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  deploy:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-deploy-staging.yml@main
+    with:
+      app-dir: apps/boilerplate
+      bump: ${{ inputs.bump || 'auto' }}
+    secrets: inherit

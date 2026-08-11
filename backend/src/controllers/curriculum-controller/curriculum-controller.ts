@@ -1,0 +1,708 @@
+/**
+ * File: curriculum-controller.ts
+ * Description: HTTP routes for courses, sections, modules, elements, notes and progress.
+ * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
+ * Modified by: Jacob Matthews
+ * Date: 2026-08-10
+ */
+import { Request, Response } from 'express';
+
+import { mediaUpload } from '@/config/media-upload';
+import {
+  authenticateAndAttachUser,
+  AuthenticatedRequest,
+} from '@/controllers/auth-controller/auth-middleware';
+import {
+  AUTHOR_ROLES,
+  requireAuthor,
+} from '@/controllers/auth-controller/authorization-middleware';
+import {
+  fromCourseParam,
+  fromElementParam,
+  fromModuleParam,
+  fromSectionParam,
+  requireCourseEditor,
+} from '@/controllers/auth-controller/course-access-middleware';
+import { controller, del, get, post, put, use } from '@/controllers/decorators';
+import { fail } from '@/controllers/http-errors';
+import { enforceUploadQuota } from '@/controllers/middleware/rate-limit';
+import CurriculumService from '@/services/curriculum-service/curriculum-service';
+import DashboardService from '@/services/dashboard-service/dashboard-service';
+import NotificationService from '@/services/notification-service/notification-service';
+import PublicationService from '@/services/publication-service/publication-service';
+
+// req.params values are typed `string | string[]` in Express 5, so normalize before use.
+function param(req: Request, name: string): string {
+  return String(req.params[name]);
+}
+
+@controller('/curriculum')
+export default class CurriculumController {
+  /**
+   * Learner view: the published courses assigned to this person. Learning is
+   * assigned rather than browsed, so this needs to know who is asking.
+   */
+  @get('/courses')
+  @use(authenticateAndAttachUser)
+  async getCourses(req: AuthenticatedRequest, res: Response) {
+    const courses = await CurriculumService.getCoursesForLearner(req.user!.email);
+    return res.send({ courses });
+  }
+
+  /**
+   * Courses this person may edit: everything for a global author, only the ones
+   * they are named on for a contributor. Powers the Course Editor page.
+   */
+  @get('/courses/editable')
+  @use(authenticateAndAttachUser)
+  async getEditableCourses(req: AuthenticatedRequest, res: Response) {
+    const isGlobalAuthor = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+    const courses = isGlobalAuthor
+      ? await CurriculumService.getAllCourses()
+      : await CurriculumService.getEditableCourses(req.user!.id);
+    return res.send({ courses, isGlobalAuthor });
+  }
+
+  @get('/courses/:id/contributors')
+  @use(authenticateAndAttachUser)
+  async getContributors(req: AuthenticatedRequest, res: Response) {
+    const isGlobalAuthor = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+    const courseId = param(req as Request, 'id');
+    if (!(await CurriculumService.canEditCourse(req.user!.id, courseId, isGlobalAuthor))) {
+      return res.status(403).send({ errorMessage: 'You cannot edit that course' });
+    }
+    const contributors = await CurriculumService.getContributors(courseId);
+    return res.send({ contributors });
+  }
+
+  /** Only a global author may change who can edit a course. */
+  @put('/courses/:id/contributors')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async setContributors(req: Request, res: Response) {
+    try {
+      const { emails } = req.body as { emails?: string[] };
+      const course = await CurriculumService.setContributors(param(req, 'id'), emails ?? []);
+      return res.send({ message: 'Contributors updated', contributors: course.contributors });
+    } catch (error) {
+      return fail(res, error, 'Error updating contributors');
+    }
+  }
+
+  /** Author view: drafts included. */
+  @get('/courses/manage')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async getCoursesForAuthor(req: Request, res: Response) {
+    const courses = await CurriculumService.getAllCourses();
+    return res.send({ courses });
+  }
+
+  /** Everything in the recycle bin, for the admin dashboard. */
+  @get('/deleted')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async getDeleted(req: Request, res: Response) {
+    const deleted = await CurriculumService.getDeletedItems();
+    return res.send(deleted);
+  }
+
+  /** Restores every deleted course and module in one go. */
+  @post('/deleted/restore-all')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async restoreAll(req: Request, res: Response) {
+    try {
+      const restored = await CurriculumService.restoreAll();
+      return res.send({ message: 'Recycle bin restored', restored });
+    } catch (error) {
+      return fail(res, error, 'Error restoring items');
+    }
+  }
+
+  /** Empties the recycle bin. Permanent — nothing survives this. */
+  @del('/deleted')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async purgeAll(req: Request, res: Response) {
+    try {
+      const purged = await CurriculumService.purgeAll();
+      return res.send({ message: 'Recycle bin emptied', purged });
+    } catch (error) {
+      return fail(res, error, 'Error emptying the recycle bin');
+    }
+  }
+
+  /** Permanently removes one deleted course. */
+  @del('/deleted/courses/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async purgeCourse(req: Request, res: Response) {
+    try {
+      await CurriculumService.purgeCourse(param(req, 'id'));
+      return res.send({ message: 'Course permanently deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error permanently deleting course');
+    }
+  }
+
+  /** Permanently removes one deleted module. */
+  @del('/deleted/modules/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async purgeModule(req: Request, res: Response) {
+    try {
+      await CurriculumService.purgeModule(param(req, 'id'));
+      return res.send({ message: 'Module permanently deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error permanently deleting module');
+    }
+  }
+
+  /**
+   * One course for a learner. Authenticated and scoped to their enrolment like
+   * the list is — a course they are not on is reported as not found rather than
+   * refused, so this cannot be used to enumerate the catalogue.
+   */
+  @get('/courses/:id')
+  @use(authenticateAndAttachUser)
+  async getCourse(req: AuthenticatedRequest, res: Response) {
+    const found = await CurriculumService.getCourseWithNewIdsForLearner(
+      req.user!.email,
+      param(req as Request, 'id'),
+    );
+
+    if (!found) {
+      return res.status(404).send({ errorMessage: 'Course not found' });
+    }
+
+    // newIds rides along so the player can mark what arrived in this version
+    // without a second round trip.
+    return res.send({ course: found.course, newIds: found.newIds });
+  }
+
+  /** Creates a course from just a name; everything else is set by editing it. */
+  @post('/courses')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async createCourse(req: Request, res: Response) {
+    try {
+      const { title } = req.body as { title?: string };
+      const course = await CurriculumService.createCourse(title);
+      return res.send({ message: 'Course created successfully', course });
+    } catch (error) {
+      return fail(res, error, 'Error creating course');
+    }
+  }
+
+  @put('/courses/:id')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async updateCourse(req: Request, res: Response) {
+    try {
+      const course = await CurriculumService.updateCourse(param(req, 'id'), req.body);
+      return res.send({ message: 'Course updated successfully', course });
+    } catch (error) {
+      return fail(res, error, 'Error updating course');
+    }
+  }
+
+  /**
+   * Puts the course live as a new version.
+   *
+   * The same action whether it is the first publish or the twentieth: it
+   * snapshots the course as it currently stands and points learners at it. What
+   * the editor calls "Publish updated course" is this.
+   */
+  @post('/courses/:id/publish')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async publishCourse(req: AuthenticatedRequest, res: Response) {
+    try {
+      const result = await PublicationService.publish(
+        param(req as Request, 'id'),
+        req.user?.id ?? null,
+      );
+
+      // New content is announced only once it can actually be reached, which is
+      // now rather than when the author typed it.
+      if (result.hasNewContent) {
+        void NotificationService.announceNewContent(param(req as Request, 'id'));
+      }
+
+      return res.send({
+        message:
+          result.version === 1
+            ? 'Published — learners can see it now'
+            : `Version ${result.version} published`,
+        ...result,
+      });
+    } catch (error) {
+      return fail(res, error, 'Error publishing course');
+    }
+  }
+
+  /**
+   * Whether there is anything to publish, and what. Drives the editor's publish
+   * button and the New tags it draws on unpublished content.
+   */
+  @get('/courses/:id/publication')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async getPublicationState(req: Request, res: Response) {
+    const courseId = param(req, 'id');
+    const [hasUnpublishedChanges, unpublished, versions] = await Promise.all([
+      PublicationService.hasUnpublishedChanges(courseId),
+      PublicationService.getUnpublishedIds(courseId),
+      PublicationService.listVersions(courseId),
+    ]);
+
+    return res.send({ hasUnpublishedChanges, unpublished, versions });
+  }
+
+  /** One archived version's full tree, for the editor's read-only view. */
+  @get('/versions/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async getVersion(req: Request, res: Response) {
+    try {
+      const version = await PublicationService.getVersion(param(req, 'id'));
+      return res.send({ version });
+    } catch (error) {
+      return fail(res, error, 'Error loading that version');
+    }
+  }
+
+  /** Soft delete — the course moves to the recycle bin and can be restored. */
+  @del('/courses/:id')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteCourse(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteCourse(param(req, 'id'));
+      return res.send({ message: 'Course moved to the recycle bin' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting course');
+    }
+  }
+
+  @post('/courses/:id/restore')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async restoreCourse(req: Request, res: Response) {
+    try {
+      await CurriculumService.restoreCourse(param(req, 'id'));
+      return res.send({ message: 'Course restored' });
+    } catch (error) {
+      return fail(res, error, 'Error restoring course');
+    }
+  }
+
+  /** Uploads the course cover photo shown on the Learning page. */
+  @post('/courses/:id/image')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async uploadCourseImage(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).send({ errorMessage: 'No file uploaded' });
+      }
+      const course = await CurriculumService.setCourseImage(param(req, 'id'), req.file);
+      return res.send({ message: 'Course photo updated', course });
+    } catch (error) {
+      return fail(res, error, 'Error uploading course photo');
+    }
+  }
+
+  // ---- Sections ----
+
+  @get('/courses/:courseId/sections')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async getSections(req: Request, res: Response) {
+    const sections = await CurriculumService.getSections(param(req, 'courseId'));
+    return res.send({ sections });
+  }
+
+  /** A section takes a title and the place in the course it should occupy. */
+  @post('/courses/:courseId/sections')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async createSection(req: Request, res: Response) {
+    try {
+      const section = await CurriculumService.createSection(param(req, 'courseId'), req.body);
+      return res.send({ message: 'Section created successfully', section });
+    } catch (error) {
+      return fail(res, error, 'Error creating section');
+    }
+  }
+
+  @put('/sections/:id')
+  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(authenticateAndAttachUser)
+  async updateSection(req: Request, res: Response) {
+    try {
+      const section = await CurriculumService.updateSection(param(req, 'id'), req.body);
+      return res.send({ message: 'Section updated successfully', section });
+    } catch (error) {
+      return fail(res, error, 'Error updating section');
+    }
+  }
+
+  /** Soft delete — the section and its modules move to the recycle bin. */
+  @del('/sections/:id')
+  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteSection(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteSection(param(req, 'id'));
+      return res.send({ message: 'Section moved to the recycle bin' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting section');
+    }
+  }
+
+  @post('/sections/:id/restore')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async restoreSection(req: Request, res: Response) {
+    try {
+      await CurriculumService.restoreSection(param(req, 'id'));
+      return res.send({ message: 'Section restored' });
+    } catch (error) {
+      return fail(res, error, 'Error restoring section');
+    }
+  }
+
+  /** Permanently removes one deleted section. */
+  @del('/deleted/sections/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async purgeSection(req: Request, res: Response) {
+    try {
+      await CurriculumService.purgeSection(param(req, 'id'));
+      return res.send({ message: 'Section permanently deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error permanently deleting section');
+    }
+  }
+
+  // ---- Modules ----
+
+  @post('/courses/:courseId/modules')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async createModule(req: Request, res: Response) {
+    try {
+      const module = await CurriculumService.createModule(param(req, 'courseId'), req.body);
+      return res.send({ message: 'Module created successfully', module });
+    } catch (error) {
+      return fail(res, error, 'Error creating module');
+    }
+  }
+
+  /**
+   * Applies a new grid for the whole course — used by drag-to-reorder.
+   * Body: { sections: [{ id, moduleIds: [...] }] }, outer index the section and
+   * inner index the module. Numbers are derived, never sent.
+   */
+  @put('/courses/:courseId/structure')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async reorderStructure(req: Request, res: Response) {
+    try {
+      const { sections } = req.body as {
+        sections?: Array<{ id: string; moduleIds: string[] }>;
+      };
+
+      if (!Array.isArray(sections)) {
+        return res.status(400).send({ errorMessage: 'sections array is required' });
+      }
+
+      const course = await CurriculumService.reorderStructure(param(req, 'courseId'), sections);
+      return res.send({ message: 'Course structure updated', course });
+    } catch (error) {
+      return fail(res, error, 'Error reordering the course');
+    }
+  }
+
+  @put('/modules/:id')
+  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(authenticateAndAttachUser)
+  async updateModule(req: Request, res: Response) {
+    try {
+      const module = await CurriculumService.updateModule(param(req, 'id'), req.body);
+      return res.send({ message: 'Module updated successfully', module });
+    } catch (error) {
+      return fail(res, error, 'Error updating module');
+    }
+  }
+
+  /** Soft delete — the module moves to the recycle bin and can be restored. */
+  @del('/modules/:id')
+  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteModule(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteModule(param(req, 'id'));
+      return res.send({ message: 'Module moved to the recycle bin' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting module');
+    }
+  }
+
+  @post('/modules/:id/restore')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async restoreModule(req: Request, res: Response) {
+    try {
+      await CurriculumService.restoreModule(param(req, 'id'));
+      return res.send({ message: 'Module restored' });
+    } catch (error) {
+      return fail(res, error, 'Error restoring module');
+    }
+  }
+
+  /** Uploads an image or PDF and stores it on the module as an element. */
+  @post('/modules/:id/image')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(authenticateAndAttachUser)
+  async uploadModuleImage(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).send({ errorMessage: 'No file uploaded' });
+      }
+      const element = await CurriculumService.addUploadedElement(param(req, 'id'), req.file);
+      return res.send({ message: 'File added', element });
+    } catch (error) {
+      return fail(res, error, 'Error uploading file');
+    }
+  }
+
+  /** Modules auto-complete on view, so opening one records progress. */
+  @post('/modules/:id/view')
+  @use(authenticateAndAttachUser)
+  async recordModuleView(req: AuthenticatedRequest, res: Response) {
+    try {
+      await CurriculumService.recordModuleView(req.user!.id, param(req as Request, 'id'));
+      return res.send({ message: 'Progress recorded' });
+    } catch (error) {
+      return fail(res, error, 'Error recording progress');
+    }
+  }
+
+  /**
+   * Records one piece of content as seen. A sequential course unlocks item by
+   * item, so this is what opens the next one.
+   */
+  @post('/elements/:id/view')
+  @use(authenticateAndAttachUser)
+  async recordElementView(req: AuthenticatedRequest, res: Response) {
+    try {
+      await CurriculumService.recordElementView(req.user!.id, param(req as Request, 'id'));
+      return res.send({ message: 'Progress recorded' });
+    } catch (error) {
+      return fail(res, error, 'Error recording progress');
+    }
+  }
+
+  /**
+   * Reorders a module's content, where elements and quizzes are interleaved.
+   * Body: { items: [{ kind: 'element' | 'quiz', id }] } in the new order.
+   */
+  @put('/modules/:id/content-order')
+  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(authenticateAndAttachUser)
+  async reorderModuleContent(req: Request, res: Response) {
+    try {
+      const { items } = req.body as { items?: Array<{ kind: 'element' | 'quiz'; id: string }> };
+
+      if (!Array.isArray(items)) {
+        return res.status(400).send({ errorMessage: 'items array is required' });
+      }
+
+      const module = await CurriculumService.reorderModuleContent(param(req, 'id'), items);
+      return res.send({ message: 'Content reordered', module });
+    } catch (error) {
+      return fail(res, error, 'Error reordering content');
+    }
+  }
+
+  @post('/modules/:moduleId/elements')
+  @use(requireCourseEditor(fromModuleParam('moduleId')))
+  @use(authenticateAndAttachUser)
+  async createElement(req: Request, res: Response) {
+    const { type } = req.body as { type?: string };
+
+    if (!type) {
+      return res.status(400).send({ errorMessage: 'type is required' });
+    }
+
+    try {
+      const element = await CurriculumService.createElement(param(req, 'moduleId'), req.body);
+      return res.send({ message: 'Element created successfully', element });
+    } catch (error) {
+      return fail(res, error, 'Error creating element');
+    }
+  }
+
+  @put('/elements/:id')
+  @use(requireCourseEditor(fromElementParam('id')))
+  @use(authenticateAndAttachUser)
+  async updateElement(req: Request, res: Response) {
+    try {
+      const element = await CurriculumService.updateElement(param(req, 'id'), req.body);
+      return res.send({ message: 'Element updated successfully', element });
+    } catch (error) {
+      return fail(res, error, 'Error updating element');
+    }
+  }
+
+  @del('/elements/:id')
+  @use(requireCourseEditor(fromElementParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteElement(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteElement(param(req, 'id'));
+      return res.send({ message: 'Element deleted successfully' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting element');
+    }
+  }
+
+  /**
+   * What this learner has already done. The player needs it to draw ticks and,
+   * on a sequential course, to know which modules are unlocked.
+   */
+  @get('/progress')
+  @use(authenticateAndAttachUser)
+  async getProgress(req: AuthenticatedRequest, res: Response) {
+    const progress = await CurriculumService.getLearnerProgress(req.user!.id);
+    return res.send(progress);
+  }
+
+  /** Everything the home dashboard needs for the signed-in user. */
+  @get('/dashboard')
+  @use(authenticateAndAttachUser)
+  async getDashboard(req: AuthenticatedRequest, res: Response) {
+    const dashboard = await DashboardService.getDashboard(req.user!.id, req.user!.email);
+    return res.send(dashboard);
+  }
+
+  // ---- Instructors ----
+
+  /**
+   * Authors only. The list carries bios and photos, which are staff details
+   * rather than course content — a learner reads instructors off the course
+   * they were given, not from a directory of everyone.
+   */
+  @get('/instructors')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async getInstructors(req: Request, res: Response) {
+    const instructors = await CurriculumService.getInstructors();
+    return res.send({ instructors });
+  }
+
+  @post('/instructors')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async createInstructor(req: Request, res: Response) {
+    try {
+      const instructor = await CurriculumService.createInstructor(req.body);
+      return res.send({ message: 'Instructor created', instructor });
+    } catch (error) {
+      return fail(res, error, 'Error creating instructor');
+    }
+  }
+
+  @put('/instructors/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async updateInstructor(req: Request, res: Response) {
+    try {
+      const instructor = await CurriculumService.updateInstructor(param(req, 'id'), req.body);
+      return res.send({ message: 'Instructor updated', instructor });
+    } catch (error) {
+      return fail(res, error, 'Error updating instructor');
+    }
+  }
+
+  @post('/instructors/:id/photo')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async uploadInstructorPhoto(req: Request, res: Response) {
+    try {
+      if (!req.file) return res.status(400).send({ errorMessage: 'No file uploaded' });
+      const instructor = await CurriculumService.setInstructorPhoto(param(req, 'id'), req.file);
+      return res.send({ message: 'Photo updated', instructor });
+    } catch (error) {
+      return fail(res, error, 'Error uploading instructor photo');
+    }
+  }
+
+  @del('/instructors/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async deleteInstructor(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteInstructor(param(req, 'id'));
+      return res.send({ message: 'Instructor deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting instructor');
+    }
+  }
+
+  // ---- Learner notes ----
+
+  @get('/courses/:courseId/notes')
+  @use(authenticateAndAttachUser)
+  async getNotes(req: AuthenticatedRequest, res: Response) {
+    const notes = await CurriculumService.getNotes(req.user!.id, param(req as Request, 'courseId'));
+    return res.send({ notes });
+  }
+
+  @post('/courses/:courseId/notes')
+  @use(authenticateAndAttachUser)
+  async createNote(req: AuthenticatedRequest, res: Response) {
+    try {
+      const note = await CurriculumService.createNote(
+        req.user!.id,
+        param(req as Request, 'courseId'),
+        req.body,
+      );
+      return res.send({ message: 'Note saved', note });
+    } catch (error) {
+      return fail(res, error, 'Error saving note');
+    }
+  }
+
+  @put('/notes/:id')
+  @use(authenticateAndAttachUser)
+  async updateNote(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { body } = req.body as { body?: string };
+      await CurriculumService.updateNote(param(req as Request, 'id'), req.user!.id, body);
+      return res.send({ message: 'Note updated' });
+    } catch (error) {
+      return fail(res, error, 'Error updating note');
+    }
+  }
+
+  @del('/notes/:id')
+  @use(authenticateAndAttachUser)
+  async deleteNote(req: AuthenticatedRequest, res: Response) {
+    try {
+      await CurriculumService.deleteNote(param(req as Request, 'id'), req.user!.id);
+      return res.send({ message: 'Note deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting note');
+    }
+  }
+}

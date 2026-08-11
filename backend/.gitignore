@@ -1,0 +1,9 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+# Prisma
+# The generated client is a build artifact, rebuilt by `prisma generate`.
+/generated/prisma
+# prisma/migrations/ is deliberately NOT ignored — the migration history has to be
+# committed, or a fresh database cannot be built.
