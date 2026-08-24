@@ -1,6 +1,6 @@
 {
   "realm": "learningapp",
-  "auth-server-url": "http://localhost:4000/",
+  "auth-server-url": "https://auth.ttgteams.com/",
   "ssl-required": "external",
   "resource": "learning-client",
   "public-client": true,

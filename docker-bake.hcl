@@ -19,5 +19,8 @@ target "frontend" {
   # frontend/, and bundles it into the Vite build (see frontend/src/utils/keycloak.ts).
   context    = "."
   dockerfile = "frontend/Dockerfile"
+  # Bake the PRODUCTION Keycloak config (realm learningapp on
+  # auth.ttgteams.com). Local `docker compose` builds keep the dev default.
+  args       = { KEYCLOAK_CONFIG = "keycloak_ttg.json" }
   tags       = ["tartigrade/learning-app-frontend:${VERSION}"]
 }
