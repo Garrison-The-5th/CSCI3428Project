@@ -39,8 +39,8 @@ type Status = 'finished' | 'overdue' | 'started' | 'not-started' | 'off';
 function statusOf(assignment: Assignment): Status {
   if (assignment.revokedAt) return 'off';
 
-  const total = assignment.totalModules ?? 0;
-  const done = assignment.completedModules ?? 0;
+  const total = assignment.totalSections ?? 0;
+  const done = assignment.completedSections ?? 0;
   if (total > 0 && done >= total) return 'finished';
 
   const overdue =
@@ -146,7 +146,7 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">{openCourse.title}</CardTitle>
             <p className="text-sm text-dark-gray">
-              {openCourse.totalModules} module{openCourse.totalModules === 1 ? '' : 's'} ·{' '}
+              {openCourse.totalSections} section{openCourse.totalSections === 1 ? '' : 's'} ·{' '}
               {openCourse.assignedCount} assigned
             </p>
           </CardHeader>
@@ -171,7 +171,7 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">Learners</CardTitle>
             <p className="text-sm text-dark-gray">
-              Whoever needs chasing is at the top. Progress is per module.
+              Whoever needs chasing is at the top. Progress is per section.
             </p>
           </CardHeader>
 
@@ -201,7 +201,7 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
                           </span>
                         )}
                         <span className="block text-xs text-dark-gray">
-                          {entry.completedModules ?? 0}/{entry.totalModules ?? 0} modules
+                          {entry.completedSections ?? 0}/{entry.totalSections ?? 0} sections
                           {entry.dueDate &&
                             ` · due ${new Date(entry.dueDate).toLocaleDateString()}`}
                           {entry.lastActivityAt
@@ -331,7 +331,7 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
                     font-medium text-dark-gray"
                 >
                   <span>Assigned: {course.assignedCount}</span>
-                  <span>Modules: {course.totalModules}</span>
+                  <span>Sections: {course.totalSections}</span>
                 </CardContent>
               </Card>
             );

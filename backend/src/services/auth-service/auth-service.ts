@@ -11,6 +11,15 @@ import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
 
 import { User } from '../../../generated/prisma';
 
+/**
+ * User records, and the newsletter subscription that sits on the same row.
+ *
+ * Identity itself is Keycloak's job — this never checks a password. A `User` row
+ * is the application's local record of somebody: created on first sign-in, and
+ * also created the moment an address is assigned work, which is why the row
+ * existing proves nothing about whether they have an account. `lastSignInAt` is
+ * the only reliable answer to that, and `markSignedIn` is what maintains it.
+ */
 export default class AuthService {
   static async getAll(): Promise<User[]> {
     try {
@@ -157,8 +166,13 @@ export default class AuthService {
   /**
    * Get or create user - useful for SSO/OAuth flows
    */
-  static searchUsers(query: string) {
-    return AuthGateway.searchUsers(query);
+  static searchUsers(query: string, options?: { accountsOnly?: boolean }) {
+    return AuthGateway.searchUsers(query, options);
+  }
+
+  /** Whether this exact address belongs to somebody who has signed in. */
+  static hasAccount(email: string) {
+    return AuthGateway.hasAccount(email);
   }
 
   static async getOrCreateUser(email: string, name?: string): Promise<User> {

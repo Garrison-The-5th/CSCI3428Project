@@ -15,11 +15,13 @@ Built on the TTG full-stack boilerplate: React frontend, Node.js/Express backend
 
 ### Content model
 
-A **Course** holds **Sections**; a Section holds **Modules**; a Module holds **Elements** (rich text, YouTube video, image, PDF) and **Quizzes**. Section and module numbers are derived from position — module `2.3` is the third module of the second section — so reordering renumbers the course and there is no free-text number to keep in step. Elements and quizzes share one ordering sequence, so a quiz can sit between two pieces of content rather than always at the end.
+A **Course** holds **Modules**; a Module holds **Sections**; a Section holds **Elements** (rich text, YouTube video, image, PDF) and **Quizzes**. Module and section numbers are derived from position — section `2.3` is the third section of the second module — so reordering renumbers the course and there is no free-text number to keep in step. Elements and quizzes share one ordering sequence, so a quiz can sit between two pieces of content rather than always at the end.
+
+Quizzes come in three kinds, and the kind decides where one may live and what it may do. A **learning check** sits inside a section, is never timed, never keeps a mark, and must be attempted before the learner may move on. An **exam** is the ordinary graded quiz — standalone or inside a section, optionally timed, reported to the dashboard. A **one-time quiz** is sent as a link, may be answered once, and then disappears from the learner's side entirely; what they answered is kept under their name on the admin dashboard. Every question is multiple choice or multiple answer, and each quiz chooses whether the learner is shown their result at all.
 
 ### Versioned publishing
 
-Learners never read the rows an author is editing. They read a **snapshot** taken when someone pressed *Publish*, which is what lets an edit to existing content be held back exactly like a brand new module. Publishing again releases everything at once and archives the version it replaced for 14 days. Content added since a learner started a course is marked **New** until they read it.
+Learners never read the rows an author is editing. They read a **snapshot** taken when someone pressed *Publish*, which is what lets an edit to existing content be held back exactly like a brand new section. Publishing again releases everything at once and archives the version it replaced for 14 days. Content added since a learner started a course is marked **New** until they read it.
 
 See [Code Structure](docs/code_structure.md) for the full domain model and file tree.
 

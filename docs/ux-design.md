@@ -161,10 +161,10 @@ the fold for anyone with more than six courses. A table — rejected, it made
 ### Learning grid
 
 Portrait cards, cover photo on top, counts along the bottom, searchable across
-title, description, tags **and** module names.
+title, description, tags **and** section names.
 
 *Justification.* Someone hunting for "manual handling" is as likely to remember
-a module name as the course's own wording; a search that reads only titles fails
+a section name as the course's own wording; a search that reads only titles fails
 quietly for them.
 
 *Alternatives considered.* A list view — rejected, cover photos are the fastest
@@ -199,11 +199,11 @@ drift from what ships.
 thirty fields makes save-state a constant background worry. A separate preview
 route — rejected, it lost the author's place in the editor.
 
-### Module editor
+### Structure editor
 
-Drag-and-drop for sections and modules; numbers are derived, never typed.
+Drag-and-drop for modules and sections; numbers are derived, never typed.
 
-*Justification.* Module `2.3` *means* "third module of the second section". Once
+*Justification.* Section `2.3` *means* "third section of the second module". Once
 that is true, a free-text number field can only ever disagree with reality, so
 the field is read-only and dragging is the way to renumber. The UI renumbers
 optimistically so numbers change under the cursor rather than a round trip later.

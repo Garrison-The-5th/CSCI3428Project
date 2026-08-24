@@ -1,0 +1,12 @@
+-- A one-time link closes itself, but not the instant the paper goes in.
+--
+-- Handing in already stamps `completedAt`. The holder then gets exactly one more
+-- visit — the one where they see their result, and the answers if the author
+-- allowed them — and that visit is what this column records. Opening the link
+-- again after that closes it for good by stamping `revokedAt`, which is the same
+-- state an author gets from the off switch, so they can turn it back on.
+--
+-- Kept separate from `lastAccessedAt` because that moves on every request and a
+-- single page load makes several of them, which would have burned the one visit
+-- before the page had finished rendering.
+ALTER TABLE "Assignment" ADD COLUMN "resultsSeenAt" TIMESTAMP(3);

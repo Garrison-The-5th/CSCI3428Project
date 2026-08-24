@@ -36,20 +36,20 @@ function check(label: string, actual: unknown, expected: unknown) {
 async function main() {
   const course = await CurriculumService.createCourse('TIMER TEST — safe to delete');
   const courseId = course!.id;
-  const [section] = await CurriculumGateway.getSections(courseId);
-  const module = await CurriculumService.createModule(courseId, {
-    sectionId: section.id,
+  const [module] = await CurriculumGateway.getModules(courseId);
+  const section = await CurriculumService.createSection(courseId, {
+    moduleId: module.id,
     title: 'Holder',
   });
   const user = await AuthService.getOrCreateUser('timercheck@example.test');
 
   const timed = await QuizService.createQuiz({
     title: 'Timed',
-    moduleId: module!.id,
+    sectionId: section!.id,
     timeLimitMinutes: 30,
   });
-  const untimed = await QuizService.createQuiz({ title: 'Untimed', moduleId: module!.id });
-  const draft = await QuizService.createQuiz({ title: 'Draft', moduleId: module!.id });
+  const untimed = await QuizService.createQuiz({ title: 'Untimed', sectionId: section!.id });
+  const draft = await QuizService.createQuiz({ title: 'Draft', sectionId: section!.id });
 
   // Quizzes are created unpublished; a learner can only run a published one.
   await QuizService.updateQuiz(timed.id, { published: true });
@@ -85,6 +85,17 @@ async function main() {
 
   console.log("\na timed quiz starts on the author's limit");
   const first = await QuizService.startSession(user.id, timed.id);
+
+  /*
+   * `sessionId` is nullable now that a learning check reports a run without
+   * opening one — it has no clock, so there is nothing to resume and a row would
+   * stay open forever. A timed exam always has one, so this narrows it once here
+   * rather than at each of the updates below, and fails loudly if that ever
+   * stops being true.
+   */
+  const sessionId = first.sessionId;
+  if (!sessionId) throw new Error('a timed quiz must open a session');
+
   check('timeLimitMinutes', first.timeLimitMinutes, 30);
   check('expired', first.expired, false);
   check(
@@ -98,7 +109,7 @@ async function main() {
   console.log('\nleaving and coming back resumes the same run, not a new one');
   // Wind the clock back 10 minutes to stand in for time away from the page.
   await prisma.quizSession.update({
-    where: { id: first.sessionId },
+    where: { id: sessionId },
     data: {
       startedAt: new Date(Date.now() - 10 * 60_000),
       expiresAt: new Date(Date.now() + 20 * 60_000),
@@ -117,7 +128,7 @@ async function main() {
 
   console.log('\na run whose clock has passed reports itself expired');
   await prisma.quizSession.update({
-    where: { id: first.sessionId },
+    where: { id: sessionId },
     data: { expiresAt: new Date(Date.now() - 1000) },
   });
 

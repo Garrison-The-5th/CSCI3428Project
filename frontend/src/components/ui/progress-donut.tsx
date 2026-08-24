@@ -16,7 +16,7 @@
  */
 interface ProgressDonutProps {
   percent: number;
-  /** e.g. "3 of 8 modules" — printed under the ring. */
+  /** e.g. "3 of 8 sections" — printed under the ring. */
   caption?: string;
   size?: number;
   label?: string;

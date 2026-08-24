@@ -4,7 +4,8 @@
  * Author: TTG Full-Stack Web Boilerplate
  * Date: 2026-08-10
  */
-// The AppRouter class creates and manages a single, shared router instance for your entire application.
+// AppRouter creates and manages a single, shared router instance for the whole
+// application.
 import express from 'express';
 
 export class AppRouter {

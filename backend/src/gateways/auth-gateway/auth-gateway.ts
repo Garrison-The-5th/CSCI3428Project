@@ -8,6 +8,14 @@
 import { User } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
+/**
+ * Every read and write of the `User` table.
+ *
+ * The gateway layer is the only place Prisma is touched: services above it deal
+ * in domain rules and never in queries, which is what keeps a schema change to
+ * one file per table. Nothing here validates or decides — an invalid email is
+ * the service's problem, not this one's.
+ */
 export default class AuthGateway {
   static async getAll(): Promise<User[]> {
     return await prisma.user.findMany();
@@ -59,21 +67,46 @@ export default class AuthGateway {
   }
 
   /** Type-ahead over the people already in the system. */
-  static async searchUsers(query: string, limit = 10) {
+  static async searchUsers(query: string, { limit = 10, accountsOnly = false } = {}) {
     const term = query.trim();
     return prisma.user.findMany({
-      where: term
-        ? {
-            OR: [
-              { email: { contains: term, mode: 'insensitive' } },
-              { name: { contains: term, mode: 'insensitive' } },
-            ],
-          }
-        : {},
+      where: {
+        ...(term
+          ? {
+              OR: [
+                { email: { contains: term, mode: 'insensitive' } },
+                { name: { contains: term, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+        // A User row is minted the moment somebody is assigned work, so its
+        // existence proves nothing about whether they can sign in. Having done
+        // so is the only reliable mark of a real account — see the note on
+        // User.lastSignInAt — and it is what the on-platform picker needs, since
+        // enrolling somebody who cannot log in sends them to a door they cannot
+        // open.
+        ...(accountsOnly ? { lastSignInAt: { not: null } } : {}),
+      },
       orderBy: { email: 'asc' },
       take: limit,
       select: { id: true, email: true, name: true },
     });
+  }
+
+  /**
+   * Whether one exact address belongs to somebody who can sign in.
+   *
+   * The counterpart of the filter above, for the link-only picker: a private
+   * link handed to somebody with an account is a second, weaker way into work
+   * that already belongs on their Learning page, so that column refuses the
+   * address rather than minting one.
+   */
+  static async hasAccount(email: string): Promise<boolean> {
+    const user = await prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() },
+      select: { lastSignInAt: true },
+    });
+    return user?.lastSignInAt != null;
   }
 
   static markSignedIn(id: number) {

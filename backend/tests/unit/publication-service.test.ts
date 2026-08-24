@@ -43,12 +43,12 @@ function courseRow(overrides: Record<string, unknown> = {}) {
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     deletedAt: null,
-    sections: [{ id: 's1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
-    modules: [
+    modules: [{ id: 's1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
+    sections: [
       {
         id: 'm1',
         courseId: 'c1',
-        sectionId: 's1',
+        moduleId: 's1',
         position: 1,
         number: '1.1',
         title: 'Basics',
@@ -74,23 +74,29 @@ describe('buildSnapshot', () => {
     const snapshot = await PublicationService.buildSnapshot('c1');
 
     expect(snapshot.id).toBe('c1');
-    expect(snapshot.sections).toHaveLength(1);
-    expect(snapshot.modules[0].elements).toHaveLength(1);
+    expect(snapshot.modules).toHaveLength(1);
+    expect(snapshot.sections[0].elements).toHaveLength(1);
   });
 
   /**
-   * An author must be able to draft a quiz inside an otherwise finished module
-   * without it appearing the moment the course is republished.
+   * A course is published whole, quizzes included.
+   *
+   * This used to drop anything not separately published, which let an author
+   * press Publish, be told the course was live, and still serve a section with
+   * the quiz missing from it — there was a second switch inside the quiz editor
+   * and nothing on screen said so. Elements never worked that way, and quizzes
+   * no longer do either: what is in the course when it is published is what
+   * learners get.
    */
-  it('drops unpublished quizzes from the snapshot', async () => {
+  it('captures every quiz, however the old per-quiz flag was left', async () => {
     curriculum.getCourseById.mockResolvedValue(
       courseRow({
-        modules: [
+        sections: [
           {
-            ...courseRow().modules[0],
+            ...courseRow().sections[0],
             quizzes: [
               { id: 'live', published: true, questions: [] },
-              { id: 'draft', published: false, questions: [] },
+              { id: 'never-published-on-its-own', published: false, questions: [] },
             ],
           },
         ],
@@ -99,7 +105,10 @@ describe('buildSnapshot', () => {
 
     const snapshot = await PublicationService.buildSnapshot('c1');
 
-    expect(snapshot.modules[0].quizzes.map((entry) => entry.id)).toEqual(['live']);
+    expect(snapshot.sections[0].quizzes.map((entry) => entry.id)).toEqual([
+      'live',
+      'never-published-on-its-own',
+    ]);
   });
 });
 
@@ -157,6 +166,87 @@ describe('hasUnpublishedChanges', () => {
   });
 });
 
+/**
+ * A write is not a change.
+ *
+ * The badge used to come from the clock alone: anything written after the last
+ * publish counted, and the editor writes constantly — it saves on blur and
+ * auto-saves as you type, so tabbing through a field or setting a toggle back to
+ * what it already was armed it. Nothing an author could do would clear it again,
+ * because publishing re-armed it too.
+ *
+ * So the clock is now only the first question. When it says something was
+ * written, the course is actually compared with what learners are reading.
+ */
+describe('hasUnpublishedChanges — comparing content, not clocks', () => {
+  const publishedAt = new Date('2026-05-01T10:00:00Z');
+  /** Something was saved after the publish — which is where the old bug began. */
+  const written = { draftUpdatedAt: new Date('2026-05-02T10:00:00Z') };
+
+  /** As it comes back out of the database: JSON, so dates are strings. */
+  function stored(snapshot: unknown) {
+    return JSON.parse(JSON.stringify(snapshot));
+  }
+
+  it('reports false when a save moved the clock but not the content', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow(written) as never);
+    const live = await PublicationService.buildSnapshot('c1');
+    publication.getLive.mockResolvedValue({ publishedAt, snapshot: stored(live) } as never);
+
+    expect(await PublicationService.hasUnpublishedChanges('c1')).toBe(false);
+  });
+
+  /**
+   * Prisma stamps `updatedAt` on every write whether the values moved or not, so
+   * a no-op save changes the rows without changing a word of the course. That is
+   * the same false positive one layer down, and it has to be ignored too.
+   */
+  it('ignores row bookkeeping that moves without the content moving', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow(written) as never);
+    const live = await PublicationService.buildSnapshot('c1');
+    publication.getLive.mockResolvedValue({
+      publishedAt,
+      snapshot: stored({ ...live, updatedAt: new Date('2019-01-01'), publishedVersion: 99 }),
+    } as never);
+
+    expect(await PublicationService.hasUnpublishedChanges('c1')).toBe(false);
+  });
+
+  it('reports true when the course really has been changed', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow(written) as never);
+    const live = await PublicationService.buildSnapshot('c1');
+    publication.getLive.mockResolvedValue({
+      publishedAt,
+      snapshot: stored({ ...live, title: 'What it used to be called' }),
+    } as never);
+
+    expect(await PublicationService.hasUnpublishedChanges('c1')).toBe(true);
+  });
+
+  /** Deep enough to catch an edit to a single question, not just the top level. */
+  it('notices a change buried inside a section', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow(written) as never);
+    const live = await PublicationService.buildSnapshot('c1');
+    publication.getLive.mockResolvedValue({
+      publishedAt,
+      snapshot: stored({
+        ...live,
+        sections: [{ ...live.sections[0], title: 'Basics, as it was' }],
+      }),
+    } as never);
+
+    expect(await PublicationService.hasUnpublishedChanges('c1')).toBe(true);
+  });
+
+  /** Nothing to compare against is not the same as nothing having changed. */
+  it('reports true when the live version has no snapshot to read', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow(written) as never);
+    publication.getLive.mockResolvedValue({ publishedAt } as never);
+
+    expect(await PublicationService.hasUnpublishedChanges('c1')).toBe(true);
+  });
+});
+
 describe('publish', () => {
   beforeEach(() => {
     curriculum.updateCourse.mockResolvedValue({} as never);
@@ -181,17 +271,34 @@ describe('publish', () => {
 
     expect(result.version).toBe(1);
     expect(result.hasNewContent).toBe(false);
-    expect(result.added.newModuleIds).toEqual([]);
+    expect(result.added.newSectionIds).toEqual([]);
+  });
+
+  /**
+   * One button publishes the course and everything in it.
+   *
+   * The snapshot is what learners read, so this is not what makes the quizzes
+   * reachable — it stops the row flag drifting away from the truth for the
+   * places that still read it, and brings quizzes written before the per-quiz
+   * publish button was removed up to date the first time their course is
+   * published again.
+   */
+  it('publishes the quizzes in the course along with it', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 0 }) as never);
+
+    await PublicationService.publish('c1', 1);
+
+    expect(quiz.publishQuizzesInCourse).toHaveBeenCalledWith('c1');
   });
 
   it('records exactly what a later version added', async () => {
     curriculum.getCourseById.mockResolvedValue(
       courseRow({
         publishedVersion: 1,
-        modules: [
-          courseRow().modules[0],
+        sections: [
+          courseRow().sections[0],
           {
-            ...courseRow().modules[0],
+            ...courseRow().sections[0],
             id: 'm2',
             elements: [{ id: 'e2' }],
             quizzes: [],
@@ -199,25 +306,25 @@ describe('publish', () => {
         ],
       }) as never,
     );
-    // The previous version had only the first module.
+    // The previous version had only the first section.
     publication.getLive.mockResolvedValue({
       snapshot: {
-        sections: [{ id: 's1' }],
-        modules: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
+        modules: [{ id: 's1' }],
+        sections: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
       },
     } as never);
 
     const result = await PublicationService.publish('c1', 1);
 
     expect(result.version).toBe(2);
-    expect(result.added.newModuleIds).toEqual(['m2']);
+    expect(result.added.newSectionIds).toEqual(['m2']);
     expect(result.added.newElementIds).toEqual(['e2']);
     expect(result.hasNewContent).toBe(true);
   });
 
   it('supersedes the previous version, starting its archive clock', async () => {
     curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 3 }) as never);
-    publication.getLive.mockResolvedValue({ snapshot: { sections: [], modules: [] } } as never);
+    publication.getLive.mockResolvedValue({ snapshot: { modules: [], sections: [] } } as never);
 
     await PublicationService.publish('c1', 1);
 
@@ -247,8 +354,8 @@ describe('publish', () => {
     // Identical to the current tree: a republish with no additions.
     publication.getLive.mockResolvedValue({
       snapshot: {
-        sections: [{ id: 's1' }],
-        modules: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
+        modules: [{ id: 's1' }],
+        sections: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
       },
     } as never);
 
@@ -261,16 +368,16 @@ describe('publish', () => {
 
 describe('getNewIdsForLearner', () => {
   const liveSnapshot = {
-    sections: [{ id: 's1' }],
-    modules: [
-      { id: 'm1', sectionId: 's1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] },
-      { id: 'm2', sectionId: 's1', elements: [{ id: 'e2' }], quizzes: [] },
+    modules: [{ id: 's1' }],
+    sections: [
+      { id: 'm1', moduleId: 's1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] },
+      { id: 'm2', moduleId: 's1', elements: [{ id: 'e2' }], quizzes: [] },
     ],
   };
 
   beforeEach(() => {
     curriculum.getCourseById.mockResolvedValue(courseRow() as never);
-    curriculum.getViewedModuleIds.mockResolvedValue([] as never);
+    curriculum.getViewedSectionIds.mockResolvedValue([] as never);
     curriculum.getViewedElementIds.mockResolvedValue([] as never);
     quiz.getAttemptsForUser.mockResolvedValue([] as never);
   });
@@ -284,8 +391,8 @@ describe('getNewIdsForLearner', () => {
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
-    expect(result.newModuleIds).toEqual([]);
     expect(result.newSectionIds).toEqual([]);
+    expect(result.newModuleIds).toEqual([]);
   });
 
   it('marks nothing when no version has been published since they began', async () => {
@@ -293,36 +400,36 @@ describe('getNewIdsForLearner', () => {
     publication.listPublishedSince.mockResolvedValue([] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(result.newModuleIds).toEqual([]);
+    expect(result.newSectionIds).toEqual([]);
   });
 
   it('marks what arrived after they started', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newSectionIds: [], newModuleIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
+      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
-    expect(result.newModuleIds).toEqual(['m2']);
+    expect(result.newSectionIds).toEqual(['m2']);
     expect(result.newElementIds).toEqual(['e2']);
   });
 
   /**
-   * Reading the new module is what makes it no longer new. Without this the
+   * Reading the new section is what makes it no longer new. Without this the
    * pills would stick forever.
    */
   it('retires a mark once the learner has read it', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newSectionIds: [], newModuleIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
+      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
     ] as never);
-    curriculum.getViewedModuleIds.mockResolvedValue([{ moduleId: 'm2' }] as never);
+    curriculum.getViewedSectionIds.mockResolvedValue([{ sectionId: 'm2' }] as never);
     curriculum.getViewedElementIds.mockResolvedValue([{ elementId: 'e2' }] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
-    expect(result.newModuleIds).toEqual([]);
+    expect(result.newSectionIds).toEqual([]);
     expect(result.newElementIds).toEqual([]);
   });
 
@@ -333,11 +440,11 @@ describe('getNewIdsForLearner', () => {
   it('does not mark content that no longer exists in the served version', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newSectionIds: [], newModuleIds: ['deleted-since'], newElementIds: [], newQuizIds: [] },
+      { newModuleIds: [], newSectionIds: ['deleted-since'], newElementIds: [], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(result.newModuleIds).toEqual([]);
+    expect(result.newSectionIds).toEqual([]);
   });
 
   /**
@@ -347,32 +454,32 @@ describe('getNewIdsForLearner', () => {
   it('accumulates across every version published since they began', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newSectionIds: [], newModuleIds: ['m1'], newElementIds: [], newQuizIds: [] },
-      { newSectionIds: [], newModuleIds: ['m2'], newElementIds: [], newQuizIds: [] },
+      { newModuleIds: [], newSectionIds: ['m1'], newElementIds: [], newQuizIds: [] },
+      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: [], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(result.newModuleIds.sort()).toEqual(['m1', 'm2']);
+    expect(result.newSectionIds.sort()).toEqual(['m1', 'm2']);
   });
 
-  /** A section heading stands in for its contents, so it clears only when they do. */
-  it('keeps a new section marked until nothing inside it is outstanding', async () => {
+  /** A module heading stands in for its contents, so it clears only when they do. */
+  it('keeps a new module marked until nothing inside it is outstanding', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newSectionIds: ['s1'], newModuleIds: [], newElementIds: [], newQuizIds: [] },
+      { newModuleIds: ['s1'], newSectionIds: [], newElementIds: [], newQuizIds: [] },
     ] as never);
-    curriculum.getViewedModuleIds.mockResolvedValue([{ moduleId: 'm1' }] as never);
+    curriculum.getViewedSectionIds.mockResolvedValue([{ sectionId: 'm1' }] as never);
 
     const stillNew = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(stillNew.newSectionIds).toEqual(['s1']);
+    expect(stillNew.newModuleIds).toEqual(['s1']);
 
-    curriculum.getViewedModuleIds.mockResolvedValue([
-      { moduleId: 'm1' },
-      { moduleId: 'm2' },
+    curriculum.getViewedSectionIds.mockResolvedValue([
+      { sectionId: 'm1' },
+      { sectionId: 'm2' },
     ] as never);
 
     const cleared = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(cleared.newSectionIds).toEqual([]);
+    expect(cleared.newModuleIds).toEqual([]);
   });
 });
 
@@ -392,6 +499,189 @@ describe('archive retention', () => {
   });
 });
 
+/**
+ * Rolling back.
+ *
+ * The rule being protected is that a restore rolls *forward*: the old snapshot
+ * goes out under a new number, and the version it replaces is superseded exactly
+ * as an ordinary publish would supersede it. That is what keeps every row either
+ * live or on an archive clock, which the retention sweep depends on.
+ */
+describe('restoreVersion', () => {
+  const archived = (overrides: Record<string, unknown> = {}) => ({
+    id: 'p1',
+    courseId: 'c1',
+    version: 2,
+    snapshot: { title: 'As it was' },
+    supersededAt: new Date('2026-02-01'),
+    ...overrides,
+  });
+
+  it('refuses a version that does not exist', async () => {
+    publication.getById.mockResolvedValue(null as never);
+    await expect(PublicationService.restoreVersion('missing', 1)).rejects.toThrow(/not found/);
+  });
+
+  it('refuses the version learners are already reading', async () => {
+    publication.getById.mockResolvedValue(archived({ supersededAt: null }) as never);
+    await expect(PublicationService.restoreVersion('p1', 1)).rejects.toThrow(/already/);
+  });
+
+  it('refuses when the course behind it has gone', async () => {
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(null as never);
+    await expect(PublicationService.restoreVersion('p1', 1)).rejects.toThrow(/not found/);
+  });
+
+  it('republishes the old snapshot under a fresh version number', async () => {
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 4 }) as never);
+    publication.highestVersion.mockResolvedValue(4 as never);
+    publication.create.mockResolvedValue({ publishedAt: new Date('2026-03-01') } as never);
+
+    const result = await PublicationService.restoreVersion('p1', 7);
+
+    expect(result).toEqual({ version: 5, restoredFrom: 2 });
+    expect(publication.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        courseId: 'c1',
+        version: 5,
+        snapshot: { title: 'As it was' },
+        publishedById: 7,
+      }),
+    );
+  });
+
+  /**
+   * The number comes off the rows, not off the course. A course rolled back once
+   * points at a version lower than ones that already exist, and reusing a number
+   * would collide with the courseId+version unique constraint.
+   */
+  it('numbers above every existing version, not above the course pointer', async () => {
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 2 }) as never);
+    publication.highestVersion.mockResolvedValue(9 as never);
+    publication.create.mockResolvedValue({ publishedAt: new Date('2026-03-01') } as never);
+
+    const result = await PublicationService.restoreVersion('p1', null);
+
+    expect(result.version).toBe(10);
+  });
+
+  it('supersedes what was live, so it goes on the archive clock', async () => {
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 4 }) as never);
+    publication.highestVersion.mockResolvedValue(4 as never);
+    publication.create.mockResolvedValue({ publishedAt: new Date('2026-03-01') } as never);
+
+    await PublicationService.restoreVersion('p1', 1);
+
+    expect(publication.supersede).toHaveBeenCalledWith('c1', 4);
+  });
+
+  /** A rollback shows a learner nothing they have not already been offered. */
+  it('marks nothing as new', async () => {
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(courseRow() as never);
+    publication.highestVersion.mockResolvedValue(3 as never);
+    publication.create.mockResolvedValue({ publishedAt: new Date('2026-03-01') } as never);
+
+    await PublicationService.restoreVersion('p1', 1);
+
+    expect(publication.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newModuleIds: [],
+        newSectionIds: [],
+        newElementIds: [],
+        newQuizIds: [],
+      }),
+    );
+  });
+
+  /**
+   * A restore publishes old content while the author's draft still holds the new,
+   * so the two differ and the editor has to keep saying so.
+   *
+   * The timestamps here are the realistic ones and that is the point of the test.
+   * A publication row is stamped `now()` on insert, so the restore is always
+   * *newer* than a draft last edited at some point in the past — and
+   * `hasUnpublishedChanges` is the comparison `draftUpdatedAt > publishedAt`.
+   * Anything that merely leaves the draft stamp alone, or aligns it with the new
+   * publication, silently reports "up to date" on a course whose draft and live
+   * version plainly disagree. An earlier version of this test used an artificially
+   * old publishedAt, which took the other branch and hid exactly that.
+   */
+  it('leaves the draft reading as ahead of a restore stamped now', async () => {
+    const now = new Date();
+    const lastEdit = new Date(now.getTime() - 86_400_000); // edited yesterday
+
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(
+      courseRow({ publishedVersion: 4, draftUpdatedAt: lastEdit }) as never,
+    );
+    publication.highestVersion.mockResolvedValue(4 as never);
+    publication.create.mockResolvedValue({ publishedAt: now } as never);
+
+    await PublicationService.restoreVersion('p1', 1);
+
+    const written = curriculum.updateCourse.mock.calls.at(-1)?.[1] as {
+      draftUpdatedAt: Date;
+      published: boolean;
+      publishedVersion: number;
+    };
+
+    expect(written).toMatchObject({ published: true, publishedVersion: 5 });
+    // Strictly after, which is what makes hasUnpublishedChanges answer true.
+    expect(written.draftUpdatedAt.getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  /** A draft edited after the restore keeps its own, later, stamp. */
+  it('keeps a draft stamp that is already ahead of the restore', async () => {
+    const now = new Date();
+    const laterEdit = new Date(now.getTime() + 60_000);
+
+    publication.getById.mockResolvedValue(archived() as never);
+    curriculum.getCourseById.mockResolvedValue(
+      courseRow({ publishedVersion: 4, draftUpdatedAt: laterEdit }) as never,
+    );
+    publication.highestVersion.mockResolvedValue(4 as never);
+    publication.create.mockResolvedValue({ publishedAt: now } as never);
+
+    await PublicationService.restoreVersion('p1', 1);
+
+    const written = curriculum.updateCourse.mock.calls.at(-1)?.[1] as { draftUpdatedAt: Date };
+    expect(written.draftUpdatedAt).toEqual(laterEdit);
+  });
+});
+
+describe('deleteVersion', () => {
+  it('refuses a version that does not exist', async () => {
+    publication.getById.mockResolvedValue(null as never);
+    await expect(PublicationService.deleteVersion('missing')).rejects.toThrow(/not found/);
+  });
+
+  /**
+   * Deleting the live version would leave the course pointing at something that
+   * no longer exists — a published course nobody can open.
+   */
+  it('refuses the version learners are reading', async () => {
+    publication.getById.mockResolvedValue({ version: 3, supersededAt: null } as never);
+
+    await expect(PublicationService.deleteVersion('p1')).rejects.toThrow(/cannot be deleted/);
+    expect(publication.deleteById).not.toHaveBeenCalled();
+  });
+
+  it('removes an archived version and says which it was', async () => {
+    publication.getById.mockResolvedValue({
+      version: 3,
+      supersededAt: new Date('2026-02-01'),
+    } as never);
+
+    expect(await PublicationService.deleteVersion('p1')).toEqual({ version: 3 });
+    expect(publication.deleteById).toHaveBeenCalledWith('p1');
+  });
+});
+
 describe('findPublishedQuiz', () => {
   it('returns null when the quiz belongs to no course', async () => {
     curriculum.courseIdFromQuiz.mockResolvedValue(null as never);
@@ -402,7 +692,7 @@ describe('findPublishedQuiz', () => {
     curriculum.courseIdFromQuiz.mockResolvedValue('c1' as never);
     curriculum.getCourseById.mockResolvedValue(courseRow() as never);
     publication.getLive.mockResolvedValue({
-      snapshot: { modules: [{ quizzes: [{ id: 'q1', title: 'Found' }] }] },
+      snapshot: { sections: [{ quizzes: [{ id: 'q1', title: 'Found' }] }] },
     } as never);
 
     expect(await PublicationService.findPublishedQuiz('q1')).toMatchObject({ title: 'Found' });
@@ -412,9 +702,144 @@ describe('findPublishedQuiz', () => {
     curriculum.courseIdFromQuiz.mockResolvedValue('c1' as never);
     curriculum.getCourseById.mockResolvedValue(courseRow() as never);
     publication.getLive.mockResolvedValue({
-      snapshot: { modules: [{ quizzes: [{ id: 'other' }] }] },
+      snapshot: { sections: [{ quizzes: [{ id: 'other' }] }] },
     } as never);
 
     expect(await PublicationService.findPublishedQuiz('q1')).toBeNull();
+  });
+});
+
+/**
+ * The reads the editor's version panel is built from, and the failure paths
+ * underneath them.
+ *
+ * These were the part of the service with no tests, which is why its pinned
+ * coverage slipped when `hasUnpublishedChanges` grew its content comparison —
+ * the new branches landed in a file whose exercised share was already thin.
+ */
+describe('version reads', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  /**
+   * A snapshot published before modules and sections traded names is read
+   * through a shim. Getting this wrong does not throw — it silently swaps the
+   * two levels of every old course.
+   */
+  it('reads a snapshot published under the old module/section naming', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow() as never);
+    publication.getLive.mockResolvedValue({
+      snapshot: {
+        id: 'c1',
+        title: 'Fire safety',
+        // The old shape: the outer level was called `sections` and the inner
+        // level `modules`, and the inner one carried the elements.
+        sections: [{ id: 'outer-1', courseId: 'c1', number: 1, title: 'Intro' }],
+        modules: [
+          {
+            id: 'inner-1',
+            sectionId: 'outer-1',
+            number: '1.1',
+            title: 'Basics',
+            elements: [{ id: 'e1' }],
+            quizzes: [{ id: 'q1', moduleId: 'inner-1', questions: [] }],
+          },
+        ],
+      },
+    } as never);
+
+    const snapshot = await PublicationService.getLiveSnapshot('c1');
+
+    // The outer level becomes modules, the inner becomes sections.
+    expect(snapshot!.modules.map((m) => m.id)).toEqual(['outer-1']);
+    expect(snapshot!.sections.map((s) => s.id)).toEqual(['inner-1']);
+    expect(snapshot!.sections[0].moduleId).toBe('outer-1');
+    // Defaults that did not exist when the snapshot was written.
+    expect(snapshot!.kind).toBe('LESSON');
+    expect(snapshot!.sections[0].quizzes[0].type).toBe('EXAM');
+    expect(snapshot!.sections[0].quizzes[0].showResults).toBe(true);
+  });
+
+  it('reports nothing outstanding on a course that has never been published', async () => {
+    curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 0 }) as never);
+
+    await expect(PublicationService.getUnpublishedIds('c1')).resolves.toEqual({
+      newModuleIds: [],
+      newSectionIds: [],
+      newElementIds: [],
+      newQuizIds: [],
+    });
+  });
+
+  /** What the editor tags as "not live yet": in the draft, absent from the live version. */
+  it('names exactly what the draft has added since the live version', async () => {
+    curriculum.getCourseById.mockResolvedValue(
+      courseRow({
+        sections: [
+          courseRow().sections[0],
+          { ...courseRow().sections[0], id: 'm2', elements: [{ id: 'e2' }], quizzes: [] },
+        ],
+      }) as never,
+    );
+    publication.getLive.mockResolvedValue({
+      snapshot: { ...(await PublicationService.buildSnapshot('c1')), sections: [] },
+    } as never);
+
+    const added = await PublicationService.getUnpublishedIds('c1');
+
+    expect(added.newSectionIds).toEqual(['m1', 'm2']);
+    expect(added.newElementIds).toEqual(['e1', 'e2']);
+  });
+
+  /** A course never published has no snapshot, and is skipped rather than nulled into the list. */
+  it('drops courses with no live snapshot when reading several at once', async () => {
+    curriculum.getCourseById
+      .mockResolvedValueOnce(courseRow() as never)
+      .mockResolvedValueOnce(courseRow({ published: false, publishedVersion: 0 }) as never);
+    publication.getLive.mockResolvedValue({
+      snapshot: { id: 'c1', title: 'Fire safety' },
+    } as never);
+
+    const snapshots = await PublicationService.getLiveSnapshots(['c1', 'c2']);
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].id).toBe('c1');
+  });
+
+  it('lists the versions of a course', async () => {
+    publication.listForCourse.mockResolvedValue([{ id: 'p1', version: 2 }] as never);
+    await expect(PublicationService.listVersions('c1')).resolves.toEqual([
+      { id: 'p1', version: 2 },
+    ]);
+  });
+
+  it('reads one archived version', async () => {
+    publication.getById.mockResolvedValue({ id: 'p1', version: 2 } as never);
+    await expect(PublicationService.getVersion('p1')).resolves.toMatchObject({ version: 2 });
+  });
+
+  it('refuses a version id that does not exist', async () => {
+    publication.getById.mockResolvedValue(null as never);
+    await expect(PublicationService.getVersion('nope')).rejects.toThrow(/not found/);
+  });
+
+  /**
+   * A comparison that cannot be made must not read as "nothing to publish".
+   * Stranding an author on an up-to-date badge they cannot clear is the worse
+   * of the two failures, so the fallback is to report changes.
+   */
+  it('reports changes when the two versions cannot be compared', async () => {
+    curriculum.getCourseById
+      .mockResolvedValueOnce(
+        courseRow({ draftUpdatedAt: new Date('2026-05-02T10:00:00Z') }) as never,
+      )
+      .mockRejectedValueOnce(new Error('snapshot unreadable'));
+    publication.getLive.mockResolvedValue({
+      publishedAt: new Date('2026-05-01T10:00:00Z'),
+      snapshot: { id: 'c1', title: 'Fire safety', sections: [] },
+    } as never);
+
+    await expect(PublicationService.hasUnpublishedChanges('c1')).resolves.toBe(true);
   });
 });

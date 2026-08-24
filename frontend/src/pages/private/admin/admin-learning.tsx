@@ -71,6 +71,16 @@ const AdminLearning = () => {
   };
 
   /**
+   * Lessons only.
+   *
+   * A quiz set is a course underneath — one module nobody sees and a section per
+   * quiz — which is what had them turning up on this page beside real lessons,
+   * where nothing about the card describes what they are. They are made and
+   * edited on the Quizzes tab, and that is the only place they belong.
+   */
+  const lessons = useMemo(() => courses.filter((course) => course.kind !== 'QUIZ_SET'), [courses]);
+
+  /**
    * Searches across both states at once, then splits.
    *
    * Filtering before the split rather than after is what makes the two counts
@@ -79,27 +89,27 @@ const AdminLearning = () => {
    */
   const matching = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return courses;
+    if (!query) return lessons;
 
-    return courses.filter((course) =>
+    return lessons.filter((course) =>
       [
         course.title,
         course.shortDescription ?? '',
         ...course.tags,
-        ...course.modules.map((module) => `${module.number} ${module.title}`),
+        ...course.sections.map((section) => `${section.number} ${section.title}`),
       ]
         .join(' ')
         .toLowerCase()
         .includes(query),
     );
-  }, [courses, search]);
+  }, [lessons, search]);
 
   const published = matching.filter((course) => course.published);
   const drafts = matching.filter((course) => !course.published);
 
   const courseCard = (course: Course) => {
     const cover = imageSrc(course.imageData, course.imageType);
-    const quizCount = course.modules.reduce((sum, module) => sum + module.quizzes.length, 0);
+    const quizCount = course.sections.reduce((sum, section) => sum + section.quizzes.length, 0);
 
     return (
       <Card
@@ -129,7 +139,7 @@ const AdminLearning = () => {
           className="flex items-center justify-between border-t border-gray-300 p-4 text-sm
             font-medium text-dark-gray"
         >
-          <span>Modules: {course.modules.length}</span>
+          <span>Sections: {course.sections.length}</span>
           <span>Quizzes: {quizCount}</span>
         </CardContent>
       </Card>
@@ -187,7 +197,7 @@ const AdminLearning = () => {
         </CardContent>
       </Card>
 
-      {courses.length === 0 ? (
+      {lessons.length === 0 ? (
         <Card className="bg-light-gray">
           <CardContent className="py-16 text-center">
             <p>No lessons yet. Create one above to get started.</p>

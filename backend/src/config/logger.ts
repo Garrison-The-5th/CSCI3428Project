@@ -101,7 +101,7 @@ export interface SecurityContext {
   ip?: string;
   method?: string;
   path?: string;
-  /** Which course, module, quiz or assignment the decision was about. */
+  /** Which course, section, quiz or assignment the decision was about. */
   resource?: string;
   /** Why a decision went the way it did — never free-form user input. */
   reason?: string;

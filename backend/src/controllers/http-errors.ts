@@ -15,7 +15,7 @@ import { Prisma } from '../../generated/prisma';
  * Turning a thrown error into a response.
  *
  * Services throw plain `Error`s whose messages are written for the person using
- * the app ("module 2.3 already exists"), so those are safe to pass on. Anything
+ * the app ("section 2.3 already exists"), so those are safe to pass on. Anything
  * the database throws is not: a Prisma error names columns, constraints and
  * sometimes values, which is a free schema tour for anyone poking at the API.
  * Those are logged in full and answered with something generic.
@@ -28,6 +28,16 @@ export class NotFoundError extends Error {}
 
 /** Thrown when the caller may not do this. Distinct from "does not exist". */
 export class ForbiddenError extends Error {}
+
+/**
+ * Thrown when the request is well formed and allowed, but the thing it asks for
+ * has already happened — handing in a one-time quiz twice, say.
+ *
+ * Separate from a plain validation failure because the page renders it
+ * differently: 400 means "fix this and try again", 409 means "there is nothing
+ * left to try".
+ */
+export class ConflictError extends Error {}
 
 function isDatabaseError(error: unknown): boolean {
   return (
@@ -52,6 +62,11 @@ export function fail(res: Response, error: unknown, fallback: string) {
   if (error instanceof ForbiddenError) {
     logger.warn({ operation: fallback, reason: error.message }, 'request failed: forbidden');
     return res.status(403).send({ errorMessage: error.message });
+  }
+
+  if (error instanceof ConflictError) {
+    logger.info({ operation: fallback, reason: error.message }, 'request failed: conflict');
+    return res.status(409).send({ errorMessage: error.message });
   }
 
   if (isDatabaseError(error)) {

@@ -86,6 +86,14 @@ export const EditorAccessProvider: React.FC<{ children: ReactNode }> = ({ childr
   );
 };
 
+/**
+ * Whether this person may edit anything, and so whether the authoring tabs show.
+ *
+ * Course-level contributor rights cannot be read off the Keycloak token — they
+ * live in the database, on the course — so this asks the server. It is what
+ * makes the rule "lose your last contributor role, lose the Course Editor,
+ * Users and Admin Dashboard tabs" hold without a sign-out and back in.
+ */
 export const useEditorAccess = () => {
   const context = useContext(EditorAccessContext);
   if (context === undefined) {

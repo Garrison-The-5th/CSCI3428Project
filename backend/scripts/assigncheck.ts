@@ -36,11 +36,11 @@ function check(label: string, actual: unknown, expected: unknown) {
   }
 }
 
-/** A published course with one module, ready to assign. */
+/** A published course with one section, ready to assign. */
 async function makeCourse(title: string) {
   const course = await CurriculumService.createCourse(title);
-  const [section] = await CurriculumGateway.getSections(course!.id);
-  await CurriculumService.createModule(course!.id, { sectionId: section.id, title: 'Only' });
+  const [module] = await CurriculumGateway.getModules(course!.id);
+  await CurriculumService.createSection(course!.id, { moduleId: module.id, title: 'Only' });
   // Going live takes a snapshot, so this is the publish path rather than a
   // flag on the course row.
   await PublicationService.publish(course!.id, null);
@@ -117,13 +117,30 @@ async function main() {
   check('two courses', new Set(now.map((c) => c.id)), new Set([alpha, charlie]) as unknown);
 
   console.log('\na quiz inside an enrolled course is reachable; one outside is not');
-  const [moduleOfBravo] = (await CurriculumGateway.getCourseById(bravo))!.modules;
-  const hidden = await QuizService.createQuiz({ title: 'Hidden', moduleId: moduleOfBravo.id });
+  const [sectionOfBravo] = (await CurriculumGateway.getCourseById(bravo))!.sections;
+  const hidden = await QuizService.createQuiz({ title: 'Hidden', sectionId: sectionOfBravo.id });
   await QuizService.updateQuiz(hidden.id, { published: true });
 
-  const [moduleOfAlpha] = (await CurriculumGateway.getCourseById(alpha))!.modules;
-  const visible = await QuizService.createQuiz({ title: 'Visible', moduleId: moduleOfAlpha.id });
+  const [sectionOfAlpha] = (await CurriculumGateway.getCourseById(alpha))!.sections;
+  const visible = await QuizService.createQuiz({ title: 'Visible', sectionId: sectionOfAlpha.id });
   await QuizService.updateQuiz(visible.id, { published: true });
+
+  /*
+   * A question, so the redaction checks below have an answer key to redact.
+   *
+   * Without one this script created no options at all, and the author-view
+   * assertion — "the same tree still carries answers for an author" — was really
+   * asking whether *anything else* in the database happened to have a quiz with
+   * options. It passed on a developer's working database and failed the moment
+   * one was reset, which is the wrong way round for a check of this kind.
+   */
+  await QuizService.addQuestion(visible.id, {
+    prompt: 'Which of these is redacted for a learner?',
+    options: [
+      { text: 'The answer key', isCorrect: true },
+      { text: 'The question text', isCorrect: false },
+    ],
+  });
 
   // Marking the quiz published is not enough on its own: learners read the
   // course's published snapshot, and this quiz is not in it yet.

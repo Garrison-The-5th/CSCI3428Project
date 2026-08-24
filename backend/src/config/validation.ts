@@ -210,3 +210,37 @@ export function boundedInteger(
   }
   return parsed;
 }
+
+/**
+ * How long a learner gets once something is handed to them, in days.
+ *
+ * Optional in both directions, and the two absences mean different things —
+ * `undefined` is "the author did not touch this field", `null` is "the author
+ * cleared it, so there is no deadline" — which is the same contract
+ * `optionalText` keeps and which every caller here spreads on.
+ *
+ * The ceiling is five years. There is no honest deadline past that, and an
+ * unbounded number here would be stamped straight onto an assignment's due date
+ * and overflow the column.
+ */
+export const MAX_DAYS_REMAINING = 1825;
+
+export function parseDaysRemaining(value: unknown, label = 'days remaining') {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+
+  return boundedInteger(value, { min: 1, max: MAX_DAYS_REMAINING, label });
+}
+
+/**
+ * The deadline that follows from a length: today plus that many days.
+ *
+ * Kept here rather than at the two call sites so an assignment made from the
+ * Access pane and one made from the admin dashboard land on the same date, and
+ * so the editor can show the author what the date would be using the very same
+ * arithmetic.
+ */
+export function dueDateFromDays(days: number | null | undefined, from = new Date()): Date | null {
+  if (days === null || days === undefined) return null;
+  return new Date(from.getTime() + days * 86_400_000);
+}

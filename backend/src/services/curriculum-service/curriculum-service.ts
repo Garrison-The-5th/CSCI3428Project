@@ -1,18 +1,19 @@
 /**
  * File: curriculum-service.ts
- * Description: Course, section, module and element rules, including the numbering grid.
+ * Description: Course, module, section and element rules, including the numbering grid.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 import { logger } from '@/config/logger';
 import { normalizeUpload } from '@/config/media-upload';
+import { parseModuleColor } from '@/config/module-colors';
 import { sanitizeRichText } from '@/config/rich-text';
-import { parseSectionColor } from '@/config/section-colors';
 import {
   cleanStringList,
   type FieldName,
   optionalText,
+  parseDaysRemaining,
   requiredText,
   safeUrl,
   withinLimit,
@@ -23,9 +24,9 @@ import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import EnrolmentService from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
-import { redactAnswers } from '@/services/quiz-service/quiz-service';
+import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
 
-import { ElementType, Prisma } from '../../../generated/prisma';
+import { CourseKind, ElementType, Prisma, QuizType } from '../../../generated/prisma';
 
 const ELEMENT_TYPES = Object.values(ElementType) as string[];
 
@@ -39,9 +40,9 @@ const ELEMENT_TYPES = Object.values(ElementType) as string[];
 export const RECYCLE_BIN_DAYS = 14;
 
 /**
- * A course is a two-dimensional grid: sections are the outer index and modules
- * the inner one, both 1-based and always contiguous. Module "2.3" is the third
- * module of the second section, and nothing else can be expressed — there is no
+ * A course is a two-dimensional grid: modules are the outer index and sections
+ * the inner one, both 1-based and always contiguous. Section "2.3" is the third
+ * section of the second module, and nothing else can be expressed — there is no
  * free-text number to validate any more, because position in the grid is the
  * only source of truth.
  *
@@ -51,21 +52,21 @@ export const RECYCLE_BIN_DAYS = 14;
  */
 
 /** "2.3" — what the learner sees. */
-export function toNumber(sectionNumber: number, position: number): string {
-  return `${sectionNumber}.${position}`;
+export function toNumber(moduleNumber: number, position: number): string {
+  return `${moduleNumber}.${position}`;
 }
 
 /**
  * "000002.000003" — the stored ordering key. Zero padding is what stops "1.10"
  * from sorting before "1.2" under plain string comparison.
  */
-export function toSortKey(sectionNumber: number, position: number): string {
-  return `${String(sectionNumber).padStart(6, '0')}.${String(position).padStart(6, '0')}`;
+export function toSortKey(moduleNumber: number, position: number): string {
+  return `${String(moduleNumber).padStart(6, '0')}.${String(position).padStart(6, '0')}`;
 }
 
 /**
- * A section's place in the course, as typed by the author. Out-of-range values
- * are clamped rather than rejected: "put it at 9" in a four-section course means
+ * A module's place in the course, as typed by the author. Out-of-range values
+ * are clamped rather than rejected: "put it at 9" in a four-module course means
  * the end, which is what someone typing a big number intends.
  */
 function validatePlace(value: unknown, max: number, field: string): number {
@@ -80,26 +81,39 @@ function validatePlace(value: unknown, max: number, field: string): number {
 }
 
 /**
- * Strips the answer key out of every quiz in a course tree.
+ * Strips the answer key out of every quiz in a course tree, and the one-time
+ * links out of it entirely.
  *
- * A course carries its modules' quizzes, and those carry questions and options —
+ * A course carries its sections' quizzes, and those carry questions and options —
  * `isCorrect` and all. The gateway reads the tree whole, so any course sent to a
  * learner has to come through here first, or the correct answers ship with it.
  * The quiz endpoints and the guest-link path already redact; this is the same
  * guarantee for the course path.
+ *
+ * One-time links are dropped for a different reason. A one-time link may now own
+ * a quiz set's section, and this is the browsing path — the Learning and Quizzes
+ * tabs of somebody signed in. Leaving them in would list a quiz whose whole
+ * promise is that the link it was sent in is the only way to it, which is the
+ * thing that must stay true even for the person the link was addressed to. The
+ * token path does not come through here, so the link itself still opens it.
  */
 function redactCourse<
   T extends {
-    modules: Array<{
-      quizzes: Array<{ questions: Array<{ options: Array<Record<string, unknown>> }> }>;
+    sections: Array<{
+      quizzes: Array<{
+        type?: QuizType | null;
+        questions: Array<{ options: Array<Record<string, unknown>> }>;
+      }>;
     }>;
   },
 >(course: T): T {
   return {
     ...course,
-    modules: course.modules.map((module) => ({
-      ...module,
-      quizzes: module.quizzes.map((quiz) => redactAnswers(quiz)),
+    sections: course.sections.map((section) => ({
+      ...section,
+      quizzes: section.quizzes
+        .filter((quiz) => quiz.type !== QuizType.ONE_TIME)
+        .map((quiz) => redactAnswers(quiz)),
     })),
   };
 }
@@ -173,7 +187,7 @@ export default class CurriculumService {
     const user = await AuthService.getUserByEmail(email);
     const newIds = user
       ? await PublicationService.getNewIdsForLearner(courseId, user.id, course)
-      : { newSectionIds: [], newModuleIds: [], newElementIds: [], newQuizIds: [] };
+      : { newModuleIds: [], newSectionIds: [], newElementIds: [], newQuizIds: [] };
 
     return { course, newIds };
   }
@@ -189,14 +203,71 @@ export default class CurriculumService {
 
   /**
    * A course starts as just a name; everything else is filled in by editing it.
-   * It gets one empty section so the author can add a module immediately —
-   * modules live inside sections, so a course with none has nowhere to put them.
+   * It gets one empty module so the author can add a section immediately —
+   * sections live inside modules, so a course with none has nowhere to put them.
    */
-  static async createCourse(title?: string) {
+  static async createCourse(title?: string, kind: CourseKind = CourseKind.LESSON) {
     const clean = requiredText(title, 'title', 'title');
 
-    const course = await CurriculumGateway.createCourse(clean);
-    await CurriculumGateway.createSection({ courseId: course.id, number: 1, title: 'Section 1' });
+    const course = await CurriculumGateway.createCourse(clean, kind);
+
+    /*
+     * One module to hang sections off, because a section cannot exist without
+     * one — it is where its number's first digit comes from.
+     *
+     * A quiz set has exactly this one for its whole life: the author sees a flat
+     * list of quizzes and never learns the module is there. Naming it after the
+     * set rather than "Module 1" keeps the rail readable in the previews, which
+     * do show it.
+     */
+    await CurriculumGateway.createModule({
+      courseId: course.id,
+      number: 1,
+      title: kind === CourseKind.QUIZ_SET ? clean : 'Module 1',
+    });
+    return CurriculumGateway.getCourseById(course.id);
+  }
+
+  /**
+   * A quiz set: a course that holds exactly one quiz and no elements.
+   *
+   * Deliberately the same Course underneath, rather than a parallel model. It
+   * buys publishing, versioning, contributors, assignment and the learner path
+   * for nothing, and means a quiz set can be handed out exactly as a lesson is.
+   *
+   * The quiz is made here rather than by the author afterwards. A set holds one
+   * quiz and only ever one — an exam, or a one-time link — so the empty set the
+   * author used to land in was a state with exactly one legal move in it, and a
+   * structure pane whose whole job was to offer that move. Both are gone: the
+   * container arrives with its quiz, and the editor opens on the questions.
+   *
+   * The section under it is the row that carries the name, the minutes and the
+   * order; the author never sees it as a thing of its own.
+   */
+  static async createQuizSet(title?: string) {
+    // Cleaned here as well as inside createCourse, so the section and the quiz
+    // are named from what the author typed rather than from whatever the
+    // gateway echoes back — the round trip is a read of the new row, and
+    // depending on a field of it to name two more is a needless coupling.
+    const clean = requiredText(title, 'title', 'title');
+
+    const course = await CurriculumService.createCourse(clean, CourseKind.QUIZ_SET);
+    if (!course) throw new Error('the quiz set could not be created');
+
+    const section = await CurriculumService.createSection(course.id, {
+      title: clean,
+      estimatedMinutes: 0,
+    });
+    if (!section) throw new Error('the quiz could not be created');
+
+    // Exam is what "a quiz" means until the author says otherwise, and the
+    // editor's type picker is where they say it.
+    await QuizService.createQuiz({
+      title: clean,
+      sectionId: section.id,
+      type: QuizType.EXAM,
+    });
+
     return CurriculumGateway.getCourseById(course.id);
   }
 
@@ -223,6 +294,7 @@ export default class CurriculumService {
       prerequisites?: string[];
       required?: boolean;
       dueDate?: string | null;
+      daysRemaining?: number | string | null;
       published?: boolean;
       sequential?: boolean;
       instructorIds?: string[];
@@ -252,6 +324,8 @@ export default class CurriculumService {
         dueDate = parsed;
       }
     }
+
+    const daysRemaining = parseDaysRemaining(data.daysRemaining);
 
     const tags = CurriculumService.cleanList(data.tags, 'tag', 'tags');
     const languages = CurriculumService.cleanList(data.languages, 'tag', 'languages');
@@ -288,6 +362,7 @@ export default class CurriculumService {
       ...(prerequisites !== undefined ? { prerequisites } : {}),
       ...(data.required !== undefined ? { required: data.required === true } : {}),
       ...(dueDate !== undefined ? { dueDate } : {}),
+      ...(daysRemaining !== undefined ? { daysRemaining } : {}),
       // Only ever false here — publishing goes through PublicationService.
       ...(data.published !== undefined ? { published: false } : {}),
       ...(data.sequential !== undefined ? { sequential: data.sequential === true } : {}),
@@ -395,13 +470,13 @@ export default class CurriculumService {
   static createNote(
     userId: number,
     courseId: string,
-    data: { body?: string; moduleId?: string | null },
+    data: { body?: string; sectionId?: string | null },
   ) {
     const body = requiredText(data.body, 'noteBody', 'note');
     return CurriculumGateway.createNote({
       userId,
       courseId,
-      moduleId: data.moduleId || null,
+      sectionId: data.sectionId || null,
       body,
     });
   }
@@ -469,18 +544,18 @@ export default class CurriculumService {
   static async getDeletedItems() {
     await CurriculumService.purgeExpired();
 
-    const [courses, sections, modules] = await Promise.all([
+    const [courses, modules, sections] = await Promise.all([
       CurriculumGateway.getDeletedCourses(),
-      CurriculumGateway.getDeletedSections(),
       CurriculumGateway.getDeletedModules(),
+      CurriculumGateway.getDeletedSections(),
     ]);
-    return { courses, sections, modules, retentionDays: RECYCLE_BIN_DAYS };
+    return { courses, modules, sections, retentionDays: RECYCLE_BIN_DAYS };
   }
 
   /**
    * Permanently removes anything deleted more than RECYCLE_BIN_DAYS ago.
    *
-   * Outermost first, so a course going takes its sections and modules with it by
+   * Outermost first, so a course going takes its modules and sections with it by
    * cascade and the later passes only have to deal with what outlived a parent
    * that is still live. Never throws: this runs on a timer and on ordinary reads,
    * and a failed sweep must not take the page down with it.
@@ -490,19 +565,19 @@ export default class CurriculumService {
 
     try {
       const courses = await CurriculumGateway.purgeCoursesDeletedBefore(cutoff);
-      const sections = await CurriculumGateway.purgeSectionsDeletedBefore(cutoff);
       const modules = await CurriculumGateway.purgeModulesDeletedBefore(cutoff);
+      const sections = await CurriculumGateway.purgeSectionsDeletedBefore(cutoff);
       const quizzes = await QuizGateway.purgeQuizzesDeletedBefore(cutoff);
 
       return {
         courses: courses.count,
-        sections: sections.count,
         modules: modules.count,
+        sections: sections.count,
         quizzes: quizzes.count,
       };
     } catch (error) {
       logger.error({ err: error }, 'Failed to expire recycle bin items');
-      return { courses: 0, sections: 0, modules: 0, quizzes: 0 };
+      return { courses: 0, modules: 0, sections: 0, quizzes: 0 };
     }
   }
 
@@ -517,24 +592,24 @@ export default class CurriculumService {
     return CurriculumGateway.hardDeleteCourse(id);
   }
 
-  static async purgeModule(id: string) {
-    const module = await CurriculumGateway.findDeletedModule(id);
-    if (!module) throw new NotFoundError(`Module with ID ${id} is not in the recycle bin`);
-    return CurriculumGateway.hardDeleteModule(id);
-  }
-
   static async purgeSection(id: string) {
     const section = await CurriculumGateway.findDeletedSection(id);
     if (!section) throw new NotFoundError(`Section with ID ${id} is not in the recycle bin`);
     return CurriculumGateway.hardDeleteSection(id);
   }
 
+  static async purgeModule(id: string) {
+    const module = await CurriculumGateway.findDeletedModule(id);
+    if (!module) throw new NotFoundError(`Module with ID ${id} is not in the recycle bin`);
+    return CurriculumGateway.hardDeleteModule(id);
+  }
+
   static async restoreAll() {
-    // Outermost first: restoring a module whose section is still deleted would
+    // Outermost first: restoring a section whose module is still deleted would
     // leave it stranded, and restoring a container does not touch its contents.
     const courses = await CurriculumGateway.restoreAllCourses();
-    const sections = await CurriculumGateway.restoreAllSections();
     const modules = await CurriculumGateway.restoreAllModules();
+    const sections = await CurriculumGateway.restoreAllSections();
 
     // Everything came back on the parked numbers it was deleted with, so the
     // grid has to be rebuilt before any of it is readable.
@@ -544,73 +619,73 @@ export default class CurriculumService {
       );
     }
 
-    return { courses: courses.count, sections: sections.count, modules: modules.count };
+    return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
   static async purgeAll() {
-    // Deleting a course cascades to its sections and modules, so work outward in
+    // Deleting a course cascades to its modules and sections, so work outward in
     // and let each later pass clear whatever survived because its parent is live.
     const courses = await CurriculumGateway.purgeCourses();
-    const sections = await CurriculumGateway.purgeSections();
     const modules = await CurriculumGateway.purgeModules();
-    return { courses: courses.count, sections: sections.count, modules: modules.count };
+    const sections = await CurriculumGateway.purgeSections();
+    return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
-  // ---- Sections and the numbering grid ----
+  // ---- Modules and the numbering grid ----
 
   /**
-   * Rewrites every section number and module number in a course so the grid runs
+   * Rewrites every module number and section number in a course so the grid runs
    * 1..n with no gaps, in the order things currently sit. Every mutation that can
    * disturb the grid finishes by calling this, which is why nothing else in this
    * file ever computes a number.
    *
    * Both passes park their rows on throwaway values first. The unique indexes on
-   * (courseId, number) for sections and modules are checked row by row, and
+   * (courseId, number) for modules and sections are checked row by row, and
    * renumbering permutes values among existing rows — closing a gap turns
    * "1.2, 1.3" into "1.1, 1.2", which collides half way through unless the old
    * values are out of the way.
    */
   static async renumberCourse(courseId: string, db: Prisma.TransactionClient) {
-    const sections = await CurriculumGateway.getSections(courseId, db);
-    const modules = await CurriculumGateway.getModulesForRenumber(courseId, db);
+    const modules = await CurriculumGateway.getModules(courseId, db);
+    const sections = await CurriculumGateway.getSectionsForRenumber(courseId, db);
 
-    // Park below every number the course holds, recycled sections included.
-    // Plain -1, -2… would be wrong: a section soft-deleted a moment ago is
+    // Park below every number the course holds, recycled modules included.
+    // Plain -1, -2… would be wrong: a module soft-deleted a moment ago is
     // already sitting down there, and parking on top of it trips the same unique
     // index this is trying to step around.
-    const floor = await CurriculumGateway.getLowestSectionNumber(courseId, db);
-    for (const [index, section] of sections.entries()) {
-      await CurriculumGateway.updateSection(section.id, { number: floor - (index + 1) }, db);
-    }
+    const floor = await CurriculumGateway.getLowestModuleNumber(courseId, db);
     for (const [index, module] of modules.entries()) {
-      await CurriculumGateway.updateModule(
-        module.id,
-        { number: `renumbering-${index}-${module.id}`, sortKey: `renumbering-${index}` },
+      await CurriculumGateway.updateModule(module.id, { number: floor - (index + 1) }, db);
+    }
+    for (const [index, section] of sections.entries()) {
+      await CurriculumGateway.updateSection(
+        section.id,
+        { number: `renumbering-${index}-${section.id}`, sortKey: `renumbering-${index}` },
         db,
       );
     }
 
-    const modulesBySection = new Map<string, typeof modules>();
-    for (const module of modules) {
-      if (!module.sectionId) continue;
-      const bucket = modulesBySection.get(module.sectionId) ?? [];
-      bucket.push(module);
-      modulesBySection.set(module.sectionId, bucket);
+    const sectionsByModule = new Map<string, typeof sections>();
+    for (const section of sections) {
+      if (!section.moduleId) continue;
+      const bucket = sectionsByModule.get(section.moduleId) ?? [];
+      bucket.push(section);
+      sectionsByModule.set(section.moduleId, bucket);
     }
 
-    for (const [index, section] of sections.entries()) {
-      const sectionNumber = index + 1;
-      await CurriculumGateway.updateSection(section.id, { number: sectionNumber }, db);
+    for (const [index, module] of modules.entries()) {
+      const moduleNumber = index + 1;
+      await CurriculumGateway.updateModule(module.id, { number: moduleNumber }, db);
 
-      const owned = modulesBySection.get(section.id) ?? [];
-      for (const [moduleIndex, module] of owned.entries()) {
-        const position = moduleIndex + 1;
-        await CurriculumGateway.updateModule(
-          module.id,
+      const owned = sectionsByModule.get(module.id) ?? [];
+      for (const [sectionIndex, section] of owned.entries()) {
+        const position = sectionIndex + 1;
+        await CurriculumGateway.updateSection(
+          section.id,
           {
             position,
-            number: toNumber(sectionNumber, position),
-            sortKey: toSortKey(sectionNumber, position),
+            number: toNumber(moduleNumber, position),
+            sortKey: toSortKey(moduleNumber, position),
           },
           db,
         );
@@ -619,7 +694,7 @@ export default class CurriculumService {
   }
 
   /**
-   * Writes the intended section order somewhere no live or recycled number can
+   * Writes the intended module order somewhere no live or recycled number can
    * reach, keeping that order under an ascending sort. renumberCourse reads it
    * back and turns it into 1..n.
    *
@@ -628,196 +703,214 @@ export default class CurriculumService {
    * rows in place — some intermediate state always collides. Saying "this is the
    * order" in a range nothing else occupies sidesteps the problem entirely.
    */
-  static async parkSectionOrder(
+  static async parkModuleOrder(
     courseId: string,
     ordered: Array<{ id: string }>,
     db: Prisma.TransactionClient,
   ) {
-    const floor = await CurriculumGateway.getLowestSectionNumber(courseId, db);
+    const floor = await CurriculumGateway.getLowestModuleNumber(courseId, db);
     // Ascending within the band, so a sort by number reproduces `ordered`.
     const base = floor - ordered.length;
 
-    for (const [index, section] of ordered.entries()) {
-      await CurriculumGateway.updateSection(section.id, { number: base + index }, db);
+    for (const [index, module] of ordered.entries()) {
+      await CurriculumGateway.updateModule(module.id, { number: base + index }, db);
     }
   }
 
-  static getSections(courseId: string) {
-    return CurriculumGateway.getSections(courseId);
+  static getModules(courseId: string) {
+    return CurriculumGateway.getModules(courseId);
   }
 
   /**
-   * A section is just a title and a place in the course. The place is where the
-   * author says it goes: asking for 2 in a three-section course pushes the old
-   * section 2 and everything after it down one.
+   * A module is just a title and a place in the course. The place is where the
+   * author says it goes: asking for 2 in a three-module course pushes the old
+   * module 2 and everything after it down one.
    */
-  static async createSection(
+  static async createModule(
     courseId: string,
     data: { title?: string; number?: number | string; color?: string | null },
   ) {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
-    const sectionTitle = requiredText(data.title, 'title', 'section title');
+    const moduleTitle = requiredText(data.title, 'title', 'module title');
 
-    const color = parseSectionColor(data.color);
-    const existing = await CurriculumGateway.getSections(courseId);
-    const place = validatePlace(data.number, existing.length + 1, 'section number');
+    const color = parseModuleColor(data.color);
+    const existing = await CurriculumGateway.getModules(courseId);
+    const place = validatePlace(data.number, existing.length + 1, 'module number');
 
-    const section = await CurriculumGateway.runTransaction(async (db) => {
+    const module = await CurriculumGateway.runTransaction(async (db) => {
       // Born out of the way; the ordering pass below is what decides its place.
-      const floor = await CurriculumGateway.getLowestSectionNumber(courseId, db);
-      const created = await CurriculumGateway.createSection(
-        { courseId, number: floor - 1, title: sectionTitle, color },
+      const floor = await CurriculumGateway.getLowestModuleNumber(courseId, db);
+      const created = await CurriculumGateway.createModule(
+        { courseId, number: floor - 1, title: moduleTitle, color },
         db,
       );
 
       const ordered = [...existing];
       ordered.splice(place - 1, 0, created);
 
-      await CurriculumService.parkSectionOrder(courseId, ordered, db);
+      await CurriculumService.parkModuleOrder(courseId, ordered, db);
       await CurriculumService.renumberCourse(courseId, db);
       return created;
     });
 
-    return CurriculumGateway.getSectionById(section.id);
+    return CurriculumGateway.getModuleById(module.id);
   }
 
-  static async updateSection(
+  static async updateModule(
     id: string,
     data: { title?: string; number?: number | string; color?: string | null },
   ) {
-    const section = await CurriculumGateway.getSectionById(id);
-    if (!section) throw new NotFoundError(`Section with ID ${id} not found`);
+    const module = await CurriculumGateway.getModuleById(id);
+    if (!module) throw new NotFoundError(`Module with ID ${id} not found`);
 
-    const nextSectionTitle =
-      data.title !== undefined ? requiredText(data.title, 'title', 'section title') : undefined;
+    const nextModuleTitle =
+      data.title !== undefined ? requiredText(data.title, 'title', 'module title') : undefined;
 
     // Validated before the transaction opens: a bad colour should fail the whole
     // request rather than roll back a renumber half way through.
-    const color = data.color !== undefined ? parseSectionColor(data.color) : undefined;
-    const existing = await CurriculumGateway.getSections(section.courseId);
+    const color = data.color !== undefined ? parseModuleColor(data.color) : undefined;
+    const existing = await CurriculumGateway.getModules(module.courseId);
 
     await CurriculumGateway.runTransaction(async (db) => {
-      if (nextSectionTitle !== undefined) {
-        await CurriculumGateway.updateSection(id, { title: nextSectionTitle }, db);
+      if (nextModuleTitle !== undefined) {
+        await CurriculumGateway.updateModule(id, { title: nextModuleTitle }, db);
       }
 
       if (color !== undefined) {
-        await CurriculumGateway.updateSection(id, { color }, db);
+        await CurriculumGateway.updateModule(id, { color }, db);
       }
 
       if (data.number !== undefined) {
-        const place = validatePlace(data.number, existing.length, 'section number');
+        const place = validatePlace(data.number, existing.length, 'module number');
         const reordered = existing.filter((current) => current.id !== id);
-        reordered.splice(place - 1, 0, section);
+        reordered.splice(place - 1, 0, module);
 
-        await CurriculumService.parkSectionOrder(section.courseId, reordered, db);
+        await CurriculumService.parkModuleOrder(module.courseId, reordered, db);
       }
 
-      await CurriculumService.renumberCourse(section.courseId, db);
+      await CurriculumService.renumberCourse(module.courseId, db);
     });
 
-    return CurriculumGateway.getSectionById(id);
+    return CurriculumGateway.getModuleById(id);
   }
 
   /**
-   * Soft delete — recoverable from the admin dashboard. The section's modules go
-   * with it, because a module with no section has no number.
+   * Soft delete — recoverable from the admin dashboard. The module's sections go
+   * with it, because a section with no module has no number.
    */
-  static async deleteSection(id: string) {
-    const section = await CurriculumGateway.getSectionById(id);
-    if (!section) throw new NotFoundError(`Section with ID ${id} not found`);
+  static async deleteModule(id: string) {
+    const module = await CurriculumGateway.getModuleById(id);
+    if (!module) throw new NotFoundError(`Module with ID ${id} not found`);
 
-    const modules = await CurriculumGateway.getModulesForRenumber(section.courseId);
+    const sections = await CurriculumGateway.getSectionsForRenumber(module.courseId);
 
     return CurriculumGateway.runTransaction(async (db) => {
-      for (const module of modules.filter((current) => current.sectionId === id)) {
-        await CurriculumGateway.softDeleteModule(module.id, db);
+      for (const section of sections.filter((current) => current.moduleId === id)) {
+        await CurriculumGateway.softDeleteSection(section.id, db);
       }
-      const deleted = await CurriculumGateway.softDeleteSection(id, section.courseId, db);
-      await CurriculumService.renumberCourse(section.courseId, db);
+      const deleted = await CurriculumGateway.softDeleteModule(id, module.courseId, db);
+      await CurriculumService.renumberCourse(module.courseId, db);
       return deleted;
     });
   }
 
   /**
-   * Restoring puts the section back on the end of the course. Its old place has
+   * Restoring puts the module back on the end of the course. Its old place has
    * long since been taken by whatever closed the gap, so there is nowhere to put
    * it back to — the end is the one position that is always free and never
    * displaces anyone.
    */
-  static async restoreSection(id: string) {
-    const section = await CurriculumGateway.findDeletedSection(id);
-    if (!section) throw new NotFoundError(`Section with ID ${id} is not in the recycle bin`);
+  static async restoreModule(id: string) {
+    const module = await CurriculumGateway.findDeletedModule(id);
+    if (!module) throw new NotFoundError(`Module with ID ${id} is not in the recycle bin`);
 
     const restored = await CurriculumGateway.runTransaction(async (db) => {
-      const brought = await CurriculumGateway.restoreSection(id, section.courseId, db);
-      await CurriculumService.renumberCourse(section.courseId, db);
+      const brought = await CurriculumGateway.restoreModule(id, module.courseId, db);
+      await CurriculumService.renumberCourse(module.courseId, db);
       return brought;
     });
 
-    await CurriculumGateway.touchDraft(section.courseId);
+    await CurriculumGateway.touchDraft(module.courseId);
     return restored;
   }
 
-  // ---- Modules ----
+  // ---- Sections ----
 
   /**
-   * Adds a module to a section. `position` is where in that section it goes,
+   * Adds a section to a module. `position` is where in that module it goes,
    * defaulting to the end; the grid renumbers around it either way.
    */
-  static async createModule(
+  static async createSection(
     courseId: string,
     data: {
-      sectionId?: string;
+      moduleId?: string;
       position?: number | string;
       title?: string;
       estimatedMinutes?: number | string;
+      color?: string | null;
     },
   ) {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
 
-    const moduleTitle = requiredText(data.title, 'title', 'module title');
-
-    const sections = await CurriculumGateway.getSections(courseId);
-    if (sections.length === 0) {
-      throw new Error('add a section before adding modules — a module lives inside one');
+    // A quiz set holding a one-time link is closed to anything else. The link is
+    // issued for the whole course, so a second quiz beside it would be handed
+    // over with it and would still be reachable by anyone keeping the URL after
+    // the one-time quiz closed. QuizService guards the same rule from the other
+    // side — see `assertOneTimeIsAlone` — so neither order of operations gets
+    // around it.
+    if (await QuizGateway.findOneTimeQuiz(courseId)) {
+      throw new Error(
+        'this set is a one-time link, which has to be the only quiz in it — make a new set for ' +
+          'anything else',
+      );
     }
 
-    // No section named means the last one, which is where an author adding
-    // modules in order expects them to land.
-    const section = data.sectionId
-      ? sections.find((current) => current.id === data.sectionId)
-      : sections[sections.length - 1];
-    if (!section)
-      throw new NotFoundError(`Section with ID ${data.sectionId} not found in this course`);
+    const sectionTitle = requiredText(data.title, 'title', 'section title');
+    // Validated before the transaction opens: a bad colour should fail the whole
+    // request rather than roll back a renumber half way through.
+    const color = data.color !== undefined ? parseModuleColor(data.color) : null;
 
-    const siblings = (await CurriculumGateway.getModulesForRenumber(courseId)).filter(
-      (module) => module.sectionId === section.id,
+    const modules = await CurriculumGateway.getModules(courseId);
+    if (modules.length === 0) {
+      throw new Error('add a module before adding sections — a section lives inside one');
+    }
+
+    // No module named means the last one, which is where an author adding
+    // sections in order expects them to land.
+    const module = data.moduleId
+      ? modules.find((current) => current.id === data.moduleId)
+      : modules[modules.length - 1];
+    if (!module)
+      throw new NotFoundError(`Module with ID ${data.moduleId} not found in this course`);
+
+    const siblings = (await CurriculumGateway.getSectionsForRenumber(courseId)).filter(
+      (section) => section.moduleId === module.id,
     );
-    const place = validatePlace(data.position, siblings.length + 1, 'module position');
+    const place = validatePlace(data.position, siblings.length + 1, 'section position');
     const estimatedMinutes = validateMinutes(data.estimatedMinutes);
 
-    const module = await CurriculumGateway.runTransaction(async (db) => {
-      // Open the slot before filling it. The other way round leaves two modules
+    const section = await CurriculumGateway.runTransaction(async (db) => {
+      // Open the slot before filling it. The other way round leaves two sections
       // briefly sharing a position, and position is what decides the order — the
       // renumber pass would have nothing to break the tie with.
       for (const sibling of siblings.filter((current) => current.position >= place)) {
-        await CurriculumGateway.updateModule(sibling.id, { position: sibling.position + 1 }, db);
+        await CurriculumGateway.updateSection(sibling.id, { position: sibling.position + 1 }, db);
       }
 
-      const created = await CurriculumGateway.createModule(
+      const created = await CurriculumGateway.createSection(
         {
           courseId,
-          sectionId: section.id,
+          moduleId: module.id,
           position: place,
           // Parked: renumberCourse writes the real number a moment later, and
           // this cannot collide with one in use.
-          number: `inserting-${section.id}`,
-          sortKey: `inserting-${section.id}`,
-          title: moduleTitle,
+          number: `inserting-${module.id}`,
+          sortKey: `inserting-${module.id}`,
+          title: sectionTitle,
           estimatedMinutes,
+          color,
         },
         db,
       );
@@ -826,91 +919,94 @@ export default class CurriculumService {
       return created;
     });
 
-    // Deliberately silent. A module that has not been published cannot be
+    // Deliberately silent. A section that has not been published cannot be
     // reached, so telling learners about it now would send them looking for
     // something that is not there. The publish endpoint announces instead.
-    return CurriculumGateway.getModuleById(module.id);
+    return CurriculumGateway.getSectionById(section.id);
   }
 
   /**
-   * Title and time only. A module's number is its place in the grid, so it moves
+   * Title and time only. A section's number is its place in the grid, so it moves
    * by being dragged, not by being typed.
    */
-  static async updateModule(
+  static async updateSection(
     id: string,
-    data: { title?: string; estimatedMinutes?: number | string },
+    data: { title?: string; estimatedMinutes?: number | string; color?: string | null },
   ) {
-    const existing = await CurriculumGateway.getModuleById(id);
-    if (!existing) throw new NotFoundError(`Module with ID ${id} not found`);
+    const existing = await CurriculumGateway.getSectionById(id);
+    if (!existing) throw new NotFoundError(`Section with ID ${id} not found`);
 
     const nextTitle =
-      data.title !== undefined ? requiredText(data.title, 'title', 'module title') : undefined;
+      data.title !== undefined ? requiredText(data.title, 'title', 'section title') : undefined;
 
-    return CurriculumGateway.updateModule(id, {
+    return CurriculumGateway.updateSection(id, {
       ...(nextTitle !== undefined ? { title: nextTitle } : {}),
       ...(data.estimatedMinutes !== undefined
         ? { estimatedMinutes: validateMinutes(data.estimatedMinutes) }
         : {}),
+      // Same closed palette a module uses; anything outside it is refused rather
+      // than stored, because the tint is rendered as a raw inline style.
+      ...(data.color !== undefined ? { color: parseModuleColor(data.color) } : {}),
     });
   }
 
   /**
    * Applies a whole new grid in one transaction — what the drag-to-reorder UI
-   * sends. `sections` is the two-dimensional array itself: outer entries are the
-   * sections in their new order, each carrying its module ids in theirs. Numbers
+   * sends. `modules` is the two-dimensional array itself: outer entries are the
+   * modules in their new order, each carrying its section ids in theirs. Numbers
    * are never sent, because they are entirely implied by the positions.
    */
   static async reorderStructure(
     courseId: string,
-    sections: Array<{ id: string; moduleIds: string[] }>,
+    modules: Array<{ id: string; sectionIds: string[] }>,
   ) {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
-    if (!Array.isArray(sections)) throw new Error('sections must be a list');
-
-    const knownSections = new Set(course.sections.map((section) => section.id));
-    if (sections.some((entry) => !knownSections.has(entry.id))) {
-      throw new Error('reorder included a section that is not in this course');
-    }
-    if (new Set(sections.map((entry) => entry.id)).size !== sections.length) {
-      throw new Error('reorder listed the same section twice');
-    }
-    if (sections.length !== knownSections.size) {
-      throw new Error('reorder must list every section in the course');
-    }
+    if (!Array.isArray(modules)) throw new Error('modules must be a list');
 
     const knownModules = new Set(course.modules.map((module) => module.id));
-    const orderedModuleIds = sections.flatMap((entry) => entry.moduleIds);
-    if (orderedModuleIds.some((moduleId) => !knownModules.has(moduleId))) {
+    if (modules.some((entry) => !knownModules.has(entry.id))) {
       throw new Error('reorder included a module that is not in this course');
     }
-    if (new Set(orderedModuleIds).size !== orderedModuleIds.length) {
+    if (new Set(modules.map((entry) => entry.id)).size !== modules.length) {
       throw new Error('reorder listed the same module twice');
     }
-    if (orderedModuleIds.length !== knownModules.size) {
+    if (modules.length !== knownModules.size) {
       throw new Error('reorder must list every module in the course');
     }
 
-    await CurriculumGateway.runTransaction(async (db) => {
-      // State the arrangement — section order, then each module's section and
-      // place within it — and let renumberCourse turn it into numbers. Module
-      // numbers are parked first because the requested arrangement will reuse
-      // values that other modules still hold.
-      await CurriculumService.parkSectionOrder(courseId, sections, db);
+    const knownSections = new Set(course.sections.map((section) => section.id));
+    const orderedSectionIds = modules.flatMap((entry) => entry.sectionIds);
+    if (orderedSectionIds.some((sectionId) => !knownSections.has(sectionId))) {
+      throw new Error('reorder included a section that is not in this course');
+    }
+    if (new Set(orderedSectionIds).size !== orderedSectionIds.length) {
+      throw new Error('reorder listed the same section twice');
+    }
+    if (orderedSectionIds.length !== knownSections.size) {
+      throw new Error('reorder must list every section in the course');
+    }
 
-      for (const [index, moduleId] of orderedModuleIds.entries()) {
-        await CurriculumGateway.updateModule(
-          moduleId,
-          { number: `reordering-${index}-${moduleId}`, sortKey: `reordering-${index}` },
+    await CurriculumGateway.runTransaction(async (db) => {
+      // State the arrangement — module order, then each section's module and
+      // place within it — and let renumberCourse turn it into numbers. Section
+      // numbers are parked first because the requested arrangement will reuse
+      // values that other sections still hold.
+      await CurriculumService.parkModuleOrder(courseId, modules, db);
+
+      for (const [index, sectionId] of orderedSectionIds.entries()) {
+        await CurriculumGateway.updateSection(
+          sectionId,
+          { number: `reordering-${index}-${sectionId}`, sortKey: `reordering-${index}` },
           db,
         );
       }
 
-      for (const entry of sections) {
-        for (const [position, moduleId] of entry.moduleIds.entries()) {
-          await CurriculumGateway.updateModule(
-            moduleId,
-            { sectionId: entry.id, position: position + 1 },
+      for (const entry of modules) {
+        for (const [position, sectionId] of entry.sectionIds.entries()) {
+          await CurriculumGateway.updateSection(
+            sectionId,
+            { moduleId: entry.id, position: position + 1 },
             db,
           );
         }
@@ -925,56 +1021,56 @@ export default class CurriculumService {
   }
 
   /** Soft delete — recoverable from the admin dashboard. */
-  static async deleteModule(id: string) {
-    const module = await CurriculumGateway.getModuleById(id);
-    if (!module) throw new NotFoundError(`Module with ID ${id} not found`);
+  static async deleteSection(id: string) {
+    const section = await CurriculumGateway.getSectionById(id);
+    if (!section) throw new NotFoundError(`Section with ID ${id} not found`);
 
     return CurriculumGateway.runTransaction(async (db) => {
-      const deleted = await CurriculumGateway.softDeleteModule(id, db);
-      await CurriculumService.renumberCourse(module.courseId, db);
+      const deleted = await CurriculumGateway.softDeleteSection(id, db);
+      await CurriculumService.renumberCourse(section.courseId, db);
       return deleted;
     });
   }
 
-  /** Restoring puts the module back on the end of its section, then renumbers. */
-  static async restoreModule(id: string) {
-    const module = await CurriculumGateway.findDeletedModule(id);
-    if (!module) throw new NotFoundError(`Module with ID ${id} is not in the recycle bin`);
+  /** Restoring puts the section back on the end of its module, then renumbers. */
+  static async restoreSection(id: string) {
+    const section = await CurriculumGateway.findDeletedSection(id);
+    if (!section) throw new NotFoundError(`Section with ID ${id} is not in the recycle bin`);
 
-    // A module only has a number because it sits in a section. Restoring it into
+    // A section only has a number because it sits in a module. Restoring it into
     // one that is itself in the bin would leave it live but unnumbered and
-    // unreachable, so the section has to come back first.
-    const section = module.sectionId
-      ? await CurriculumGateway.getSectionById(module.sectionId)
+    // unreachable, so the module has to come back first.
+    const module = section.moduleId
+      ? await CurriculumGateway.getModuleById(section.moduleId)
       : null;
-    if (!section) {
-      throw new Error("restore this module's section first — a module lives inside one");
+    if (!module) {
+      throw new Error("restore this section's module first — a section lives inside one");
     }
 
     const restored = await CurriculumGateway.runTransaction(async (db) => {
-      const brought = await CurriculumGateway.restoreModule(id, section.id, db);
-      await CurriculumService.renumberCourse(module.courseId, db);
+      const brought = await CurriculumGateway.restoreSection(id, module.id, db);
+      await CurriculumService.renumberCourse(section.courseId, db);
       return brought;
     });
 
-    await CurriculumGateway.touchDraft(module.courseId);
+    await CurriculumGateway.touchDraft(section.courseId);
     return restored;
   }
 
   /**
-   * Stores an uploaded file on a module. Images become IMAGE elements (HEIC is
+   * Stores an uploaded file on a section. Images become IMAGE elements (HEIC is
    * transcoded to JPEG first), PDFs become PDF elements shown in a viewer.
    */
-  static async addUploadedElement(moduleId: string, file: Express.Multer.File) {
-    const module = await CurriculumGateway.getModuleById(moduleId);
-    if (!module) throw new NotFoundError(`Module with ID ${moduleId} not found`);
+  static async addUploadedElement(sectionId: string, file: Express.Multer.File) {
+    const section = await CurriculumGateway.getSectionById(sectionId);
+    if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
 
     const normalized = await normalizeUpload(file);
 
     return CurriculumGateway.runTransaction(async (db) => {
-      const last = await CurriculumGateway.getLastElementOrder(moduleId, db);
+      const last = await CurriculumGateway.getLastElementOrder(sectionId, db);
       return CurriculumGateway.createElement(
-        moduleId,
+        sectionId,
         {
           type: normalized.isPdf ? 'PDF' : 'IMAGE',
           imageData: normalized.buffer.toString('base64'),
@@ -988,7 +1084,7 @@ export default class CurriculumService {
   }
 
   static async createElement(
-    moduleId: string,
+    sectionId: string,
     data: {
       type: string;
       videoUrl?: string;
@@ -997,8 +1093,8 @@ export default class CurriculumService {
       durationMinutes?: number | string;
     },
   ) {
-    const module = await CurriculumGateway.getModuleById(moduleId);
-    if (!module) throw new NotFoundError(`Module with ID ${moduleId} not found`);
+    const section = await CurriculumGateway.getSectionById(sectionId);
+    if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
 
     if (!ELEMENT_TYPES.includes(data.type)) {
       throw new Error(`type must be one of ${ELEMENT_TYPES.join(', ')}`);
@@ -1023,9 +1119,9 @@ export default class CurriculumService {
 
     return CurriculumGateway.runTransaction(async (db) => {
       // Elements and quizzes share one sequence, so start after whichever is last.
-      const last = await CurriculumGateway.getLastContentOrder(moduleId, db);
+      const last = await CurriculumGateway.getLastContentOrder(sectionId, db);
       return CurriculumGateway.createElement(
-        moduleId,
+        sectionId,
         {
           ...rest,
           type,
@@ -1039,22 +1135,22 @@ export default class CurriculumService {
   }
 
   /**
-   * Applies a new order across a module's content, where elements and quizzes are
+   * Applies a new order across a section's content, where elements and quizzes are
    * interleaved in one list. `items` is the new order, front to back.
    */
-  static async reorderModuleContent(
-    moduleId: string,
+  static async reorderSectionContent(
+    sectionId: string,
     items: Array<{ kind: 'element' | 'quiz'; id: string }>,
   ) {
-    const module = await CurriculumGateway.getModuleById(moduleId);
-    if (!module) throw new NotFoundError(`Module with ID ${moduleId} not found`);
+    const section = await CurriculumGateway.getSectionById(sectionId);
+    if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
 
     if (!Array.isArray(items)) throw new Error('items must be a list');
 
-    const { elementIds, quizIds } = await CurriculumGateway.getModuleContentIds(moduleId);
+    const { elementIds, quizIds } = await CurriculumGateway.getSectionContentIds(sectionId);
     for (const item of items) {
       const known = item.kind === 'element' ? elementIds.has(item.id) : quizIds.has(item.id);
-      if (!known) throw new Error('reorder included an item that is not in this module');
+      if (!known) throw new Error('reorder included an item that is not in this section');
     }
 
     await CurriculumGateway.runTransaction(async (db) => {
@@ -1068,7 +1164,7 @@ export default class CurriculumService {
     });
 
     // Read after the transaction commits so the caller sees the new order.
-    return CurriculumGateway.getModuleById(moduleId);
+    return CurriculumGateway.getSectionById(sectionId);
   }
 
   static updateElement(
@@ -1112,41 +1208,47 @@ export default class CurriculumService {
     return CurriculumGateway.deleteElement(id);
   }
 
-  static async recordModuleView(userId: number, moduleId: string) {
-    const module = await CurriculumGateway.getModuleById(moduleId);
-    if (!module) throw new NotFoundError(`Module with ID ${moduleId} not found`);
-    return CurriculumGateway.recordModuleView(userId, moduleId);
+  static async recordSectionView(userId: number, sectionId: string) {
+    const section = await CurriculumGateway.getSectionById(sectionId);
+    if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
+    return CurriculumGateway.recordSectionView(userId, sectionId);
   }
 
   /**
-   * Records that one piece of content was opened, and credits its module at the
-   * same time. Opening anything inside a module has always counted as opening
-   * the module, and doing both here means a sequential course cannot end up with
-   * an element ticked inside a module that still looks untouched.
+   * Records that one piece of content was opened, and credits its section at the
+   * same time. Opening anything inside a section has always counted as opening
+   * the section, and doing both here means a sequential course cannot end up with
+   * an element ticked inside a section that still looks untouched.
    */
   static async recordElementView(userId: number, elementId: string) {
     const element = await CurriculumGateway.getElementById(elementId);
     if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
 
-    await CurriculumGateway.recordModuleView(userId, element.moduleId);
+    await CurriculumGateway.recordSectionView(userId, element.sectionId);
     return CurriculumGateway.recordElementView(userId, elementId);
   }
 
-  static getViewedModuleIds(userId: number) {
-    return CurriculumGateway.getViewedModuleIds(userId);
+  static getViewedSectionIds(userId: number) {
+    return CurriculumGateway.getViewedSectionIds(userId);
   }
 
-  /** Viewed modules and elements, and attempted quizzes — what "done" is measured against. */
+  /** Viewed sections and elements, and attempted quizzes — what "done" is measured against. */
   static async getLearnerProgress(userId: number) {
     const [views, elementViews, attempts] = await Promise.all([
-      CurriculumGateway.getViewedModuleIds(userId),
+      CurriculumGateway.getViewedSectionIds(userId),
       CurriculumGateway.getViewedElementIds(userId),
       QuizGateway.getAttemptsForUser(userId),
     ]);
 
     return {
-      viewedModuleIds: views.map((view) => view.moduleId),
+      viewedSectionIds: views.map((view) => view.sectionId),
       viewedElementIds: elementViews.map((view) => view.elementId),
+      // Newest first, so a page that needs "the last thing they opened" can take
+      // the head of this rather than re-deriving it from the course order.
+      elementViews: elementViews.map((view) => ({
+        elementId: view.elementId,
+        viewedAt: view.viewedAt.toISOString(),
+      })),
       attemptedQuizIds: [...new Set(attempts.map((attempt) => attempt.quizId))],
     };
   }

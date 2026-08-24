@@ -13,21 +13,21 @@ import EmailService, { NewContentItem } from '@/services/email-service/email-ser
  * Telling people a course they had already finished has grown.
  *
  * Only people who finished get a message: someone still working through a course
- * will meet the new modules on their way past, so mailing them is noise. Having
+ * will meet the new sections on their way past, so mailing them is noise. Having
  * finished is exactly the state where new content would otherwise go unnoticed.
  *
  * Everything here is fire-and-forget. It is triggered by an author adding a
- * module or a quiz, and that edit has already been saved by the time this runs —
+ * section or a quiz, and that edit has already been saved by the time this runs —
  * a mail outage must never turn into a failed save.
  */
 
 /**
  * How long to wait after telling someone before telling them again.
  *
- * An author building out a section adds five modules in five minutes; without a
+ * An author building out a module adds five sections in five minutes; without a
  * quiet period that is five emails about the same course. One message per course
  * per learner per day, and it names everything added since they finished rather
- * than only the module that triggered it, so nothing is lost by waiting.
+ * than only the section that triggered it, so nothing is lost by waiting.
  */
 const QUIET_PERIOD_MS = 24 * 60 * 60 * 1000;
 
@@ -76,34 +76,34 @@ export default class NotificationService {
     }
   }
 
-  /** Modules and published quizzes added to a course since a moment, in reading order. */
+  /** Sections and published quizzes added to a course since a moment, in reading order. */
   static async newItemsSince(courseId: string, since: Date): Promise<NewContentItem[]> {
-    const [modules, quizzes] = await Promise.all([
-      CurriculumGateway.getModulesAddedSince(courseId, since),
+    const [sections, quizzes] = await Promise.all([
+      CurriculumGateway.getSectionsAddedSince(courseId, since),
       CurriculumGateway.getQuizzesAddedSince(courseId, since),
     ]);
 
-    const sectionLabel = (section: { number: number; title: string } | null) =>
-      section ? `${section.number}. ${section.title}` : 'Ungrouped';
+    const moduleLabel = (module: { number: number; title: string } | null) =>
+      module ? `${module.number}. ${module.title}` : 'Ungrouped';
 
-    const newModuleIds = new Set(modules.map((module) => module.id));
+    const newSectionIds = new Set(sections.map((section) => section.id));
 
     return [
-      ...modules.map((module): NewContentItem => ({
-        kind: 'module',
-        number: module.number,
-        title: module.title,
-        section: sectionLabel(module.section),
+      ...sections.map((section): NewContentItem => ({
+        kind: 'section',
+        number: section.number,
+        title: section.title,
+        module: moduleLabel(section.module),
       })),
-      // A quiz inside a module that is itself new would be listed twice over —
-      // the module line already covers it.
+      // A quiz inside a section that is itself new would be listed twice over —
+      // the section line already covers it.
       ...quizzes
-        .filter((quiz) => quiz.module && !newModuleIds.has(quiz.module.id))
+        .filter((quiz) => quiz.section && !newSectionIds.has(quiz.section.id))
         .map((quiz): NewContentItem => ({
           kind: 'quiz',
-          number: quiz.module!.number,
+          number: quiz.section!.number,
           title: quiz.title,
-          section: sectionLabel(quiz.module!.section),
+          module: moduleLabel(quiz.section!.module),
         })),
     ];
   }

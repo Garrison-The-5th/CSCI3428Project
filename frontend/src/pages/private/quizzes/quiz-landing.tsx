@@ -31,7 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Course, imageSrc, NewIds, Note, sectionGroups } from '@/services/curriculum-api';
+import { Course, imageSrc, moduleGroups, NewIds, Note } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { Quiz } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
@@ -39,11 +39,11 @@ import { logger } from '@/utils/logger';
 /** A quiz plus where it sits in the course, for the list. */
 interface QuizEntry {
   quiz: Quiz;
-  sectionId: string;
-  sectionTitle: string;
   moduleId: string;
-  moduleNumber: string;
   moduleTitle: string;
+  sectionId: string;
+  sectionNumber: string;
+  sectionTitle: string;
 }
 
 function formatMinutes(minutes: number): string {
@@ -100,19 +100,24 @@ const QuizLanding = () => {
     loadNotes();
   }, [load, loadNotes]);
 
-  /** Every quiz in the course, in section-then-module order. */
+  /** Every quiz in the course, in module-then-section order. */
   const entries = useMemo<QuizEntry[]>(() => {
     if (!course) return [];
-    return sectionGroups(course).flatMap((group) =>
-      group.modules.flatMap((module) =>
-        module.quizzes.map((quiz) => ({
-          quiz,
-          sectionId: group.section.id,
-          sectionTitle: group.section.title,
-          moduleId: module.id,
-          moduleNumber: module.number,
-          moduleTitle: module.title,
-        })),
+    return moduleGroups(course).flatMap((group) =>
+      group.sections.flatMap((section) =>
+        // Learning checks are taken inside the lesson they belong to and are
+        // never listed here, so the count on this page matches what a learner
+        // can actually open from it.
+        section.quizzes
+          .filter((quiz) => quiz.type !== 'LEARNING_CHECK')
+          .map((quiz) => ({
+            quiz,
+            moduleId: group.module.id,
+            moduleTitle: group.module.title,
+            sectionId: section.id,
+            sectionNumber: section.number,
+            sectionTitle: section.title,
+          })),
       ),
     );
   }, [course]);
@@ -177,7 +182,7 @@ const QuizLanding = () => {
   const next = entries.find((entry) => !attempted.has(entry.quiz.id)) ?? null;
   const allDone = entries.length > 0 && next === null;
   const startLabel = allDone
-    ? 'All quizzes done'
+    ? 'Completed'
     : !next
       ? 'No quizzes yet'
       : next.quiz.timeLimitMinutes !== null
@@ -261,7 +266,7 @@ const QuizLanding = () => {
                         {entry.quiz.title}
                       </span>
                       <span className="block text-sm text-dark-gray">
-                        {entry.moduleNumber} {entry.moduleTitle} · {entry.sectionTitle}
+                        {entry.sectionNumber} {entry.sectionTitle} · {entry.moduleTitle}
                       </span>
                     </span>
                     <span className="shrink-0 text-sm text-dark-gray">
@@ -271,7 +276,7 @@ const QuizLanding = () => {
                         <> · {entry.quiz.timeLimitMinutes} min</>
                       )}
                     </span>
-                    {isNew.item(entry.quiz.id, entry.moduleId, entry.sectionId) && <NewBadge />}
+                    {isNew.item(entry.quiz.id, entry.sectionId, entry.moduleId) && <NewBadge />}
                     {next?.quiz.id === entry.quiz.id && (
                       <span
                         className="shrink-0 rounded-full bg-navy px-2 py-0.5 text-xs font-semibold

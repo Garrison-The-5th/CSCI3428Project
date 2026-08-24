@@ -1,31 +1,31 @@
 /**
- * File: section-color-picker.tsx
- * Description: The swatch beside a section's delete button.
+ * File: module-color-picker.tsx
+ * Description: The swatch beside a module's delete button.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * The swatch beside a section's delete button.
+ * The swatch beside a module's delete button.
  *
- * Shows the section's current tint as a circle; clicking opens the palette. The
+ * Shows the module's current tint as a circle; clicking opens the palette. The
  * palette is a closed set rather than a colour wheel because the tint sits
- * behind module titles — anything saturated would fight the text it exists to
+ * behind section titles — anything saturated would fight the text it exists to
  * group — and because a fixed set can be restyled later without unpicking
  * whatever hex codes ended up in the database.
  */
 import { useEffect, useRef, useState } from 'react';
 
-import { SECTION_COLORS } from '@/services/curriculum-api';
+import { MODULE_COLORS } from '@/services/curriculum-api';
 
-interface SectionColorPickerProps {
+interface ModuleColorPickerProps {
   color?: string | null;
   onSelect: (color: string | null) => void;
-  /** Section title, so the control says which section it belongs to. */
+  /** Module title, so the control says which module it belongs to. */
   label: string;
 }
 
-const SectionColorPicker = ({ color, onSelect, label }: SectionColorPickerProps) => {
+const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -61,14 +61,14 @@ const SectionColorPicker = ({ color, onSelect, label }: SectionColorPickerProps)
       <button
         type="button"
         onClick={(event) => {
-          // The heading around this is draggable and toggles the section;
+          // The heading around this is draggable and toggles the module;
           // neither should happen because a colour was picked.
           event.stopPropagation();
           setOpen((prev) => !prev);
         }}
         aria-expanded={open}
-        aria-label={`Section colour for ${label}`}
-        title="Section colour"
+        aria-label={`Module colour for ${label}`}
+        title="Module colour"
         className="flex h-7 w-7 items-center justify-center rounded-full transition-colors
           hover:bg-white/70"
       >
@@ -103,7 +103,7 @@ const SectionColorPicker = ({ color, onSelect, label }: SectionColorPickerProps)
           onDragStart={(event) => event.preventDefault()}
         >
           <div className="grid grid-cols-4 gap-2">
-            {SECTION_COLORS.map((swatch) => (
+            {MODULE_COLORS.map((swatch) => (
               <button
                 key={swatch}
                 type="button"
@@ -131,4 +131,4 @@ const SectionColorPicker = ({ color, onSelect, label }: SectionColorPickerProps)
   );
 };
 
-export default SectionColorPicker;
+export default ModuleColorPicker;

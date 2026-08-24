@@ -170,7 +170,7 @@ two variables plus `E2E_BASE_URL` in CI.
 
 **Status:** architectural, unchanged, and the largest remaining structural issue.
 
-Cover photos, module images and PDFs are stored base64 in the database and
+Cover photos, section images and PDFs are stored base64 in the database and
 travel inline in the course JSON. Published snapshots carry a second copy. This
 is not a standards violation as such, but it drives the payload sizes, the 2 MB
 body limit and the upload quotas above, and it will get harder to migrate the

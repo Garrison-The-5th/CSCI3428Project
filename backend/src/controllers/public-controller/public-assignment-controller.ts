@@ -40,6 +40,9 @@ function sendFailure(res: Response, error: unknown) {
       idle:
         'This link has not been used for a long time and has been closed. ' +
         'Ask whoever sent it to send it again.',
+      completed:
+        'You have completed this quiz and seen your result, so this link is no longer enabled. ' +
+        'Ask whoever sent it if you need to see it again.',
     };
     // 404 for every case so a probe cannot tell a real token from a fake one.
     return res.status(404).send({ errorMessage: messages[error.reason], reason: error.reason });
@@ -114,11 +117,11 @@ export default class PublicAssignmentController {
     }
   }
 
-  @post('/:token/modules/:moduleId/view')
+  @post('/:token/sections/:sectionId/view')
   @use(writeLimit)
   async recordView(req: Request, res: Response) {
     try {
-      await AssignmentService.recordView(param(req, 'token'), param(req, 'moduleId'));
+      await AssignmentService.recordView(param(req, 'token'), param(req, 'sectionId'));
       return res.send({ message: 'Progress recorded' });
     } catch (error) {
       return sendFailure(res, error);
@@ -132,6 +135,22 @@ export default class PublicAssignmentController {
     try {
       await AssignmentService.recordElementView(param(req, 'token'), param(req, 'elementId'));
       return res.send({ message: 'Progress recorded' });
+    } catch (error) {
+      return sendFailure(res, error);
+    }
+  }
+
+  /**
+   * Reports the run already open on an assigned quiz, and starts nothing — what
+   * lets the player show its details behind a Start button, and skip that screen
+   * for a link holder coming back to a clock already ticking.
+   */
+  @get('/:token/quizzes/:quizId/session')
+  @use(readLimit)
+  async peekQuiz(req: Request, res: Response) {
+    try {
+      const session = await AssignmentService.peekQuiz(param(req, 'token'), param(req, 'quizId'));
+      return res.send(session);
     } catch (error) {
       return sendFailure(res, error);
     }
@@ -153,7 +172,7 @@ export default class PublicAssignmentController {
   @use(writeLimit)
   async submitAttempt(req: Request, res: Response) {
     try {
-      const { answers } = req.body as { answers?: Record<string, string> };
+      const { answers } = req.body as { answers?: Record<string, string | string[]> };
       const result = await AssignmentService.submitAttempt(
         param(req, 'token'),
         param(req, 'quizId'),
@@ -195,12 +214,12 @@ export default class PublicAssignmentController {
   @use(writeLimit)
   async createNote(req: Request, res: Response) {
     try {
-      const { body, moduleId } = req.body as { body?: string; moduleId?: string | null };
+      const { body, sectionId } = req.body as { body?: string; sectionId?: string | null };
       const note = await AssignmentService.createNote(
         param(req, 'token'),
         param(req, 'courseId'),
         body ?? '',
-        moduleId,
+        sectionId,
       );
       return res.send({ message: 'Note saved', note });
     } catch (error) {

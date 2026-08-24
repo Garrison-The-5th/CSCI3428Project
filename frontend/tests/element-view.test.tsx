@@ -9,12 +9,12 @@
 import { render, screen } from '@testing-library/react';
 
 import ElementView, { plainPreview, toYouTubeEmbedUrl } from '@/components/common/element-view';
-import type { ModuleElement } from '@/services/curriculum-api';
+import type { SectionElement } from '@/services/curriculum-api';
 
-function element(overrides: Partial<ModuleElement>): ModuleElement {
+function element(overrides: Partial<SectionElement>): SectionElement {
   return {
     id: 'e1',
-    moduleId: 'm1',
+    sectionId: 'm1',
     order: 1,
     type: 'TEXT',
     videoUrl: null,
@@ -25,7 +25,7 @@ function element(overrides: Partial<ModuleElement>): ModuleElement {
     textContent: null,
     durationMinutes: null,
     ...overrides,
-  } as ModuleElement;
+  } as SectionElement;
 }
 
 describe('plainPreview', () => {
@@ -102,7 +102,7 @@ describe('ElementView — video', () => {
       />,
     );
 
-    const frame = screen.getByTitle('Module video');
+    const frame = screen.getByTitle('Section video');
     expect(frame).toHaveAttribute('src', 'https://www.youtube.com/embed/dQw4w9WgXcQ');
   });
 

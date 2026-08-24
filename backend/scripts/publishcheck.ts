@@ -41,13 +41,13 @@ async function main() {
 
   const created = await CurriculumService.createCourse('PUBLISH TEST — safe to delete');
   const courseId = created!.id;
-  const [section] = await CurriculumGateway.getSections(courseId);
+  const [module] = await CurriculumGateway.getModules(courseId);
 
-  const moduleA = await CurriculumService.createModule(courseId, {
-    sectionId: section.id,
+  const sectionA = await CurriculumService.createSection(courseId, {
+    moduleId: module.id,
     title: 'Alpha',
   });
-  const element = await CurriculumService.createElement(moduleA!.id, {
+  const element = await CurriculumService.createElement(sectionA!.id, {
     type: 'TEXT',
     textContent: 'original text',
   });
@@ -66,8 +66,8 @@ async function main() {
 
   const live1 = await CurriculumService.getCourseForLearner(email, courseId);
   check('the learner can read it', live1?.title, 'PUBLISH TEST — safe to delete');
-  check('one module', live1?.modules.length, 1);
-  check('the original text', live1?.modules[0]?.elements[0]?.textContent, 'original text');
+  check('one section', live1?.sections.length, 1);
+  check('the original text', live1?.sections[0]?.elements[0]?.textContent, 'original text');
 
   console.log('\nnothing to publish immediately after publishing');
   check('clean', await PublicationService.hasUnpublishedChanges(courseId), false);
@@ -76,24 +76,24 @@ async function main() {
   console.log('\nediting existing content does not reach the learner');
   await CurriculumService.updateElement(element.id, { textContent: 'REWRITTEN' });
   const afterEdit = await CurriculumService.getCourseForLearner(email, courseId);
-  check('still the old text', afterEdit?.modules[0]?.elements[0]?.textContent, 'original text');
+  check('still the old text', afterEdit?.sections[0]?.elements[0]?.textContent, 'original text');
 
-  console.log('\nnor does renaming a module');
-  await CurriculumService.updateModule(moduleA!.id, { title: 'Alpha RENAMED' });
+  console.log('\nnor does renaming a section');
+  await CurriculumService.updateSection(sectionA!.id, { title: 'Alpha RENAMED' });
   check(
     'still the old title',
-    (await CurriculumService.getCourseForLearner(email, courseId))?.modules[0]?.title,
+    (await CurriculumService.getCourseForLearner(email, courseId))?.sections[0]?.title,
     'Alpha',
   );
 
-  console.log('\nnor does adding a whole module');
-  const moduleB = await CurriculumService.createModule(courseId, {
-    sectionId: section.id,
+  console.log('\nnor does adding a whole section');
+  const sectionB = await CurriculumService.createSection(courseId, {
+    moduleId: module.id,
     title: 'Bravo',
   });
   check(
-    'still one module',
-    (await CurriculumService.getCourseForLearner(email, courseId))?.modules.length,
+    'still one section',
+    (await CurriculumService.getCourseForLearner(email, courseId))?.sections.length,
     1,
   );
 
@@ -102,42 +102,42 @@ async function main() {
   await CurriculumGateway.touchDraft(courseId);
   check('dirty', await PublicationService.hasUnpublishedChanges(courseId), true);
   const pending = await PublicationService.getUnpublishedIds(courseId);
-  check('one unpublished module', pending.newModuleIds, [moduleB!.id]);
+  check('one unpublished section', pending.newSectionIds, [sectionB!.id]);
 
   console.log('\npublishing again releases all of it at once');
   const second = await PublicationService.publish(courseId, user.id);
   check('version 2', second.version, 2);
   check('reports new content', second.hasNewContent, true);
-  check('names the new module', second.added.newModuleIds, [moduleB!.id]);
+  check('names the new section', second.added.newSectionIds, [sectionB!.id]);
 
   const live2 = await CurriculumService.getCourseForLearner(email, courseId);
-  check('the edit is now live', live2?.modules[0]?.elements[0]?.textContent, 'REWRITTEN');
-  check('and the rename', live2?.modules[0]?.title, 'Alpha RENAMED');
-  check('and the new module', live2?.modules.length, 2);
+  check('the edit is now live', live2?.sections[0]?.elements[0]?.textContent, 'REWRITTEN');
+  check('and the rename', live2?.sections[0]?.title, 'Alpha RENAMED');
+  check('and the new section', live2?.sections.length, 2);
   check('clean again', await PublicationService.hasUnpublishedChanges(courseId), false);
 
-  console.log('\nthe version records which module is new');
+  console.log('\nthe version records which section is new');
   const liveRow = (await PublicationService.listVersions(courseId))[0];
-  check('new module reported', liveRow?.newModuleIds, [moduleB!.id]);
-  check('the older module is not', liveRow?.newModuleIds.includes(moduleA!.id), false);
+  check('new section reported', liveRow?.newSectionIds, [sectionB!.id]);
+  check('the older section is not', liveRow?.newSectionIds.includes(sectionA!.id), false);
 
   console.log('\nbut New is only shown to someone who already knew the course');
   check(
     'nothing marked for a first-time learner',
-    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newModuleIds,
+    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newSectionIds,
     [],
   );
 
   // Having started before the version went live is the case New exists for.
-  await CurriculumService.recordModuleView(user.id, moduleA!.id);
-  await prisma.moduleProgress.updateMany({
-    where: { userId: user.id, moduleId: moduleA!.id },
+  await CurriculumService.recordSectionView(user.id, sectionA!.id);
+  await prisma.sectionProgress.updateMany({
+    where: { userId: user.id, sectionId: sectionA!.id },
     data: { viewedAt: new Date(Date.now() - 60 * 60 * 1000) },
   });
   check(
     'marked for someone who was part way through',
-    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newModuleIds,
-    [moduleB!.id],
+    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newSectionIds,
+    [sectionB!.id],
   );
 
   /*
@@ -149,10 +149,10 @@ async function main() {
    * to the visit.
    */
   console.log('\n...and re-opening the course does not clear them');
-  // Re-opening records the same module again. The upsert must leave the
+  // Re-opening records the same section again. The upsert must leave the
   // original date alone — if it moved to now, the learner would look like a
   // first-timer and every mark would vanish.
-  await CurriculumService.recordModuleView(user.id, moduleA!.id);
+  await CurriculumService.recordSectionView(user.id, sectionA!.id);
   const stillEarly = await CurriculumGateway.getFirstActivityAt(user.id, courseId);
   check(
     'the start date is not moved by a revisit',
@@ -161,68 +161,68 @@ async function main() {
   );
   check(
     'still marked after another visit',
-    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newModuleIds,
-    [moduleB!.id],
+    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newSectionIds,
+    [sectionB!.id],
   );
 
-  console.log('\nreading the new module is what clears it');
-  await CurriculumService.recordModuleView(user.id, moduleB!.id);
+  console.log('\nreading the new section is what clears it');
+  await CurriculumService.recordSectionView(user.id, sectionB!.id);
   check(
     'cleared once read',
-    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newModuleIds,
+    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newSectionIds,
     [],
   );
-  await prisma.moduleProgress.deleteMany({ where: { userId: user.id } });
+  await prisma.sectionProgress.deleteMany({ where: { userId: user.id } });
 
   console.log('\nand a first-time learner still sees nothing');
   check(
     'nothing marked',
-    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newModuleIds,
+    (await PublicationService.getNewIdsForLearner(courseId, user.id)).newSectionIds,
     [],
   );
 
   // ---- The three shapes the pill has to distinguish ----
   console.log('\nthe three cases the New pill must tell apart');
-  const freshSection = (await CurriculumService.createSection(courseId, {
-    title: 'Brand new section',
+  const freshModule = (await CurriculumService.createModule(courseId, {
+    title: 'Brand new module',
   }))!;
-  const moduleInFreshSection = await CurriculumService.createModule(courseId, {
-    sectionId: freshSection.id,
-    title: 'Inside the new section',
+  const sectionInFreshModule = await CurriculumService.createSection(courseId, {
+    moduleId: freshModule.id,
+    title: 'Inside the new module',
   });
-  const moduleInOldSection = await CurriculumService.createModule(courseId, {
-    sectionId: section.id,
-    title: 'New module, old section',
+  const sectionInOldModule = await CurriculumService.createSection(courseId, {
+    moduleId: module.id,
+    title: 'New section, old module',
   });
-  const elementInOldModule = await CurriculumService.createElement(moduleA!.id, {
+  const elementInOldSection = await CurriculumService.createElement(sectionA!.id, {
     type: 'TEXT',
-    textContent: 'new paragraph in an existing module',
+    textContent: 'new paragraph in an existing section',
   });
 
   const shapes = await PublicationService.publish(courseId, user.id);
-  check('the new section is reported', shapes.added.newSectionIds, [freshSection.id]);
+  check('the new module is reported', shapes.added.newModuleIds, [freshModule.id]);
   check(
-    'both new modules are reported',
-    new Set(shapes.added.newModuleIds),
-    new Set([moduleInFreshSection!.id, moduleInOldSection!.id]) as unknown,
+    'both new sections are reported',
+    new Set(shapes.added.newSectionIds),
+    new Set([sectionInFreshModule!.id, sectionInOldModule!.id]) as unknown,
   );
   check(
     'the new element is reported',
-    shapes.added.newElementIds.includes(elementInOldModule.id),
+    shapes.added.newElementIds.includes(elementInOldSection.id),
     true,
   );
 
   // The roll-up rule lives in the frontend, but it can only be right if the
-  // server hands it the raw sets — the module inside a brand new section is
+  // server hands it the raw sets — the section inside a brand new module is
   // reported here and suppressed there, rather than being left out.
   check(
-    'the module inside the new section is reported, not omitted',
-    shapes.added.newModuleIds.includes(moduleInFreshSection!.id),
+    'the section inside the new module is reported, not omitted',
+    shapes.added.newSectionIds.includes(sectionInFreshModule!.id),
     true,
   );
   check(
-    'the untouched module is not reported',
-    shapes.added.newModuleIds.includes(moduleA!.id),
+    'the untouched section is not reported',
+    shapes.added.newSectionIds.includes(sectionA!.id),
     false,
   );
 
@@ -234,14 +234,14 @@ async function main() {
    * before the additions was told there was nothing new when there plainly was.
    */
   console.log('\nand New survives a later publish that adds nothing');
-  await CurriculumService.recordModuleView(user.id, moduleA!.id);
-  await prisma.moduleProgress.updateMany({
-    where: { userId: user.id, moduleId: moduleA!.id },
+  await CurriculumService.recordSectionView(user.id, sectionA!.id);
+  await prisma.sectionProgress.updateMany({
+    where: { userId: user.id, sectionId: sectionA!.id },
     data: { viewedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
   });
 
   const beforeNoOp = await PublicationService.getNewIdsForLearner(courseId, user.id);
-  check('marked before the no-op publish', beforeNoOp.newModuleIds.length > 0, true);
+  check('marked before the no-op publish', beforeNoOp.newSectionIds.length > 0, true);
 
   await CurriculumService.updateCourse(courseId, { description: 'a typo fix' });
   const noOp = await PublicationService.publish(courseId, user.id);
@@ -250,14 +250,14 @@ async function main() {
   const afterNoOp = await PublicationService.getNewIdsForLearner(courseId, user.id);
   check(
     'still marked after it',
-    new Set(afterNoOp.newModuleIds),
-    new Set(beforeNoOp.newModuleIds) as unknown,
+    new Set(afterNoOp.newSectionIds),
+    new Set(beforeNoOp.newSectionIds) as unknown,
   );
-  await prisma.moduleProgress.deleteMany({ where: { userId: user.id } });
+  await prisma.sectionProgress.deleteMany({ where: { userId: user.id } });
 
   // ---- Quizzes are graded against what was shown ----
   console.log('\na quiz is graded against the published version, not the draft');
-  const quiz = await QuizService.createQuiz({ title: 'Marking', moduleId: moduleA!.id });
+  const quiz = await QuizService.createQuiz({ title: 'Marking', sectionId: sectionA!.id });
   await QuizService.updateQuiz(quiz.id, { published: true });
   const question = await QuizService.addQuestion(quiz.id, {
     prompt: 'Pick the right one',
@@ -371,9 +371,9 @@ async function main() {
   check('the learner is listed', Boolean(them), true);
   check('one course', them?.courses.length, 1);
   check(
-    'counted against the published module count',
-    them?.courses[0]?.totalModules,
-    (await CurriculumService.getCourseForLearner(email, courseId))?.modules.length,
+    'counted against the published section count',
+    them?.courses[0]?.totalSections,
+    (await CurriculumService.getCourseForLearner(email, courseId))?.sections.length,
   );
   check('no marks yet', them?.courses[0]?.averageScore, null);
 

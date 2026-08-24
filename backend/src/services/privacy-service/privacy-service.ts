@@ -47,12 +47,20 @@ export interface PersonalDataExport {
     dueDate: string | null;
     lastAccessedAt: string | null;
   }>;
-  moduleProgress: Array<{ module: string; course: string; viewedAt: string }>;
+  sectionProgress: Array<{ section: string; course: string; viewedAt: string }>;
   quizAttempts: Array<{ quiz: string; score: number; total: number; completedAt: string }>;
-  courseCompletions: Array<{ course: string; completedAt: string; moduleCount: number }>;
-  notes: Array<{ course: string; module: string | null; body: string; createdAt: string }>;
+  courseCompletions: Array<{ course: string; completedAt: string; sectionCount: number }>;
+  notes: Array<{ course: string; section: string | null; body: string; createdAt: string }>;
 }
 
+/**
+ * The two rights a learner can exercise over their own data: export and erase.
+ *
+ * Erasure anonymises rather than deletes. A training record may be the evidence
+ * an organisation is legally required to hold, so the record survives with the
+ * person detached from it — and the response says exactly that rather than
+ * claiming a clean delete it did not perform.
+ */
 export default class PrivacyService {
   /**
    * Everything held about one person, as a portable JSON document.
@@ -65,7 +73,7 @@ export default class PrivacyService {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
-        moduleViews: { include: { module: { include: { course: true } } } },
+        sectionViews: { include: { section: { include: { course: true } } } },
         quizAttempts: { include: { quiz: true } },
         completions: { include: { course: true } },
         notes: { include: { course: true } },
@@ -103,9 +111,9 @@ export default class PrivacyService {
         dueDate: assignment.dueDate?.toISOString() ?? null,
         lastAccessedAt: assignment.lastAccessedAt?.toISOString() ?? null,
       })),
-      moduleProgress: user.moduleViews.map((view) => ({
-        module: `${view.module.number} ${view.module.title}`,
-        course: view.module.course.title,
+      sectionProgress: user.sectionViews.map((view) => ({
+        section: `${view.section.number} ${view.section.title}`,
+        course: view.section.course.title,
         viewedAt: view.viewedAt.toISOString(),
       })),
       quizAttempts: user.quizAttempts.map((attempt) => ({
@@ -117,11 +125,11 @@ export default class PrivacyService {
       courseCompletions: user.completions.map((completion) => ({
         course: completion.course.title,
         completedAt: completion.completedAt.toISOString(),
-        moduleCount: completion.moduleCount,
+        sectionCount: completion.sectionCount,
       })),
       notes: user.notes.map((note) => ({
         course: note.course.title,
-        module: note.moduleId,
+        section: note.sectionId,
         body: note.body,
         createdAt: note.createdAt.toISOString(),
       })),

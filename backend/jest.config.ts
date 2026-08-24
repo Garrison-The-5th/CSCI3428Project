@@ -17,6 +17,60 @@ import type { Config } from 'jest';
  * PostgreSQL and are skipped when DATABASE_URL is absent rather than failing,
  * so a developer without Docker running still gets a useful `npm test`.
  */
+/**
+ * `sanitize-html` reaches htmlparser2 v12, which ships ESM only — as do the five
+ * small packages under it (domhandler, domutils, dom-serializer, domelementtype,
+ * entities). Node 24 can `require()` those; Jest's CommonJS runtime cannot, so
+ * every suite that touches `config/rich-text` died at import with "Cannot use
+ * import statement outside a module".
+ *
+ * Rather than stubbing the sanitiser — which is the §3.3.2 control and has its
+ * own tests — those packages are handed to ts-jest with an inline
+ * `module: CommonJS`, which downlevels them on the way in. Everything else in
+ * node_modules is still left alone.
+ *
+ * This is also why the npm scripts no longer pass `--experimental-vm-modules`.
+ * That flag makes Jest decide a file's module kind from its package's
+ * `"type": "module"`, so the CommonJS this transform emits gets evaluated as ESM
+ * and dies on `exports is not defined` — the same suites failing again for the
+ * opposite reason. The flag was never load-bearing: nothing here imports a
+ * genuinely ESM-only module at runtime (`heic-convert` is CommonJS), and the
+ * whole suite passes without it.
+ */
+const ESM_DEPENDENCIES = [
+  'htmlparser2',
+  'domhandler',
+  'domutils',
+  'dom-serializer',
+  'domelementtype',
+  'entities',
+];
+
+const esmPackages = `(?:${ESM_DEPENDENCIES.join('|')})`;
+
+const transformIgnorePatterns = [`node_modules/(?!.*${esmPackages}/)`];
+
+/**
+ * Scoped to those packages' own files rather than to `.js` generally: a bare
+ * `^.+\\.js$` also swallows the generated Prisma client, which is large,
+ * already CommonJS, and produces a warning per file for nothing.
+ */
+const esmJsTransform = {
+  [`node_modules[\\\\/].*${esmPackages}[\\\\/].*\\.js$`]: [
+    'ts-jest',
+    {
+      tsconfig: {
+        allowJs: true,
+        module: 'CommonJS',
+        moduleResolution: 'node',
+        target: 'ES2022',
+        esModuleInterop: true,
+      },
+      diagnostics: false,
+    },
+  ],
+} as const;
+
 const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
@@ -45,7 +99,9 @@ const config: Config = {
             diagnostics: { ignoreCodes: [151002] },
           },
         ],
+        ...esmJsTransform,
       },
+      transformIgnorePatterns,
       testMatch: ['<rootDir>/tests/unit/**/*.test.ts'],
       moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
       setupFilesAfterEnv: ['<rootDir>/tests/setup-unit.ts'],
@@ -68,9 +124,14 @@ const config: Config = {
             diagnostics: { ignoreCodes: [151002] },
           },
         ],
+        ...esmJsTransform,
       },
+      transformIgnorePatterns,
       testMatch: ['<rootDir>/tests/integration/**/*.test.ts'],
       moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
+      // Runs before the test file, and so before prisma-client reads the
+      // environment. It decides which database may be emptied.
+      setupFiles: ['<rootDir>/tests/setup-test-db.ts'],
       setupFilesAfterEnv: ['<rootDir>/tests/setup-integration.ts'],
       // A migration replay and a full course tree are slower than a unit test.
       testTimeout: 30_000,
@@ -124,7 +185,7 @@ const config: Config = {
    */
   coverageThreshold: {
     global: { statements: 30, branches: 20, functions: 25, lines: 30 },
-    './src/services/': { statements: 45, branches: 35, functions: 40, lines: 45 },
+    './src/services/': { statements: 50, branches: 40, functions: 45, lines: 50 },
 
     // At or above the §5.1.1 target — pinned so they cannot slip back.
     './src/config/': { statements: 85, branches: 80, functions: 90, lines: 85 },
@@ -151,6 +212,17 @@ const config: Config = {
       branches: 70,
       functions: 90,
       lines: 80,
+    },
+    // Export and erasure are the §3.5.3 control ("users have a method to remove
+    // or export their data on demand"), so they are pinned hard: both fail
+    // quietly if they fail at all — an export that drops a table still returns a
+    // plausible document, and an erasure that misses a column still reports
+    // success.
+    './src/services/privacy-service/': {
+      statements: 100,
+      branches: 90,
+      functions: 100,
+      lines: 100,
     },
   },
 

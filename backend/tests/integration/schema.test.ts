@@ -61,14 +61,14 @@ describeWithDatabase('schema validation', () => {
       'User',
       'Course',
       'CoursePublication',
-      'Section',
       'Module',
+      'Section',
       'Element',
       'Quiz',
       'Question',
       'Option',
       'Assignment',
-      'ModuleProgress',
+      'SectionProgress',
       'ElementProgress',
       'QuizAttempt',
       'QuizSession',
@@ -82,19 +82,19 @@ describeWithDatabase('schema validation', () => {
 
   it('enforces the uniqueness the numbering grid depends on', async () => {
     const course = await prisma.course.create({ data: { title: 'Unique test' } });
-    const section = await prisma.section.create({
+    const module = await prisma.module.create({
       data: { courseId: course.id, number: 1, title: 'One' },
     });
 
-    // Two sections cannot share a number within one course.
+    // Two modules cannot share a number within one course.
     await expect(
-      prisma.section.create({ data: { courseId: course.id, number: 1, title: 'Clash' } }),
+      prisma.module.create({ data: { courseId: course.id, number: 1, title: 'Clash' } }),
     ).rejects.toThrow();
 
-    await prisma.module.create({
+    await prisma.section.create({
       data: {
         courseId: course.id,
-        sectionId: section.id,
+        moduleId: module.id,
         position: 1,
         number: '1.1',
         sortKey: '000001.000001',
@@ -102,12 +102,12 @@ describeWithDatabase('schema validation', () => {
       },
     });
 
-    // Nor can two modules share a number.
+    // Nor can two sections share a number.
     await expect(
-      prisma.module.create({
+      prisma.section.create({
         data: {
           courseId: course.id,
-          sectionId: section.id,
+          moduleId: module.id,
           position: 2,
           number: '1.1',
           sortKey: '000001.000002',
@@ -147,9 +147,9 @@ describeWithDatabase('schema validation', () => {
 });
 
 describeWithDatabase('foreign key integrity', () => {
-  it('refuses a module pointing at a course that does not exist', async () => {
+  it('refuses a section pointing at a course that does not exist', async () => {
     await expect(
-      prisma.module.create({
+      prisma.section.create({
         data: {
           courseId: '00000000-0000-0000-0000-000000000000',
           position: 1,
@@ -163,7 +163,7 @@ describeWithDatabase('foreign key integrity', () => {
 
   it('refuses progress against a user that does not exist', async () => {
     const course = await prisma.course.create({ data: { title: 'FK test' } });
-    const module = await prisma.module.create({
+    const section = await prisma.section.create({
       data: {
         courseId: course.id,
         position: 1,
@@ -174,24 +174,24 @@ describeWithDatabase('foreign key integrity', () => {
     });
 
     await expect(
-      prisma.moduleProgress.create({ data: { userId: 999_999, moduleId: module.id } }),
+      prisma.sectionProgress.create({ data: { userId: 999_999, sectionId: section.id } }),
     ).rejects.toThrow();
   });
 
   /**
    * Deleting a course must take its whole tree. Without the cascade, purging
-   * the recycle bin would leave orphaned modules and elements behind — and the
+   * the recycle bin would leave orphaned sections and elements behind — and the
    * elements carry base64 media, so the leak would be measured in megabytes.
    */
-  it('cascades a course delete through sections, modules, elements and quizzes', async () => {
+  it('cascades a course delete through modules, sections, elements and quizzes', async () => {
     const course = await prisma.course.create({ data: { title: 'Cascade test' } });
-    const section = await prisma.section.create({
+    const module = await prisma.module.create({
       data: { courseId: course.id, number: 1, title: 'S' },
     });
-    const module = await prisma.module.create({
+    const section = await prisma.section.create({
       data: {
         courseId: course.id,
-        sectionId: section.id,
+        moduleId: module.id,
         position: 1,
         number: '1.1',
         sortKey: '000001.000001',
@@ -199,9 +199,9 @@ describeWithDatabase('foreign key integrity', () => {
       },
     });
     const element = await prisma.element.create({
-      data: { moduleId: module.id, order: 1, type: 'TEXT', textContent: 'hello' },
+      data: { sectionId: section.id, order: 1, type: 'TEXT', textContent: 'hello' },
     });
-    const quiz = await prisma.quiz.create({ data: { title: 'Q', moduleId: module.id } });
+    const quiz = await prisma.quiz.create({ data: { title: 'Q', sectionId: section.id } });
     const question = await prisma.question.create({
       data: { quizId: quiz.id, order: 1, prompt: 'P' },
     });
@@ -211,8 +211,8 @@ describeWithDatabase('foreign key integrity', () => {
 
     await prisma.course.delete({ where: { id: course.id } });
 
-    expect(await prisma.section.findUnique({ where: { id: section.id } })).toBeNull();
     expect(await prisma.module.findUnique({ where: { id: module.id } })).toBeNull();
+    expect(await prisma.section.findUnique({ where: { id: section.id } })).toBeNull();
     expect(await prisma.element.findUnique({ where: { id: element.id } })).toBeNull();
     expect(await prisma.quiz.findUnique({ where: { id: quiz.id } })).toBeNull();
     expect(await prisma.question.findUnique({ where: { id: question.id } })).toBeNull();
@@ -222,7 +222,7 @@ describeWithDatabase('foreign key integrity', () => {
   it('cascades a user delete through their progress and notes', async () => {
     const user = await prisma.user.create({ data: { email: 'cascade@example.com' } });
     const course = await prisma.course.create({ data: { title: 'User cascade' } });
-    const module = await prisma.module.create({
+    const section = await prisma.section.create({
       data: {
         courseId: course.id,
         position: 1,
@@ -232,12 +232,12 @@ describeWithDatabase('foreign key integrity', () => {
       },
     });
 
-    await prisma.moduleProgress.create({ data: { userId: user.id, moduleId: module.id } });
+    await prisma.sectionProgress.create({ data: { userId: user.id, sectionId: section.id } });
     await prisma.note.create({ data: { userId: user.id, courseId: course.id, body: 'note' } });
 
     await prisma.user.delete({ where: { id: user.id } });
 
-    expect(await prisma.moduleProgress.count({ where: { userId: user.id } })).toBe(0);
+    expect(await prisma.sectionProgress.count({ where: { userId: user.id } })).toBe(0);
     expect(await prisma.note.count({ where: { userId: user.id } })).toBe(0);
   });
 

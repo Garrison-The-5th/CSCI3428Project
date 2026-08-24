@@ -61,6 +61,21 @@ function subjectKey(req: Request, subject: RateLimitSubject): string {
   return `ip:${clientAddress(req)}`;
 }
 
+/**
+ * A fixed-window rate limiter, in memory.
+ *
+ * `subject` decides what a bucket is keyed on. 'ip' is right for anything
+ * unauthenticated; 'user' is right once there is an account, so that an office
+ * behind one NAT address does not share a budget and one account cannot escape
+ * its limit by moving. `scope` separates unrelated limits that would otherwise
+ * share a bucket — reads and writes on the same route, say.
+ *
+ * In memory means per process: two replicas enforce roughly twice the limit
+ * between them, which is accepted here because this exists to stop floods and
+ * accidents rather than a determined distributed attacker. Behind a proxy it is
+ * only as good as TRUST_PROXY — see config/client-address.ts, without which
+ * every caller resolves to the ingress IP and shares one bucket.
+ */
 export function rateLimit({
   max,
   windowMs,

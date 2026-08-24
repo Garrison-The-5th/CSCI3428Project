@@ -80,7 +80,9 @@ const MEMBERS: TeamMemberRecord[] = Array.from({ length: 24 }, (_, index) => {
   return {
     id: `USR-${1041 + seed}`,
     name: `${firstNames[index % firstNames.length]} ${lastNames[index % lastNames.length]}`,
-    email: `${firstNames[index % firstNames.length].toLowerCase()}.${lastNames[index % lastNames.length].toLowerCase()}@example.com`,
+    email:
+      `${firstNames[index % firstNames.length].toLowerCase()}.` +
+      `${lastNames[index % lastNames.length].toLowerCase()}@example.com`,
     team: teams[index % teams.length],
     role: roles[index % roles.length],
     status: statuses[index % statuses.length],

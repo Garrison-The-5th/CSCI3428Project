@@ -9,7 +9,7 @@ import { Request } from 'express';
 import multer from 'multer';
 
 /**
- * Upload rules for course and module media.
+ * Upload rules for course and section media.
  *
  * HEIC is accepted but never stored as-is: Chrome and Firefox cannot render it,
  * so `normalizeUpload` transcodes it to JPEG. PDFs are stored unchanged and are

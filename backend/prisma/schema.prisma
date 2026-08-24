@@ -14,86 +14,112 @@ datasource db {
 }
 
 model User {
-  id            Int              @id @default(autoincrement())
-  email         String           @unique
-  name          String?
-  role          String?          @default("user")
-  subscribed    Boolean          @default(false)
+  id                Int                 @id @default(autoincrement())
+  email             String              @unique
+  name              String?
+  role              String?             @default("user")
+  subscribed        Boolean             @default(false)
   /// When they last signed in through Keycloak.
   ///
   /// The only reliable mark of a real account. A User row is also created the
   /// moment someone is assigned work, so its mere existence proves nothing, and
   /// `name` cannot stand in for it — not every realm sends a name claim, which
   /// left genuine accounts looking like bare email addresses.
-  lastSignInAt  DateTime?
-  moduleViews   ModuleProgress[]
-  elementViews  ElementProgress[]
-  quizAttempts  QuizAttempt[]
-  quizSessions  QuizSession[]
-  notes         Note[]
-  completions   CourseCompletion[]
+  lastSignInAt      DateTime?
+  sectionViews      SectionProgress[]
+  elementViews      ElementProgress[]
+  quizAttempts      QuizAttempt[]
+  quizSessions      QuizSession[]
+  notes             Note[]
+  completions       CourseCompletion[]
   /// Courses this person may edit. Empty means no Course Editor access.
-  editableCourses Course[] @relation("CourseContributors")
+  editableCourses   Course[]            @relation("CourseContributors")
   /// Assignments this person handed out. Their address is the one the learner
   /// hears from, so a reply lands with whoever set the work.
-  assignmentsMade Assignment[] @relation("AssignmentAssigner")
+  assignmentsMade   Assignment[]        @relation("AssignmentAssigner")
   /// Course versions this person put live, for the archive list.
   publishedVersions CoursePublication[] @relation("PublishedVersions")
 }
 
-/// A course is the top-level container an admin creates by name, then fills with modules.
+/// What kind of thing a Course is.
+///
+/// Both are the same shape — modules holding sections holding content — and
+/// share publishing, versioning, access and the whole learner path. They differ
+/// only in what an author is offered while editing one, and in which tab it
+/// appears under.
+enum CourseKind {
+  /// A lesson: sections of elements, with quizzes dropped in among them.
+  LESSON
+  /// A quiz set: one module, and a section per quiz. No elements.
+  QUIZ_SET
+}
+
+/// The top-level container an admin creates by name, then fills with content.
 model Course {
-  id               String    @id @default(uuid())
+  id               String     @id @default(uuid())
   title            String
+  /// Lesson or quiz set. Decides which tab lists it and what the editor offers.
+  kind             CourseKind @default(LESSON)
   /// One-line pitch shown under the title on the course page.
   shortDescription String?
   /// The long description shown further down the course page.
   description      String?
-  tags             String[]  @default([])
-  languages        String[]  @default([])
+  tags             String[]   @default([])
+  languages        String[]   @default([])
   /// Bullet points for the "What you'll learn" box.
-  whatYouWillLearn String[]  @default([])
-  prerequisites    String[]  @default([])
-  required         Boolean   @default(false) // required learning
+  whatYouWillLearn String[]   @default([])
+  prerequisites    String[]   @default([])
+  required         Boolean    @default(false) // required learning
   dueDate          DateTime? // when required learning must be finished
-  published        Boolean   @default(false) // hidden from learners until published
-  /// When on, a module stays locked until every earlier module is finished.
-  sequential       Boolean   @default(false)
+  /// How long someone gets once this is handed to them, in days.
+  ///
+  /// The deadline an author sets is a length rather than a date: a course
+  /// assigned today and the same course assigned next month should each give
+  /// the learner the same run at it, which one fixed `dueDate` cannot do. The
+  /// assignment's own `dueDate` is stamped from this at the moment it is made —
+  /// see AssignmentService.assign — and `dueDate` above stays as the single
+  /// course-wide deadline for anything that never went through an assignment.
+  daysRemaining    Int?
+  published        Boolean    @default(false) // hidden from learners until published
+  /// When on, a section stays locked until every earlier section is finished.
+  sequential       Boolean    @default(false)
   publishedAt      DateTime? // stamped the first time it is published
   /// Which CoursePublication learners are currently served. 0 means the course
   /// has never been published, so there is nothing for a learner to read.
   ///
   /// Authors edit the live rows below freely; none of it reaches a learner until
   /// a publish snapshots it. That is what lets an edit to existing content be
-  /// held back as surely as a brand new module.
-  publishedVersion Int       @default(0)
+  /// held back as surely as a brand new section.
+  publishedVersion Int        @default(0)
   /// Touched by every content edit. Compared against the current publication's
   /// date to answer "are there unpublished changes?" without diffing the tree.
-  draftUpdatedAt   DateTime  @default(now())
-  imageData        String?   @db.Text // base64 cover photo shown on the Learning page
+  draftUpdatedAt   DateTime   @default(now())
+  imageData        String?    @db.Text // base64 cover photo shown on the Learning page
   imageType        String? // MIME type of the cover photo
   deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @default(now()) @updatedAt
-  /// Bumped only when a module or quiz is added. Compared against a learner's
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @default(now()) @updatedAt
+  /// Bumped only when a section or quiz is added. Compared against a learner's
   /// completion date to tell them there is something new.
-  contentUpdatedAt DateTime  @default(now())
+  contentUpdatedAt DateTime   @default(now())
 
-  sections    Section[]
-  modules     Module[]
-  completions CourseCompletion[]
+  modules      Module[]
+  sections     Section[]
+  completions  CourseCompletion[]
   /// People allowed to edit this one course without being global authors.
-  contributors User[]  @relation("CourseContributors")
-  instructors Instructor[]
-  notes       Note[]
-  assignments Assignment[]
+  contributors User[]              @relation("CourseContributors")
+  instructors  Instructor[]
+  notes        Note[]
+  assignments  Assignment[]
   publications CoursePublication[]
+
+  @@index([kind])
 }
 
 /// One published version of a course, frozen at the moment it went live.
 ///
 /// The whole course tree is stored as JSON rather than as a second set of rows.
-/// Two reasons. Progress is keyed on element, module and quiz ids, and those
+/// Two reasons. Progress is keyed on element, section and quiz ids, and those
 /// have to stay stable across a publish or every learner's history would break —
 /// copying rows would mint new ids. And authors get to keep editing the live
 /// tables exactly as before, with no draft/live pair on every column: the
@@ -104,16 +130,16 @@ model Course {
 /// large. That is bounded by the retention sweep, which keeps only the live
 /// version and whatever was superseded inside the archive window.
 model CoursePublication {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   courseId      String
-  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course        Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   /// 1-based, and the number Course.publishedVersion points at.
   version       Int
   /// The course tree as learners see it at this version.
   snapshot      Json
-  publishedAt   DateTime @default(now())
+  publishedAt   DateTime  @default(now())
   publishedById Int?
-  publishedBy   User?    @relation("PublishedVersions", fields: [publishedById], references: [id], onDelete: SetNull)
+  publishedBy   User?     @relation("PublishedVersions", fields: [publishedById], references: [id], onDelete: SetNull)
   /// Set when a newer version replaced this one. Null on the live version, which
   /// is never purged however old it gets.
   supersededAt  DateTime?
@@ -121,8 +147,8 @@ model CoursePublication {
   /// What this version added compared with the one before it, so a learner who
   /// had already finished can be shown exactly what is new. Worked out once at
   /// publish time rather than by diffing two snapshots on every page load.
-  newSectionIds String[] @default([])
   newModuleIds  String[] @default([])
+  newSectionIds String[] @default([])
   newElementIds String[] @default([])
   newQuizIds    String[] @default([])
 
@@ -163,35 +189,45 @@ enum AssignmentType {
 /// is recorded against the User row for that address either way, so a guest who
 /// later signs in through Keycloak with the same email keeps their history.
 model Assignment {
-  id             String    @id @default(uuid())
-  type           AssignmentType @default(LINK)
+  id                String         @id @default(uuid())
+  type              AssignmentType @default(LINK)
   /// High-entropy random string. Appears in the public URL for a LINK assignment;
   /// held but never published for a PLATFORM one.
-  token          String    @unique
-  email          String
-  courseId       String?
-  course         Course?   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  quizId         String?
-  quiz           Quiz?     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  token             String         @unique
+  email             String
+  courseId          String?
+  course            Course?        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  quizId            String?
+  quiz              Quiz?          @relation(fields: [quizId], references: [id], onDelete: Cascade)
   /// Who handed this over. Their address is used as the From and Reply-To on
   /// every mail about it, so the learner answers a person rather than a system
   /// mailbox. Null on rows created before assignments recorded this.
-  assignedById   Int?
-  assignedBy     User?     @relation("AssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
-  assignedAt     DateTime  @default(now())
-  dueDate        DateTime?
+  assignedById      Int?
+  assignedBy        User?          @relation("AssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedAt        DateTime       @default(now())
+  dueDate           DateTime?
   /// Optional cut-off; the link stops working after this.
-  expiresAt      DateTime?
+  expiresAt         DateTime?
   /// Set to kill a link early without deleting the record.
-  revokedAt      DateTime?
-  lastAccessedAt DateTime?
+  revokedAt         DateTime?
+  /// Stamped when a ONE_TIME quiz behind this link has been handed in. The quiz
+  /// is closed from that moment; the link stays open for exactly one more visit,
+  /// so the holder can come back to their result rather than to a bare error.
+  completedAt       DateTime?
+  /// Stamped the first time the link is opened *after* it was completed — the one
+  /// visit that shows the result. Opening it again after this closes the link for
+  /// good, which is what `revokedAt` then records. Kept apart from
+  /// `lastAccessedAt` because that moves on every request, and a single page load
+  /// makes several.
+  resultsSeenAt     DateTime?
+  lastAccessedAt    DateTime?
   /// When the notification email actually went out. Null means it was never sent
   /// — no mail credentials configured, or the send failed.
-  notifiedAt     DateTime?
+  notifiedAt        DateTime?
   /// Mails sent about this assignment inside the current window. Together with
   /// `notifyWindowStart` this is the whole rate limit: flipping the link off and
   /// on again re-sends, but only so many times before it refuses.
-  notifyCount      Int       @default(0)
+  notifyCount       Int            @default(0)
   notifyWindowStart DateTime?
 
   @@index([email])
@@ -206,108 +242,114 @@ model Assignment {
 /// this answers "had they finished before this content appeared" — which is what
 /// makes a new-content notice meaningful rather than noise.
 model CourseCompletion {
-  id          String   @id @default(uuid())
-  userId      Int
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  courseId    String
-  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  completedAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  userId       Int
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId     String
+  course       Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  completedAt  DateTime  @default(now())
   /// What they finished, so the notice can say how much is new.
-  moduleCount Int      @default(0)
+  sectionCount Int       @default(0)
   /// When they were last emailed that this course had gained content. Stops a
   /// burst of edits turning into a burst of mail.
-  notifiedAt  DateTime?
+  notifiedAt   DateTime?
 
   @@unique([userId, courseId])
 }
 
-/// A learner's own notes, kept per course and optionally pinned to a module.
+/// A learner's own notes, kept per course and optionally pinned to a section.
 model Note {
   id        String   @id @default(uuid())
   userId    Int
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   courseId  String
   course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  moduleId  String?
+  sectionId String?
   body      String   @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([userId, courseId])
-  @@index([moduleId])
+  @@index([sectionId])
 }
 
-/// A named group of modules, and the first digit of every module number inside it.
+/// A named group of sections, and the first digit of every section number inside it.
 ///
-/// Course structure is a two-dimensional grid: the section is the outer index and
-/// the module its inner one, so section 2's third module is "2.3". `number` is the
-/// section's 1-based place in the course, which the author sets directly.
-model Section {
+/// Course structure is a two-dimensional grid: the module is the outer index and
+/// the section its inner one, so module 2's third section is "2.3". `number` is the
+/// module's 1-based place in the course, which the author sets directly.
+model Module {
   id        String    @id @default(uuid())
   courseId  String
   course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   number    Int
   title     String
   /// Hex tint the author picked, e.g. "#c7d9f0". Used at low opacity behind the
-  /// section's modules so a long course reads as groups at a glance. Null means
+  /// module's sections so a long course reads as groups at a glance. Null means
   /// no tint, which is the default.
   color     String?
   deletedAt DateTime? // soft delete: recoverable from the admin dashboard
-  modules   Module[]
+  sections  Section[]
 
   @@unique([courseId, number])
   @@index([courseId, number])
 }
 
-/// A part of a course, living inside a section.
+/// A part of a course, living inside a module.
 ///
-/// `position` is the module's 1-based place within its section — the digit after
+/// `position` is the section's 1-based place within its module — the digit after
 /// the dot. `number` ("2.3") and `sortKey` (zero-padded, so "1.10" sorts after
-/// "1.2") are derived from section.number and position and stored so ordering and
+/// "1.2") are derived from module.number and position and stored so ordering and
 /// display cost nothing to read. Never set them by hand: they are rewritten
 /// wholesale by the renumbering pass in CurriculumService.
-model Module {
-  id               String           @id @default(uuid())
+model Section {
+  id               String            @id @default(uuid())
   courseId         String
-  course           Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  sectionId        String?
-  section          Section?         @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  position         Int              @default(1)
+  course           Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  moduleId         String?
+  module           Module?           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  position         Int               @default(1)
   number           String
   sortKey          String
   title            String
-  estimatedMinutes Int              @default(0) // admin's estimate; summed for the course total
-  /// When the module was added. Compared against a learner's completion date to
+  estimatedMinutes Int               @default(0) // admin's estimate; summed for the course total
+  /// Hex tint the author picked, from the same closed palette a module uses.
+  ///
+  /// Modules already carried one, which was enough while a section was only ever
+  /// read inside its module's group. A quiz set has one module and a long flat
+  /// list of sections, so the colour has to live at this level to be any use.
+  color            String?
+  /// When the section was added. Compared against a learner's completion date to
   /// name exactly what is new to them, rather than only that something is.
-  createdAt        DateTime         @default(now())
+  createdAt        DateTime          @default(now())
   deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
   elements         Element[]
   quizzes          Quiz[]
-  views            ModuleProgress[]
+  views            SectionProgress[]
 
   @@unique([courseId, number])
   @@index([courseId, sortKey])
-  @@index([sectionId, position])
+  @@index([moduleId, position])
 }
 
 model Element {
-  id          String      @id @default(uuid())
-  moduleId    String
-  module      Module      @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  order       Int          // position within the module
-  type        ElementType
-  videoUrl    String?      // for YOUTUBE type (the private/unlisted link)
-  imageUrl    String?      // for IMAGE type, when linked rather than uploaded
-  imageData   String?     @db.Text // base64 of an uploaded image or PDF
-  imageType   String?      // MIME type of the uploaded file
-  fileName    String?      // original filename, shown for PDF downloads
-  textContent String?      // for TEXT type
+  id              String            @id @default(uuid())
+  sectionId       String
+  section         Section           @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  order           Int // position within the section
+  type            ElementType
+  videoUrl        String? // for YOUTUBE type (the private/unlisted link)
+  imageUrl        String? // for IMAGE type, when linked rather than uploaded
+  imageData       String?           @db.Text // base64 of an uploaded image or PDF
+  imageType       String? // MIME type of the uploaded file
+  fileName        String? // original filename, shown for PDF downloads
+  textContent     String? // for TEXT type
   /// Runtime of a YOUTUBE element, entered by the author. Summed for the
   /// "hours of video" figure on the course page.
   durationMinutes Int?
-  views       ElementProgress[]
+  views           ElementProgress[]
 
-  @@index([moduleId])
+  @@index([sectionId])
 }
 
 enum ElementType {
@@ -317,24 +359,24 @@ enum ElementType {
   PDF
 }
 
-/// Modules auto-complete on view, so one row per user per module is all progress needs.
-model ModuleProgress {
-  id       String   @id @default(uuid())
-  userId   Int
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  moduleId String
-  module   Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  viewedAt DateTime @default(now())
+/// Sections auto-complete on view, so one row per user per section is all progress needs.
+model SectionProgress {
+  id        String   @id @default(uuid())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
 
-  @@unique([userId, moduleId])
-  @@index([moduleId])
+  @@unique([userId, sectionId])
+  @@index([sectionId])
 }
 
 /// One piece of content a learner has opened.
 ///
-/// Finer grained than ModuleProgress on purpose: a sequential course unlocks item
+/// Finer grained than SectionProgress on purpose: a sequential course unlocks item
 /// by item, so "have they seen the thing before this one" has to be answerable
-/// per element, not per module. Keyed on the element id rather than a position so
+/// per element, not per section. Keyed on the element id rather than a position so
 /// reordering or inserting content cannot silently re-lock what someone read.
 model ElementProgress {
   id        String   @id @default(uuid())
@@ -349,45 +391,109 @@ model ElementProgress {
 }
 
 model QuizAttempt {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
   userId      Int
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   quizId      String
-  quiz        Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quiz        Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  /// Always 0 for a LEARNING_CHECK: those are formative, and the rule is that the
+  /// mark is never kept. What survives is the row itself, which is how the
+  /// dashboard answers "did they attempt it".
   score       Int
   total       Int
-  completedAt DateTime @default(now())
+  completedAt DateTime     @default(now())
+  /// The paper itself, kept only for ONE_TIME quizzes — the admin dashboard shows
+  /// what that person actually chose, and there is no retake to supersede it.
+  answers     QuizAnswer[]
 
   @@index([userId, quizId])
+  @@index([quizId])
 }
 
-// Quizzes are multiple choice only: each Question has N Options, one of which is correct.
-// Every quiz belongs to one module, and a module may hold several — the quizzes of
-// a course are the quizzes of its modules. `moduleId` stays nullable only so quizzes
-// created before this rule survive; the API requires it.
-model Quiz {
-  id          String        @id @default(uuid())
-  title       String
-  description String?
-  moduleId    String?
-  module      Module?       @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  /// Position within the module, sharing one sequence with Element.order so a
-  /// quiz can sit between two pieces of content.
-  order       Int           @default(0)
-  published   Boolean       @default(false) // hidden from learners until published
-  showAnswers Boolean       @default(false) // admin toggle: reveal correct answers after an attempt
-  dueDate     DateTime? // falls back to the course due date when not set
-  /// Minutes a learner gets once they start. Null means untimed.
-  timeLimitMinutes Int?
-  /// When the quiz was added, for the same reason as Module.createdAt.
-  createdAt   DateTime      @default(now())
-  deletedAt   DateTime? // soft delete: recoverable from the admin dashboard
-  questions   Question[]
-  attempts    QuizAttempt[]
-  sessions    QuizSession[]
-  assignments Assignment[]
+/// One question as it was answered, frozen at submission time.
+///
+/// The prompt and option texts are copied rather than joined back to Question and
+/// Option. A ONE_TIME quiz is a record of what somebody was asked and what they
+/// said, and an author editing the quiz afterwards must not rewrite that.
+model QuizAnswer {
+  id         String      @id @default(uuid())
+  attemptId  String
+  attempt    QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId String
+  order      Int
+  prompt     String      @db.Text
+  /// What they picked, in the order the options were shown.
+  chosen     String[]    @default([])
+  /// What would have been right, so the answer reads without the quiz beside it.
+  correct    String[]    @default([])
+  wasCorrect Boolean     @default(false)
 
-  @@index([moduleId])
+  @@index([attemptId])
+}
+
+/// Which of the three kinds of quiz this is. The kind decides where it may live,
+/// whether it can be timed, whether the mark is kept, and who may see it.
+enum QuizType {
+  /// A formative check inside a section. Never timed, mark never stored, never
+  /// listed on the Quizzes tab — but it must be attempted before the learner may
+  /// move on to the next element.
+  LEARNING_CHECK
+  /// The ordinary graded quiz. Stands alone or sits in a section, may be timed,
+  /// scores go to the dashboard, appears on the Quizzes tab.
+  EXAM
+  /// Sent as a one-off link. One attempt, then it disappears — and it is never
+  /// listed on the Quizzes tab even for someone signed in with that address.
+  ONE_TIME
+}
+
+// Quizzes are multiple choice or multiple answer: each Question has N Options and
+// one or more of them is correct.
+//
+// A LEARNING_CHECK always belongs to a section. An EXAM may belong to one or stand
+// alone. A ONE_TIME quiz always stands alone, because it is only ever reached
+// through its link.
+model Quiz {
+  id               String        @id @default(uuid())
+  title            String
+  description      String?
+  type             QuizType      @default(EXAM)
+  sectionId        String?
+  section          Section?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  /// Position within the section, sharing one sequence with Element.order so a
+  /// quiz can sit between two pieces of content.
+  order            Int           @default(0)
+  published        Boolean       @default(false) // hidden from learners until published
+  /// Show the score screen — the ring and the percentage — after submitting.
+  /// Off means the learner is moved straight on without being told how they did.
+  showResults      Boolean       @default(true)
+  showAnswers      Boolean       @default(false) // admin toggle: reveal correct answers after an attempt
+  /// Whether an EXAM may be sat more than once.
+  ///
+  /// Off by default, which is what an exam means unless the author says
+  /// otherwise: one sitting, one mark. On, and the learner is offered Try again
+  /// on the result screen and when they come back to it later.
+  ///
+  /// Meaningless on the other two kinds and ignored there. A LEARNING_CHECK is
+  /// always retakeable — it keeps no mark, so there is nothing to protect — and
+  /// a ONE_TIME quiz never is, which is the whole of what it is for.
+  allowMultipleAttempts Boolean  @default(false)
+  dueDate          DateTime? // falls back to the course due date when not set
+  /// Days the learner gets once this quiz is handed to them. Same idea as
+  /// Course.daysRemaining, and read the same way when an assignment is made.
+  daysRemaining    Int?
+  /// Minutes a learner gets once they start. Null means untimed, and is forced
+  /// for a LEARNING_CHECK.
+  timeLimitMinutes Int?
+  /// When the quiz was added, for the same reason as Section.createdAt.
+  createdAt        DateTime      @default(now())
+  deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
+  questions        Question[]
+  attempts         QuizAttempt[]
+  sessions         QuizSession[]
+  assignments      Assignment[]
+
+  @@index([sectionId])
+  @@index([type])
 }
 
 /// One learner's run at a timed quiz.
@@ -412,14 +518,14 @@ model QuizSession {
 }
 
 model Question {
-  id       String   @id @default(uuid())
-  quizId   String
-  quiz     Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  order    Int       // position within the quiz
-  prompt   String
-  hint     String? // shown in a popup when the learner asks for a hint
-  hintModuleNumber String? // optional module number the hint points back to, e.g. "1.2"
-  options  Option[]
+  id                String   @id @default(uuid())
+  quizId            String
+  quiz              Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  order             Int // position within the quiz
+  prompt            String
+  hint              String? // shown in a popup when the learner asks for a hint
+  hintSectionNumber String? // optional section number the hint points back to, e.g. "1.2"
+  options           Option[]
 
   @@index([quizId])
 }
@@ -428,7 +534,7 @@ model Option {
   id         String   @id @default(uuid())
   questionId String
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  order      Int       // position within the question
+  order      Int // position within the question
   text       String
   isCorrect  Boolean  @default(false)
 

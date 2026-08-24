@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { AssignmentType } from '../../../generated/prisma';
+import { AssignmentType, CourseKind } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
 /** The assigner, joined onto every author-facing read so mail can come from them. */
@@ -13,6 +13,14 @@ const withAssigner = {
   assignedBy: { select: { id: true, email: true, name: true } },
 } as const;
 
+/**
+ * Every read and write of the `Assignment` table — who was given what, and how.
+ *
+ * An assignment is one course or one quiz handed to one address, so somebody
+ * given three courses has three rows and three separate links. Author-facing
+ * reads join `withAssigner` above, because mail about an assignment goes out as
+ * the person who set it rather than from a system mailbox.
+ */
 export default class AssignmentGateway {
   static create(data: {
     type: AssignmentType;
@@ -121,8 +129,21 @@ export default class AssignmentGateway {
     return prisma.assignment.update({ where: { id }, data: { revokedAt: new Date() } });
   }
 
+  /**
+   * Turns a link back on, and gives a completed one its result view back — see
+   * `AssignmentService.restore` for why that comes with it rather than being a
+   * separate switch.
+   */
   static restore(id: string) {
-    return prisma.assignment.update({ where: { id }, data: { revokedAt: null } });
+    return prisma.assignment.update({
+      where: { id },
+      data: { revokedAt: null, resultsSeenAt: null },
+    });
+  }
+
+  /** Records that the one visit a completed link still had has been used. */
+  static markResultsSeen(id: string) {
+    return prisma.assignment.update({ where: { id }, data: { resultsSeenAt: new Date() } });
   }
 
   /** Only the due date is editable after the fact; the rest defines the grant. */
@@ -145,11 +166,11 @@ export default class AssignmentGateway {
   static clearCourseProgress(userId: number, courseId: string) {
     return prisma.$transaction([
       prisma.elementProgress.deleteMany({
-        where: { userId, element: { module: { courseId } } },
+        where: { userId, element: { section: { courseId } } },
       }),
-      prisma.moduleProgress.deleteMany({ where: { userId, module: { courseId } } }),
-      prisma.quizAttempt.deleteMany({ where: { userId, quiz: { module: { courseId } } } }),
-      prisma.quizSession.deleteMany({ where: { userId, quiz: { module: { courseId } } } }),
+      prisma.sectionProgress.deleteMany({ where: { userId, section: { courseId } } }),
+      prisma.quizAttempt.deleteMany({ where: { userId, quiz: { section: { courseId } } } }),
+      prisma.quizSession.deleteMany({ where: { userId, quiz: { section: { courseId } } } }),
       prisma.courseCompletion.deleteMany({ where: { userId, courseId } }),
     ]);
   }
@@ -164,6 +185,47 @@ export default class AssignmentGateway {
 
   static touch(id: string) {
     return prisma.assignment.update({ where: { id }, data: { lastAccessedAt: new Date() } });
+  }
+
+  /**
+   * Closes whatever links handed this quiz to this person, once they have handed
+   * it in. Only one-time quizzes call this.
+   *
+   * Keyed on the address rather than on a single assignment id because the
+   * submission arrives from either the link or a signed-in session, and both are
+   * the same person as far as the User row is concerned. `updateMany` so a quiz
+   * completed without any assignment behind it — an author trying their own — is
+   * a no-op rather than a failure.
+   */
+  static async markQuizCompleted(userId: number, quizId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) return { count: 0 };
+
+    // A one-time link may now be the whole of a quiz set, and a set is handed
+    // over as a link to the *course* — so the assignment carrying it names the
+    // course and leaves `quizId` null. Matching on the quiz alone would leave
+    // that link recorded as outstanding for ever, however long ago the paper
+    // went in.
+    //
+    // Safe to close the course row because a one-time link is the only quiz in
+    // its set, which QuizService and CurriculumService both enforce; the kind is
+    // still checked here rather than assumed, so a lesson that somehow held one
+    // could not close itself off the back of a single quiz.
+    const owner = await prisma.quiz.findUnique({
+      where: { id: quizId },
+      select: { section: { select: { course: { select: { id: true, kind: true } } } } },
+    });
+    const course = owner?.section?.course;
+    const courseId = course?.kind === CourseKind.QUIZ_SET ? course.id : null;
+
+    return prisma.assignment.updateMany({
+      where: {
+        email: user.email,
+        completedAt: null,
+        OR: courseId ? [{ quizId }, { courseId }] : [{ quizId }],
+      },
+      data: { completedAt: new Date() },
+    });
   }
 
   /** Existing assignment for the same person and the same item, if there is one. */

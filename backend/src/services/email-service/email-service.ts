@@ -62,14 +62,14 @@ type AssignmentEmailRequest = {
   resend?: boolean;
 };
 
-/** One module or quiz that has appeared in a course since someone finished it. */
+/** One section or quiz that has appeared in a course since someone finished it. */
 export type NewContentItem = {
-  kind: 'module' | 'quiz';
-  /** "2.3" for a module, or the number of the module a quiz sits in. */
+  kind: 'section' | 'quiz';
+  /** "2.3" for a section, or the number of the section a quiz sits in. */
   number: string;
   title: string;
-  /** The section it landed in, e.g. "2. Working safely". */
-  section: string;
+  /** The module it landed in, e.g. "2. Working safely". */
+  module: string;
 };
 
 type NewContentEmailRequest = {
@@ -120,7 +120,8 @@ function parseConfig(): GmailApiConfig {
 
   if (!raw) {
     throw new Error(
-      'GOOGLE_GMAIL_API_CONFIG is not set. Add the Google Gmail API credentials JSON to enable sending email.',
+      'GOOGLE_GMAIL_API_CONFIG is not set. Add the Google Gmail API credentials JSON to ' +
+        'enable sending email.',
     );
   }
 
@@ -235,24 +236,24 @@ function composeAssignmentEmail({
 /**
  * The "there is more to do" message.
  *
- * Names the section and the modules rather than saying "this course changed",
+ * Names the module and the sections rather than saying "this course changed",
  * because someone who has already finished a course needs to know what is left
- * for them, not that an edit happened. Items are grouped under their section
+ * for them, not that an edit happened. Items are grouped under their module
  * heading in the order the course reads.
  */
 function composeNewContentEmail({ courseId, courseTitle, items, sender }: NewContentEmailRequest): {
   subject: string;
   body: string;
 } {
-  const bySection = new Map<string, NewContentItem[]>();
+  const byModule = new Map<string, NewContentItem[]>();
   for (const item of items) {
-    bySection.set(item.section, [...(bySection.get(item.section) ?? []), item]);
+    byModule.set(item.module, [...(byModule.get(item.module) ?? []), item]);
   }
 
-  const outline = [...bySection.entries()]
+  const outline = [...byModule.entries()]
     .map(
-      ([section, entries]) =>
-        `${section}\n` +
+      ([module, entries]) =>
+        `${module}\n` +
         entries
           .map(
             (entry) => `  - ${entry.kind === 'quiz' ? 'Quiz: ' : ''}${entry.number} ${entry.title}`,
@@ -299,7 +300,7 @@ export default class EmailService {
    * Tells someone a course they had finished has gained content.
    *
    * Never throws, for the same reason as the assignment mail: this is triggered
-   * by an author adding a module, and their edit must land whether or not the
+   * by an author adding a section, and their edit must land whether or not the
    * mail does.
    */
   static async sendNewContentEmail(request: NewContentEmailRequest): Promise<Delivery> {

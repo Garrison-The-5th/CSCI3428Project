@@ -1,7 +1,7 @@
 /**
  * File: security-config.test.ts
  * Description: Unit tests for logging redaction, proxy trust resolution,
- *   section colour parsing and email redaction.
+ *   module colour parsing and email redaction.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -10,7 +10,7 @@ import type { Request } from 'express';
 
 import { clientAddress, configureTrustProxy, parseTrustProxy } from '@/config/client-address';
 import { safeForLog } from '@/config/logger';
-import { parseSectionColor, SECTION_COLORS } from '@/config/section-colors';
+import { MODULE_COLORS, parseModuleColor } from '@/config/module-colors';
 import { maskSensitivePath } from '@/controllers/middleware/request-logger';
 import { redactEmail, redactTokens } from '@/services/email-service/email-service';
 
@@ -151,30 +151,30 @@ describe('clientAddress', () => {
   });
 });
 
-describe('parseSectionColor', () => {
+describe('parseModuleColor', () => {
   it('accepts every colour in the palette', () => {
-    for (const colour of SECTION_COLORS) {
-      expect(parseSectionColor(colour)).toBe(colour);
+    for (const colour of MODULE_COLORS) {
+      expect(parseModuleColor(colour)).toBe(colour);
     }
   });
 
   it('normalises case', () => {
-    expect(parseSectionColor(SECTION_COLORS[0].toUpperCase())).toBe(SECTION_COLORS[0]);
+    expect(parseModuleColor(MODULE_COLORS[0].toUpperCase())).toBe(MODULE_COLORS[0]);
   });
 
   it('treats empty and null as clearing the tint', () => {
-    expect(parseSectionColor('')).toBeNull();
-    expect(parseSectionColor(null)).toBeNull();
-    expect(parseSectionColor(undefined)).toBeNull();
+    expect(parseModuleColor('')).toBeNull();
+    expect(parseModuleColor(null)).toBeNull();
+    expect(parseModuleColor(undefined)).toBeNull();
   });
 
   /**
-   * A closed palette, so a section can only hold a colour the UI knows how to
+   * A closed palette, so a module can only hold a colour the UI knows how to
    * render — and so an arbitrary string cannot reach a style attribute.
    */
   it('refuses a colour outside the palette', () => {
-    expect(() => parseSectionColor('#ff0000')).toThrow(/not one of the section colours/);
-    expect(() => parseSectionColor('red')).toThrow();
-    expect(() => parseSectionColor('javascript:alert(1)')).toThrow();
+    expect(() => parseModuleColor('#ff0000')).toThrow(/not one of the module colours/);
+    expect(() => parseModuleColor('red')).toThrow();
+    expect(() => parseModuleColor('javascript:alert(1)')).toThrow();
   });
 });

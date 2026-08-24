@@ -92,7 +92,7 @@ describe('EmailService — assignment messages', () => {
       to: 'ada@example.com',
       courseId: 'c1',
       courseTitle: 'Fire safety',
-      items: [{ kind: 'module', number: '2.3', title: 'Extinguishers', section: '2. Equipment' }],
+      items: [{ kind: 'section', number: '2.3', title: 'Extinguishers', module: '2. Equipment' }],
     });
 
     // Not configured, so not sent — but composed without throwing.
@@ -101,64 +101,62 @@ describe('EmailService — assignment messages', () => {
 });
 
 describe('NotificationService.newItemsSince', () => {
-  it('lists modules added since a moment', async () => {
-    curriculum.getModulesAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'New module', section: { number: 2, title: 'Equipment' } },
+  it('lists sections added since a moment', async () => {
+    curriculum.getSectionsAddedSince.mockResolvedValue([
+      { id: 'm2', number: '2.1', title: 'New section', module: { number: 2, title: 'Equipment' } },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
 
     expect(items).toEqual([
-      { kind: 'module', number: '2.1', title: 'New module', section: '2. Equipment' },
+      { kind: 'section', number: '2.1', title: 'New section', module: '2. Equipment' },
     ]);
   });
 
   /**
-   * A quiz inside a module that is itself new would be listed twice over — the
-   * module line already covers it.
+   * A quiz inside a section that is itself new would be listed twice over — the
+   * section line already covers it.
    */
-  it('omits a quiz whose module is also new', async () => {
-    curriculum.getModulesAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'New module', section: { number: 2, title: 'Equipment' } },
+  it('omits a quiz whose section is also new', async () => {
+    curriculum.getSectionsAddedSince.mockResolvedValue([
+      { id: 'm2', number: '2.1', title: 'New section', module: { number: 2, title: 'Equipment' } },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([
       {
         id: 'q1',
         title: 'New quiz',
-        module: { id: 'm2', number: '2.1', section: { number: 2, title: 'Equipment' } },
+        section: { id: 'm2', number: '2.1', module: { number: 2, title: 'Equipment' } },
       },
     ] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
     expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe('module');
+    expect(items[0].kind).toBe('section');
   });
 
-  it('includes a quiz added to an existing module', async () => {
-    curriculum.getModulesAddedSince.mockResolvedValue([] as never);
+  it('includes a quiz added to an existing section', async () => {
+    curriculum.getSectionsAddedSince.mockResolvedValue([] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([
       {
         id: 'q1',
         title: 'New quiz',
-        module: { id: 'm1', number: '1.1', section: { number: 1, title: 'Intro' } },
+        section: { id: 'm1', number: '1.1', module: { number: 1, title: 'Intro' } },
       },
     ] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
-    expect(items).toEqual([
-      { kind: 'quiz', number: '1.1', title: 'New quiz', section: '1. Intro' },
-    ]);
+    expect(items).toEqual([{ kind: 'quiz', number: '1.1', title: 'New quiz', module: '1. Intro' }]);
   });
 
-  it('labels a module with no section as ungrouped rather than crashing', async () => {
-    curriculum.getModulesAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'Orphan', section: null },
+  it('labels a section with no module as ungrouped rather than crashing', async () => {
+    curriculum.getSectionsAddedSince.mockResolvedValue([
+      { id: 'm2', number: '2.1', title: 'Orphan', module: null },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
-    expect(items[0].section).toBe('Ungrouped');
+    expect(items[0].module).toBe('Ungrouped');
   });
 });
 
@@ -181,7 +179,7 @@ describe('NotificationService.announceNewContent', () => {
   });
 
   /**
-   * An author building out a section adds five modules in five minutes; without
+   * An author building out a module adds five sections in five minutes; without
    * a quiet period that is five emails about the same course.
    */
   it('skips a learner still inside the quiet period', async () => {
@@ -201,7 +199,7 @@ describe('NotificationService.announceNewContent', () => {
 
     await NotificationService.announceNewContent('c1');
 
-    expect(curriculum.getModulesAddedSince).not.toHaveBeenCalled();
+    expect(curriculum.getSectionsAddedSince).not.toHaveBeenCalled();
     expect(curriculum.markCompletionNotified).not.toHaveBeenCalled();
   });
 
@@ -241,8 +239,94 @@ describe('EnrolmentService', () => {
 
 describe('InsightsService', () => {
   beforeEach(() => {
-    curriculum.getViewedModuleIds.mockResolvedValue([] as never);
+    curriculum.getViewedSectionIds.mockResolvedValue([] as never);
     quizzes.getAttemptsForUser.mockResolvedValue([] as never);
+    // The default for these tests is a learner who has been sent no one-time
+    // quizzes; the panel that shows them has its own tests below.
+    quizzes.getAnsweredAttempts.mockResolvedValue([] as never);
+  });
+
+  /**
+   * One-time quizzes are filed under the learner rather than under the quiz,
+   * because they disappear from the learner's own side the moment they are
+   * handed in — this is the only record of what was asked and answered.
+   */
+  it('reports a completed one-time quiz with the paper', async () => {
+    assignments.listAll.mockResolvedValue([
+      {
+        email: 'ada@example.com',
+        courseId: null,
+        assignedAt: new Date(),
+        dueDate: null,
+        revokedAt: null,
+        lastAccessedAt: null,
+      },
+    ] as never);
+    auth.getUserByEmail.mockResolvedValue({
+      id: 1,
+      email: 'ada@example.com',
+      name: 'Ada',
+      lastSignInAt: new Date(),
+    } as never);
+    quizzes.getAnsweredAttempts.mockResolvedValue([
+      {
+        id: 'attempt-1',
+        score: 1,
+        total: 2,
+        completedAt: new Date('2026-08-01T10:00:00Z'),
+        quiz: { id: 'quiz-1', title: 'Induction', type: 'ONE_TIME' },
+        answers: [
+          {
+            questionId: 'q1',
+            order: 1,
+            prompt: 'Where is the muster point?',
+            chosen: ['Car park'],
+            correct: ['Car park'],
+            wasCorrect: true,
+          },
+          {
+            questionId: 'q2',
+            order: 2,
+            prompt: 'Who do you report to?',
+            chosen: ['Nobody'],
+            correct: ['Site manager'],
+            wasCorrect: false,
+          },
+        ],
+      },
+    ] as never);
+
+    const [learner] = await InsightsService.listLearners(null);
+
+    expect(learner.oneTimeQuizzes).toHaveLength(1);
+    const [paper] = learner.oneTimeQuizzes;
+    expect(paper.title).toBe('Induction');
+    // 1 of 2 is 50%, and the percentage is worked out here rather than stored.
+    expect(paper.percent).toBe(50);
+    expect(paper.answers.map((answer) => answer.wasCorrect)).toEqual([true, false]);
+    expect(paper.answers[1].correct).toEqual(['Site manager']);
+  });
+
+  it('reports no papers for someone who has never been sent one', async () => {
+    assignments.listAll.mockResolvedValue([
+      {
+        email: 'ada@example.com',
+        courseId: null,
+        assignedAt: new Date(),
+        dueDate: null,
+        revokedAt: null,
+        lastAccessedAt: null,
+      },
+    ] as never);
+    auth.getUserByEmail.mockResolvedValue({
+      id: 1,
+      email: 'ada@example.com',
+      name: 'Ada',
+      lastSignInAt: new Date(),
+    } as never);
+
+    const [learner] = await InsightsService.listLearners(null);
+    expect(learner.oneTimeQuizzes).toEqual([]);
   });
 
   it('returns nothing when nobody has been assigned anything', async () => {
@@ -324,11 +408,11 @@ describe('InsightsService', () => {
       title: 'Fire safety',
       imageData: null,
       imageType: null,
-      modules: [{ id: 'm1', quizzes: [{ id: 'q1' }] }],
+      sections: [{ id: 'm1', quizzes: [{ id: 'q1' }] }],
     } as never);
     curriculum.getCourseById.mockResolvedValue({ dueDate: null } as never);
-    curriculum.getViewedModuleIds.mockResolvedValue([
-      { moduleId: 'm1', viewedAt: new Date() },
+    curriculum.getViewedSectionIds.mockResolvedValue([
+      { sectionId: 'm1', viewedAt: new Date() },
     ] as never);
     quizzes.getAttemptsForUser.mockResolvedValue([
       { quizId: 'q1', score: 2, total: 10, completedAt: new Date() },
@@ -361,7 +445,7 @@ describe('InsightsService', () => {
       title: 'Fire safety',
       imageData: null,
       imageType: null,
-      modules: [{ id: 'm1', quizzes: [] }],
+      sections: [{ id: 'm1', quizzes: [] }],
     } as never);
     curriculum.getCourseById.mockResolvedValue({ dueDate: null } as never);
 
@@ -397,5 +481,35 @@ describe('InsightsService', () => {
   it('returns null for a learner who holds nothing the caller assigned', async () => {
     assignments.listAll.mockResolvedValue([] as never);
     expect(await InsightsService.getLearner('nobody@example.com', 5)).toBeNull();
+  });
+
+  /**
+   * Addresses are matched without regard to case, because an assignment is
+   * keyed on whatever was typed into the box and "Ada@Example.com" is the same
+   * person as "ada@example.com". Only the null path was covered before, so a
+   * lookup that stopped finding anyone would have gone unnoticed.
+   */
+  it('finds a learner whose address was typed in a different case', async () => {
+    assignments.listAll.mockResolvedValue([
+      {
+        email: 'Ada@Example.com',
+        courseId: null,
+        assignedAt: new Date(),
+        dueDate: null,
+        revokedAt: null,
+        lastAccessedAt: null,
+      },
+    ] as never);
+    auth.getUserByEmail.mockResolvedValue({
+      id: 1,
+      email: 'ada@example.com',
+      name: 'Ada',
+      lastSignInAt: new Date(),
+    } as never);
+
+    const learner = await InsightsService.getLearner('ADA@example.com', 5);
+
+    expect(learner).not.toBeNull();
+    expect(learner!.email).toBe('ada@example.com');
   });
 });

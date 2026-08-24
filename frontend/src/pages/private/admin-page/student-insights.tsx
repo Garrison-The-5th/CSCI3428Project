@@ -11,7 +11,7 @@
  * Three depths, each a step narrower:
  *   list   : every learner, with a short bar per course under their name
  *   learner: one person, their courses as cards
- *   course : one person on one course — sections done, quizzes, marks, last seen
+ *   course : one person on one course — modules done, quizzes, marks, last seen
  *
  * Which one is showing lives in this component's state rather than the URL. The
  * dashboard already owns the ?tab= parameter, and nesting a second router-driven
@@ -79,6 +79,8 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
   const [search, setSearch] = useState('');
   const [openEmail, setOpenEmail] = useState<string | null>(null);
   const [openCourseId, setOpenCourseId] = useState<string | null>(null);
+  /** Which one-time quiz paper is expanded, if any. */
+  const [openPaperId, setOpenPaperId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -135,15 +137,15 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
             <ProgressDonut
               percent={openCourse.percentComplete}
               size={110}
-              caption={`${openCourse.completedModules} of ${openCourse.totalModules} modules`}
+              caption={`${openCourse.completedSections} of ${openCourse.totalSections} sections`}
             />
 
             <dl className="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-3">
               <div>
-                <dt className="text-xs font-medium text-dark-gray">Modules completed</dt>
+                <dt className="text-xs font-medium text-dark-gray">Sections completed</dt>
                 <dd className="text-xl font-bold text-dark-gray">
-                  {openCourse.completedModules}
-                  <span className="text-sm font-normal">/{openCourse.totalModules}</span>
+                  {openCourse.completedSections}
+                  <span className="text-sm font-normal">/{openCourse.totalSections}</span>
                 </dd>
               </div>
               <div>
@@ -279,8 +281,8 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
                       />
                     </span>
                     <p className="mt-1 text-xs text-dark-gray">
-                      {course.percentComplete}% · {course.completedModules}/{course.totalModules}{' '}
-                      modules
+                      {course.percentComplete}% · {course.completedSections}/{course.totalSections}{' '}
+                      sections
                     </p>
                   </CardHeader>
 
@@ -300,6 +302,85 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
               );
             })}
           </div>
+        )}
+
+        {/*
+          One-time quizzes, filed under the person rather than under the quiz.
+          They vanish from the learner's own side the moment they are handed in,
+          so this is the only record of what was asked and what was answered —
+          which is why the paper is shown in full rather than just a mark.
+        */}
+        {openLearner.oneTimeQuizzes.length > 0 && (
+          <Card className="mt-8 bg-light-gray shadow-sm">
+            <CardHeader className="p-4">
+              <CardTitle className="text-lg text-dark-gray">One-time quizzes completed</CardTitle>
+              <p className="text-sm text-dark-gray">
+                Sent by link and taken once. The learner can no longer see these.
+              </p>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {openLearner.oneTimeQuizzes.map((paper) => (
+                <div key={paper.attemptId} className="rounded-lg border border-gray-300 bg-white">
+                  <button
+                    onClick={() =>
+                      setOpenPaperId(openPaperId === paper.attemptId ? null : paper.attemptId)
+                    }
+                    className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left"
+                    aria-expanded={openPaperId === paper.attemptId}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words font-semibold text-dark-gray">
+                        {paper.title}
+                      </span>
+                      <span className="block text-xs text-dark-gray">
+                        Completed {new Date(paper.completedAt).toLocaleString()}
+                      </span>
+                    </span>
+                    <Badge className="bg-navy px-2 text-white">
+                      {paper.score}/{paper.total} · {paper.percent}%
+                    </Badge>
+                  </button>
+
+                  {openPaperId === paper.attemptId && (
+                    <ul className="flex flex-col gap-3 border-t border-gray-300 p-4">
+                      {paper.answers.map((answer) => (
+                        <li key={answer.questionId}>
+                          <p className="flex items-start gap-2 font-medium text-dark-gray">
+                            <span
+                              className={
+                                answer.wasCorrect
+                                  ? 'shrink-0 font-bold text-green'
+                                  : 'shrink-0 font-bold text-danger'
+                              }
+                              aria-label={answer.wasCorrect ? 'Correct' : 'Incorrect'}
+                            >
+                              {answer.wasCorrect ? '✓' : '✗'}
+                            </span>
+                            <span className="min-w-0 break-words">
+                              {answer.order}. {answer.prompt}
+                            </span>
+                          </p>
+                          <p className="mt-1 ml-6 text-sm text-dark-gray">
+                            Answered: {answer.chosen.length > 0 ? answer.chosen.join(', ') : '—'}
+                          </p>
+                          {!answer.wasCorrect && (
+                            <p className="ml-6 text-sm text-dark-gray">
+                              Correct: {answer.correct.join(', ')}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                      {paper.answers.length === 0 && (
+                        <li className="text-sm text-dark-gray">
+                          No answers were recorded for this attempt.
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         )}
       </div>
     );

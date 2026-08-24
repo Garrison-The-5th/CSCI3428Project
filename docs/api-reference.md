@@ -18,7 +18,7 @@ production reverse proxy.
 
 **Authentication.** A Keycloak-issued JWT in `Authorization: Bearer <token>`,
 verified RS256 server-side. The one exception is `/public/assignments/:token/*`,
-where the token in the path is the credential — see the note under that section.
+where the token in the path is the credential — see the note under that module.
 
 **Content type.** Requests carrying a body must send
 `Content-Type: application/json` (or `multipart/form-data` for uploads).
@@ -105,10 +105,10 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `PUT` | `/curriculum/courses/:id/contributors` | signed in, author/admin | Only a global author may change who can edit a course |
 | `GET` | `/curriculum/courses/manage` | signed in, author/admin | Author view: drafts included |
 | `GET` | `/curriculum/deleted` | signed in, author/admin | Everything in the recycle bin, for the admin dashboard |
-| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores every deleted course and module in one go |
+| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores every deleted course and section in one go |
 | `DELETE` | `/curriculum/deleted` | signed in, author/admin | Empties the recycle bin |
 | `DELETE` | `/curriculum/deleted/courses/:id` | signed in, author/admin | Permanently removes one deleted course |
-| `DELETE` | `/curriculum/deleted/modules/:id` | signed in, author/admin | Permanently removes one deleted module |
+| `DELETE` | `/curriculum/deleted/sections/:id` | signed in, author/admin | Permanently removes one deleted section |
 | `GET` | `/curriculum/courses/:id` | signed in | One course for a learner |
 | `POST` | `/curriculum/courses` | signed in, author/admin | Creates a course from just a name; everything else is set by editing it |
 | `PUT` | `/curriculum/courses/:id` | signed in, can edit this course | Creates a course from just a name; everything else is set by editing it |
@@ -118,24 +118,24 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `DELETE` | `/curriculum/courses/:id` | signed in, can edit this course | Soft delete — the course moves to the recycle bin and can be restored |
 | `POST` | `/curriculum/courses/:id/restore` | signed in, author/admin | Soft delete — the course moves to the recycle bin and can be restored |
 | `POST` | `/curriculum/courses/:id/image` | signed in, can edit this course, upload quota | Uploads the course cover photo shown on the Learning page |
-| `GET` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | Uploads the course cover photo shown on the Learning page |
-| `POST` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | A section takes a title and the place in the course it should occupy |
-| `PUT` | `/curriculum/sections/:id` | signed in, can edit this course | A section takes a title and the place in the course it should occupy |
-| `DELETE` | `/curriculum/sections/:id` | signed in, can edit this course | Soft delete — the section and its modules move to the recycle bin |
-| `POST` | `/curriculum/sections/:id/restore` | signed in, author/admin | Soft delete — the section and its modules move to the recycle bin |
-| `DELETE` | `/curriculum/deleted/sections/:id` | signed in, author/admin | Permanently removes one deleted section |
-| `POST` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | Permanently removes one deleted section |
+| `GET` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | Uploads the course cover photo shown on the Learning page |
+| `POST` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
+| `PUT` | `/curriculum/modules/:id` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
+| `DELETE` | `/curriculum/modules/:id` | signed in, can edit this course | Soft delete — the module and its sections move to the recycle bin |
+| `POST` | `/curriculum/modules/:id/restore` | signed in, author/admin | Soft delete — the module and its sections move to the recycle bin |
+| `DELETE` | `/curriculum/deleted/modules/:id` | signed in, author/admin | Permanently removes one deleted module |
+| `POST` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | Permanently removes one deleted module |
 | `PUT` | `/curriculum/courses/:courseId/structure` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
-| `PUT` | `/curriculum/modules/:id` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
-| `DELETE` | `/curriculum/modules/:id` | signed in, can edit this course | Soft delete — the module moves to the recycle bin and can be restored |
-| `POST` | `/curriculum/modules/:id/restore` | signed in, author/admin | Soft delete — the module moves to the recycle bin and can be restored |
-| `POST` | `/curriculum/modules/:id/image` | signed in, can edit this course, upload quota | Uploads an image or PDF and stores it on the module as an element |
-| `POST` | `/curriculum/modules/:id/view` | signed in | Modules auto-complete on view, so opening one records progress |
+| `PUT` | `/curriculum/sections/:id` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
+| `DELETE` | `/curriculum/sections/:id` | signed in, can edit this course | Soft delete — the section moves to the recycle bin and can be restored |
+| `POST` | `/curriculum/sections/:id/restore` | signed in, author/admin | Soft delete — the section moves to the recycle bin and can be restored |
+| `POST` | `/curriculum/sections/:id/image` | signed in, can edit this course, upload quota | Uploads an image or PDF and stores it on the section as an element |
+| `POST` | `/curriculum/sections/:id/view` | signed in | Sections auto-complete on view, so opening one records progress |
 | `POST` | `/curriculum/elements/:id/view` | signed in | Records one piece of content as seen |
-| `PUT` | `/curriculum/modules/:id/content-order` | signed in, can edit this course | Reorders a module's content, where elements and quizzes are interleaved |
-| `POST` | `/curriculum/modules/:moduleId/elements` | signed in, can edit this course | Reorders a module's content, where elements and quizzes are interleaved |
-| `PUT` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a module's content, where elements and quizzes are interleaved |
-| `DELETE` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a module's content, where elements and quizzes are interleaved |
+| `PUT` | `/curriculum/sections/:id/content-order` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
+| `POST` | `/curriculum/sections/:sectionId/elements` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
+| `PUT` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
+| `DELETE` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
 | `GET` | `/curriculum/progress` | signed in | What this learner has already done |
 | `GET` | `/curriculum/dashboard` | signed in | Everything the home dashboard needs for the signed-in user |
 | `GET` | `/curriculum/instructors` | signed in, author/admin | Authors only |
@@ -168,7 +168,7 @@ Defined in `backend/src/controllers/**/public-assignment-controller.ts`.
 | `GET` | `/public/assignments/:token/quizzes` | public | Every quiz assigned to this email, directly or through a course |
 | `GET` | `/public/assignments/:token/dashboard` | public | The same dashboard a signed-in learner gets, over assigned content only |
 | `GET` | `/public/assignments/:token/progress` | public | The same dashboard a signed-in learner gets, over assigned content only |
-| `POST` | `/public/assignments/:token/modules/:moduleId/view` | public | The same dashboard a signed-in learner gets, over assigned content only |
+| `POST` | `/public/assignments/:token/sections/:sectionId/view` | public | The same dashboard a signed-in learner gets, over assigned content only |
 | `POST` | `/public/assignments/:token/elements/:elementId/view` | public | One piece of content seen — what unlocks the next on a sequential course |
 | `POST` | `/public/assignments/:token/quizzes/:quizId/start` | public | Starts the clock on an assigned quiz, or reports the one already running |
 | `POST` | `/public/assignments/:token/quizzes/:quizId/attempt` | public | Starts the clock on an assigned quiz, or reports the one already running |
@@ -181,6 +181,29 @@ Defined in `backend/src/controllers/**/public-assignment-controller.ts`.
 ### `/quizzes`
 
 Defined in `backend/src/controllers/**/quiz-controller.ts`.
+
+A quiz has a `type`, and the type decides what the rest of these endpoints will
+accept for it:
+
+| Type | Lives | Timer | Mark kept | Listed on `GET /quizzes` |
+|---|---|---|---|---|
+| `LEARNING_CHECK` | inside a section only | never | no | no |
+| `EXAM` (default) | a section, or on its own | optional | yes | yes |
+| `ONE_TIME` | on its own only | optional | yes | no, ever |
+
+`POST /quizzes` and `PUT /quizzes/:id` enforce those rules rather than trusting
+the caller: a learning check without a `sectionId` is refused, a one-time quiz
+*with* one is refused, and a time limit sent for a learning check is dropped.
+
+`POST /quizzes/:id/attempt` takes `answers` as question id → **array** of option
+ids, so a multiple-answer question sends several. A bare string is still accepted
+for one. A question is right only when the set matches exactly. The reply carries
+`perQuestion` (a tick or cross each), `showResults` (false means the client must
+move the learner on without showing a score), and `correctOptionIds` only when
+the author enabled *Show correct answers*.
+
+Starting or submitting a `ONE_TIME` quiz a second time answers **409**, not 400 —
+it is a state to render, not a request to fix.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|

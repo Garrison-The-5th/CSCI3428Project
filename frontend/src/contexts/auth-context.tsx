@@ -39,6 +39,11 @@ interface AuthContextType {
 const hasEitherRole = (role: string) =>
   keycloak.hasResourceRole(role) || keycloak.hasRealmRole(role);
 
+/**
+ * Whether the signed-in user holds the admin role, in either place Keycloak
+ * can put it — realm-level or on this client. Checking only one of the two has
+ * been the cause of "my admin cannot see the admin tabs" more than once.
+ */
 export const isAdminUser = () => hasEitherRole('admin');
 
 /** Contributors have the same authoring rights as admins over courses and quizzes. */

@@ -8,7 +8,7 @@
 import { randomBytes } from 'crypto';
 
 import { logSecurityEvent } from '@/config/logger';
-import { normaliseEmail } from '@/config/validation';
+import { dueDateFromDays, normaliseEmail, parseDaysRemaining } from '@/config/validation';
 import { NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
@@ -19,7 +19,7 @@ import EmailService from '@/services/email-service/email-service';
 import PublicationService, { NewIds } from '@/services/publication-service/publication-service';
 import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
 
-import { AssignmentType } from '../../../generated/prisma';
+import { AssignmentType, QuizType } from '../../../generated/prisma';
 
 function parseDate(value: string | null | undefined, field: string): Date | null {
   if (value === null || value === undefined || value === '') return null;
@@ -29,7 +29,15 @@ function parseDate(value: string | null | undefined, field: string): Date | null
 }
 
 /** Why a token was refused, so the public page can say something useful. */
-export type TokenFailure = 'not-found' | 'revoked' | 'expired' | 'unavailable' | 'sign-in' | 'idle';
+export type TokenFailure =
+  | 'not-found'
+  | 'revoked'
+  | 'expired'
+  | 'unavailable'
+  | 'sign-in'
+  | 'idle'
+  /** A one-time link that has been handed in and whose result has been read. */
+  | 'completed';
 
 /**
  * How long a link may sit unused before it stops working.
@@ -93,6 +101,44 @@ export default class AssignmentService {
   }
 
   /**
+   * Refuses to hand out something the recipient could not open.
+   *
+   * `resolveToken` turns unpublished content into "This training is not
+   * available right now", and until now nothing stopped a link being minted and
+   * mailed for exactly that — so the author heard nothing, and the person on the
+   * other end opened a dead end with no way to tell whose fault it was.
+   *
+   * It bites hardest on a one-time link, and that is how it was found. A course
+   * and a quiz are both drafts until somebody publishes them (see
+   * schema.prisma), and a link is the *only* way into a one-time quiz — there is
+   * no Quizzes tab to fall back on, so the first link an author ever sends is
+   * the first time they would discover the quiz was still a draft.
+   *
+   * A course needs its published flag *and* a snapshot behind it: publishing is
+   * versioned, and `getLiveSnapshot` returns nothing until a version exists, so
+   * a course flagged published with no version opens an empty catalogue rather
+   * than a refusal — worse, because it looks like it worked.
+   */
+  private static assertSendable(
+    item: { title: string; published: boolean; publishedVersion?: number },
+    kind: 'course' | 'quiz',
+  ): void {
+    if (!item.published) {
+      throw new Error(
+        `"${item.title}" is still a draft, so a link to it would not open — publish the ` +
+          `${kind} first, then send it`,
+      );
+    }
+
+    if (item.publishedVersion !== undefined && item.publishedVersion < 1) {
+      throw new Error(
+        `"${item.title}" has no published version yet, so a link to it would open nothing — ` +
+          'publish it, then send it',
+      );
+    }
+  }
+
+  /**
    * Assigns one course or one quiz to an email address.
    *
    * Two shapes, chosen by `type`:
@@ -112,6 +158,11 @@ export default class AssignmentService {
       courseId?: string | null;
       quizId?: string | null;
       dueDate?: string | null;
+      /**
+       * How long this person gets, in days. Overrides whatever length the course
+       * or quiz carries; leave it out and that one is used.
+       */
+      daysRemaining?: number | string | null;
       expiresAt?: string | null;
     },
     /** The signed-in author. The learner hears from them, not a shared mailbox. */
@@ -121,7 +172,7 @@ export default class AssignmentService {
 
     // An explicit type still wins, so the API stays usable directly; the UI
     // stopped sending one and lets this decide.
-    const type =
+    let type =
       data.type === undefined || data.type === null || data.type === ''
         ? await AssignmentService.chooseType(email)
         : AssignmentService.parseType(data.type);
@@ -132,14 +183,48 @@ export default class AssignmentService {
     if (courseId && quizId) throw new Error('assign either a course or a quiz, not both');
 
     let title: string;
+    /** The length of run the course or quiz itself sets, when it sets one. */
+    let defaultDays: number | null = null;
     if (courseId) {
       const course = await CurriculumGateway.getCourseById(courseId);
       if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
       title = course.title;
+      defaultDays = course.daysRemaining ?? null;
+
+      // A quiz set built around a one-time link goes out as a link for the same
+      // reason a bare one-time quiz does — see the quiz branch below. The
+      // assignment names the course rather than the quiz, so without this the
+      // kind would be chosen from whether the address has signed in before, and
+      // sending one to a colleague with an account would quietly produce a
+      // platform enrolment: no URL anywhere, and the quiz sitting on their
+      // Quizzes tab, which is the one thing a one-time link must never do.
+      if (await QuizGateway.findOneTimeQuiz(courseId)) type = 'LINK';
+
+      // Publishing is what makes the whole set reachable, quizzes included, so
+      // this one check covers a one-time link as well: it cannot be shared until
+      // its set is published, which is the only state in which the link opens
+      // anything at all.
+      AssignmentService.assertSendable(course, 'course');
     } else {
       const quiz = await QuizGateway.getQuizById(quizId!);
       if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
       title = quiz.title;
+      defaultDays = quiz.daysRemaining ?? null;
+
+      // A learning check is part of the section around it. Handing one out on its
+      // own would strip it of the thing it is checking, so it is not assignable.
+      if (quiz.type === QuizType.LEARNING_CHECK) {
+        throw new Error(
+          'a learning check is taken inside its lesson, so it cannot be sent on its own',
+        );
+      }
+
+      // A one-time quiz is defined by being reachable only through its link, so
+      // it always goes out as one — even to somebody with a perfectly good
+      // account, who would otherwise find it waiting on their Quizzes tab.
+      if (quiz.type === QuizType.ONE_TIME) type = 'LINK';
+
+      AssignmentService.assertSendable(quiz, 'quiz');
     }
 
     const existing = await AssignmentGateway.findDuplicate(email, courseId, quizId);
@@ -157,7 +242,7 @@ export default class AssignmentService {
       courseId,
       quizId,
       assignedById: assigner?.id ?? null,
-      dueDate: parseDate(data.dueDate, 'dueDate'),
+      dueDate: AssignmentService.deadlineFor(data, defaultDays),
       expiresAt: parseDate(data.expiresAt, 'expiresAt'),
     });
 
@@ -180,6 +265,33 @@ export default class AssignmentService {
     }
 
     return { ...assignment, delivery };
+  }
+
+  /**
+   * When this person's work is due.
+   *
+   * A deadline is set as a length now — "they get fourteen days" — rather than
+   * as a date, because the same course handed out today and again next month
+   * should give each learner the same run at it, which one fixed date on the
+   * course cannot do. The length is turned into a date here, once, at the moment
+   * the assignment is made, so from then on every reader of `dueDate` — the
+   * dashboard, the reminder mail, the roster — sees an ordinary deadline and
+   * needs to know nothing about how it was arrived at.
+   *
+   * An explicit `dueDate` still wins, so the API stays usable directly and one
+   * person's deadline can still be set by hand. Failing that, an explicit
+   * `daysRemaining` on the request; failing that, the length the course or quiz
+   * carries; and failing that, no deadline at all.
+   */
+  static deadlineFor(
+    data: { dueDate?: string | null; daysRemaining?: number | string | null },
+    defaultDays: number | null,
+  ): Date | null {
+    const explicit = parseDate(data.dueDate, 'dueDate');
+    if (explicit) return explicit;
+
+    const days = parseDaysRemaining(data.daysRemaining, 'daysRemaining') ?? defaultDays;
+    return dueDateFromDays(days);
   }
 
   /**
@@ -332,7 +444,15 @@ export default class AssignmentService {
     // holding a stale URL; either way the answer is to sign in.
     if (assignment.type === 'PLATFORM') throw new AssignmentError('sign-in');
 
-    if (assignment.revokedAt) throw new AssignmentError('revoked');
+    if (assignment.revokedAt) {
+      // A one-time link that closed itself once its result had been read says so,
+      // rather than blaming the author for having turned it off. Both states are
+      // `revokedAt` — that is deliberate, so the author's on switch works on
+      // either — and what separates them is having been completed and read.
+      throw new AssignmentError(
+        assignment.completedAt && assignment.resultsSeenAt ? 'completed' : 'revoked',
+      );
+    }
     if (assignment.expiresAt && assignment.expiresAt.getTime() < Date.now()) {
       throw new AssignmentError('expired');
     }
@@ -362,20 +482,20 @@ export default class AssignmentService {
     return { assignment, user };
   }
 
-  /** Records a module view, if that module is inside something assigned to them. */
-  static async recordView(token: string, moduleId: string) {
+  /** Records a section view, if that section is inside something assigned to them. */
+  static async recordView(token: string, sectionId: string) {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
 
     const inAssigned = courses.some((course) =>
-      course.modules.some((module) => module.id === moduleId),
+      course.sections.some((section) => section.id === sectionId),
     );
-    if (!inAssigned) throw new Error('that module is not part of your assigned learning');
+    if (!inAssigned) throw new Error('that section is not part of your assigned learning');
 
-    return CurriculumGateway.recordModuleView(user.id, moduleId);
+    return CurriculumGateway.recordSectionView(user.id, sectionId);
   }
 
   /**
-   * Records that one piece of content was opened, and credits its module too —
+   * Records that one piece of content was opened, and credits its section too —
    * the same pairing the signed-in path does, so a guest working through a
    * sequential course unlocks exactly as a member would.
    */
@@ -383,11 +503,11 @@ export default class AssignmentService {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
 
     const owner = courses
-      .flatMap((course) => course.modules)
-      .find((module) => module.elements.some((element) => element.id === elementId));
+      .flatMap((course) => course.sections)
+      .find((section) => section.elements.some((element) => element.id === elementId));
     if (!owner) throw new Error('that content is not part of your assigned learning');
 
-    await CurriculumGateway.recordModuleView(user.id, owner.id);
+    await CurriculumGateway.recordSectionView(user.id, owner.id);
     return CurriculumGateway.recordElementView(user.id, elementId);
   }
 
@@ -406,8 +526,27 @@ export default class AssignmentService {
     return QuizService.startSession(user.id, quizId);
   }
 
+  /**
+   * Whether this link holder is already part way through an assigned quiz,
+   * without starting one if they are not — the guest half of the details screen
+   * the player shows in front of a quiz nobody has opened yet.
+   */
+  static async peekQuiz(token: string, quizId: string) {
+    const { user, quizzes } = await AssignmentService.getSessionCatalogue(token);
+
+    if (!quizzes.some((candidate) => candidate.id === quizId)) {
+      throw new Error('that quiz is not part of your assigned learning');
+    }
+
+    return QuizService.peekSession(user.id, quizId);
+  }
+
   /** Grades and records a quiz attempt, if that quiz is assigned to them. */
-  static async submitAttempt(token: string, quizId: string, answers: Record<string, string>) {
+  static async submitAttempt(
+    token: string,
+    quizId: string,
+    answers: Record<string, string | string[]>,
+  ) {
     const { user, quizzes } = await AssignmentService.getSessionCatalogue(token);
 
     if (!quizzes.some((candidate) => candidate.id === quizId)) {
@@ -447,7 +586,7 @@ export default class AssignmentService {
     // A course link carries the quizzes inside that course; a quiz link carries
     // just that quiz.
     const quizzes = course
-      ? course.modules.flatMap((module) => module.quizzes)
+      ? course.sections.flatMap((section) => section.quizzes)
       : directQuiz
         ? [directQuiz]
         : [];
@@ -466,7 +605,7 @@ export default class AssignmentService {
   static async getSessionNewIds(token: string, courseId: string): Promise<NewIds> {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
     if (!courses.some((course) => course.id === courseId)) {
-      return { newSectionIds: [], newModuleIds: [], newElementIds: [], newQuizIds: [] };
+      return { newModuleIds: [], newSectionIds: [], newElementIds: [], newQuizIds: [] };
     }
     return PublicationService.getNewIdsForLearner(courseId, user.id);
   }
@@ -476,9 +615,9 @@ export default class AssignmentService {
     const { courses } = await AssignmentService.getSessionCatalogue(token);
     return courses.map((course) => ({
       ...course,
-      modules: course.modules.map((module) => ({
-        ...module,
-        quizzes: module.quizzes.map(redactAnswers),
+      sections: course.sections.map((section) => ({
+        ...section,
+        quizzes: section.quizzes.map(redactAnswers),
       })),
     }));
   }
@@ -505,10 +644,10 @@ export default class AssignmentService {
           required: course.required,
           dueDate: course.dueDate ? new Date(course.dueDate) : null,
           contentUpdatedAt: row?.contentUpdatedAt ?? new Date(0),
-          modules: course.modules.map((module) => ({
-            id: module.id,
-            estimatedMinutes: module.estimatedMinutes,
-            quizzes: (module.quizzes ?? []).map((quiz) => ({ id: quiz.id })),
+          sections: course.sections.map((section) => ({
+            id: section.id,
+            estimatedMinutes: section.estimatedMinutes,
+            quizzes: (section.quizzes ?? []).map((quiz) => ({ id: quiz.id })),
           })),
         };
       }),
@@ -519,7 +658,7 @@ export default class AssignmentService {
     const dashboardQuizzes = quizzes.map((quiz) => ({
       id: quiz.id,
       title: quiz.title,
-      moduleId: quiz.moduleId,
+      sectionId: quiz.sectionId,
       dueDate: quiz.dueDate ? new Date(quiz.dueDate) : null,
       questions: quiz.questions.map((question) => ({ id: question.id })),
     }));
@@ -532,8 +671,8 @@ export default class AssignmentService {
           const ids = await PublicationService.getNewIdsForLearner(course.id, user.id, course);
           return [
             course.id,
-            ids.newSectionIds.length +
-              ids.newModuleIds.length +
+            ids.newModuleIds.length +
+              ids.newSectionIds.length +
               ids.newElementIds.length +
               ids.newQuizIds.length,
           ];
@@ -548,20 +687,25 @@ export default class AssignmentService {
   static async getSessionProgress(token: string) {
     const { user, courses, quizzes } = await AssignmentService.getSessionCatalogue(token);
     const [views, elementViews, attempts] = await Promise.all([
-      CurriculumGateway.getViewedModuleIds(user.id),
+      CurriculumGateway.getViewedSectionIds(user.id),
       CurriculumGateway.getViewedElementIds(user.id),
       QuizGateway.getAttemptsForUser(user.id),
     ]);
 
-    const ownModules = new Set(courses.flatMap((c) => c.modules.map((m) => m.id)));
+    const ownSections = new Set(courses.flatMap((c) => c.sections.map((m) => m.id)));
     const ownElements = new Set(
-      courses.flatMap((c) => c.modules.flatMap((m) => m.elements.map((e) => e.id))),
+      courses.flatMap((c) => c.sections.flatMap((m) => m.elements.map((e) => e.id))),
     );
     const ownQuizzes = new Set(quizzes.map((q) => q.id));
 
     return {
-      viewedModuleIds: views.map((v) => v.moduleId).filter((id) => ownModules.has(id)),
+      viewedSectionIds: views.map((v) => v.sectionId).filter((id) => ownSections.has(id)),
       viewedElementIds: elementViews.map((v) => v.elementId).filter((id) => ownElements.has(id)),
+      // Same shape a signed-in learner gets, so Continue resumes at the last
+      // thing a link holder opened rather than sending them back to the start.
+      elementViews: elementViews
+        .filter((v) => ownElements.has(v.elementId))
+        .map((v) => ({ elementId: v.elementId, viewedAt: v.viewedAt.toISOString() })),
       attemptedQuizIds: [
         ...new Set(attempts.map((a) => a.quizId).filter((id) => ownQuizzes.has(id))),
       ],
@@ -569,8 +713,36 @@ export default class AssignmentService {
   }
 
   /** Who the guest is, for the profile menu and greeting. */
+  /**
+   * Opening the link, and closing it behind them.
+   *
+   * Called exactly once per page load — by the entry page when the link is first
+   * opened, and by the guest provider on every load after that, which is what
+   * makes it the place that counts visits. `resolveToken` cannot do the counting:
+   * it runs on every request, and one page makes several.
+   *
+   * A completed one-time link is not shut the instant the paper goes in. The
+   * holder gets one more visit, so that reloading, or coming back to the tab,
+   * lands on their result and the marked answers rather than on an error about a
+   * link that worked a moment ago. The load after that closes it — and closes it
+   * exactly as an author would, by stamping `revokedAt`, so the roster shows the
+   * switch off and the author can turn it back on.
+   *
+   * Stamping `resultsSeenAt` here does not break the visit it is stamped in:
+   * nothing else reads it, and `resolveToken` goes on letting the rest of that
+   * page's requests through until the revoke lands on the next load.
+   */
   static async getSessionUser(token: string) {
-    const { user } = await AssignmentService.resolveToken(token);
+    const { assignment, user } = await AssignmentService.resolveToken(token);
+
+    if (assignment.completedAt) {
+      if (assignment.resultsSeenAt) {
+        await AssignmentGateway.revoke(assignment.id);
+        throw new AssignmentError('completed');
+      }
+      await AssignmentGateway.markResultsSeen(assignment.id);
+    }
+
     return { email: user.email, name: user.name };
   }
 
@@ -583,7 +755,12 @@ export default class AssignmentService {
     return CurriculumGateway.getNotes(user.id, courseId);
   }
 
-  static async createNote(token: string, courseId: string, body: string, moduleId?: string | null) {
+  static async createNote(
+    token: string,
+    courseId: string,
+    body: string,
+    sectionId?: string | null,
+  ) {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
     if (!courses.some((course) => course.id === courseId)) {
       throw new Error('that course is not part of your assigned learning');
@@ -593,7 +770,7 @@ export default class AssignmentService {
     return CurriculumGateway.createNote({
       userId: user.id,
       courseId,
-      moduleId: moduleId || null,
+      sectionId: sectionId || null,
       body: body.trim(),
     });
   }
@@ -623,7 +800,7 @@ export default class AssignmentService {
 
     const course = target.courseId ? await CurriculumGateway.getCourseById(target.courseId) : null;
 
-    const moduleIds = new Set(course?.modules.map((m) => m.id) ?? []);
+    const sectionIds = new Set(course?.sections.map((m) => m.id) ?? []);
 
     return Promise.all(
       assignments.map(async (assignment) => {
@@ -632,8 +809,8 @@ export default class AssignmentService {
           return {
             ...assignment,
             name: null,
-            completedModules: 0,
-            totalModules: moduleIds.size,
+            completedSections: 0,
+            totalSections: sectionIds.size,
             percentComplete: 0,
             attempts: 0,
             lastActivityAt: null as Date | null,
@@ -641,13 +818,13 @@ export default class AssignmentService {
         }
 
         const [viewed, attempts] = await Promise.all([
-          CurriculumGateway.getViewedModuleIds(user.id),
+          CurriculumGateway.getViewedSectionIds(user.id),
           QuizGateway.getAttemptsForUser(user.id),
         ]);
 
         const relevantQuizId = target.quizId;
-        const relevant = viewed.filter((v) => moduleIds.has(v.moduleId));
-        const completedModules = relevant.length;
+        const relevant = viewed.filter((v) => sectionIds.has(v.sectionId));
+        const completedSections = relevant.length;
 
         // Latest of anything they did, so the list can be read as "who has gone
         // quiet" rather than only "who opened the link".
@@ -660,10 +837,10 @@ export default class AssignmentService {
         return {
           ...assignment,
           name: user.name,
-          totalModules: moduleIds.size,
-          completedModules,
+          totalSections: sectionIds.size,
+          completedSections,
           percentComplete:
-            moduleIds.size === 0 ? 0 : Math.round((completedModules / moduleIds.size) * 100),
+            sectionIds.size === 0 ? 0 : Math.round((completedSections / sectionIds.size) * 100),
           attempts: relevantQuizId
             ? attempts.filter((a) => a.quizId === relevantQuizId).length
             : attempts.length,
@@ -681,6 +858,19 @@ export default class AssignmentService {
     return AssignmentGateway.revoke(id);
   }
 
+  /**
+   * Turning a link back on.
+   *
+   * Also forgets that the result has already been read, so a one-time link an
+   * author reopens gives the holder their result again rather than closing
+   * itself on the first load — turning it on and having it die immediately is
+   * not a switch that works.
+   *
+   * `completedAt` is deliberately left alone. The quiz itself refuses a second
+   * attempt whatever this row says (see `QuizService.startSession`), so clearing
+   * it would not hand out another go — it would only make the roster claim the
+   * quiz had never been sat.
+   */
   static async restore(id: string) {
     const assignment = await AssignmentGateway.findById(id);
     if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);
@@ -727,13 +917,13 @@ export default class AssignmentService {
 
         const assignments = await AssignmentService.listWithProgress({ courseId });
         const completed = assignments.filter(
-          (entry) => entry.totalModules > 0 && entry.completedModules >= entry.totalModules,
+          (entry) => entry.totalSections > 0 && entry.completedSections >= entry.totalSections,
         ).length;
         const overdue = assignments.filter(
           (entry) =>
             entry.dueDate !== null &&
             entry.dueDate.getTime() < Date.now() &&
-            entry.completedModules < entry.totalModules,
+            entry.completedSections < entry.totalSections,
         ).length;
 
         return {
@@ -742,7 +932,7 @@ export default class AssignmentService {
           imageData: course.imageData,
           imageType: course.imageType,
           published: course.published,
-          totalModules: course.modules.length,
+          totalSections: course.sections.length,
           assignedCount: count,
           completedCount: completed,
           overdueCount: overdue,

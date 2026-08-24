@@ -10,12 +10,13 @@ import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway'
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import PublicationService from '@/services/publication-service/publication-service';
+import QuizService from '@/services/quiz-service/quiz-service';
 
 /**
  * How the people who have been given learning are actually getting on.
  *
  * Everything here measures against each course's *published* version, which is
- * the only thing a learner can see. Counting a draft module against someone's
+ * the only thing a learner can see. Counting a draft section against someone's
  * progress would show them stuck at 80% on work that does not exist for them
  * yet, and would move their percentage every time an author saved.
  */
@@ -27,8 +28,8 @@ export interface LearnerCourseProgress {
   imageData: string | null;
   imageType: string | null;
   dueDate: string | null;
-  totalModules: number;
-  completedModules: number;
+  totalSections: number;
+  completedSections: number;
   percentComplete: number;
   totalQuizzes: number;
   attemptedQuizzes: number;
@@ -39,12 +40,40 @@ export interface LearnerCourseProgress {
   revoked: boolean;
 }
 
+/**
+ * One handed-in one-time quiz, with the paper.
+ *
+ * These sit under the learner rather than under the quiz because that is the
+ * only place they make sense: a one-time quiz is sent to one person, taken once,
+ * and then gone from their side entirely — so the record of it belongs with
+ * everything else that person has completed.
+ */
+export interface OneTimeQuizResult {
+  attemptId: string;
+  quizId: string;
+  title: string;
+  score: number;
+  total: number;
+  percent: number;
+  completedAt: string;
+  answers: Array<{
+    questionId: string;
+    order: number;
+    prompt: string;
+    chosen: string[];
+    correct: string[];
+    wasCorrect: boolean;
+  }>;
+}
+
 export interface LearnerInsight {
   email: string;
   name: string | null;
   /** They have signed in at least once, rather than only being an address. */
   hasAccount: boolean;
   courses: LearnerCourseProgress[];
+  /** One-time quizzes this person has handed in, newest first. */
+  oneTimeQuizzes: OneTimeQuizResult[];
   /** Mean of the per-course percentages, for the summary line. */
   overallPercent: number;
 }
@@ -93,13 +122,13 @@ export default class InsightsService {
 
     const [views, attempts] = user
       ? await Promise.all([
-          CurriculumGateway.getViewedModuleIds(user.id),
+          CurriculumGateway.getViewedSectionIds(user.id),
           QuizGateway.getAttemptsForUser(user.id),
         ])
       : [[], []];
 
-    const viewedIds = new Set(views.map((view) => view.moduleId));
-    const viewedAt = new Map(views.map((view) => [view.moduleId, view.viewedAt]));
+    const viewedIds = new Set(views.map((view) => view.sectionId));
+    const viewedAt = new Map(views.map((view) => [view.sectionId, view.viewedAt]));
 
     const courses = await Promise.all(
       held
@@ -113,12 +142,12 @@ export default class InsightsService {
           // Assigned but never published, or since deleted: nothing to measure.
           if (!snapshot || !row) return null;
 
-          const moduleIds = snapshot.modules.map((module) => module.id);
-          const quizIds = snapshot.modules.flatMap((module) =>
-            (module.quizzes ?? []).map((quiz) => quiz.id),
+          const sectionIds = snapshot.sections.map((section) => section.id);
+          const quizIds = snapshot.sections.flatMap((section) =>
+            (section.quizzes ?? []).map((quiz) => quiz.id),
           );
 
-          const completedModules = moduleIds.filter((id) => viewedIds.has(id)).length;
+          const completedSections = sectionIds.filter((id) => viewedIds.has(id)).length;
           const own = attempts.filter((attempt) => quizIds.includes(attempt.quizId));
 
           // Best attempt per quiz, so retaking to improve a score is reflected
@@ -131,7 +160,7 @@ export default class InsightsService {
 
           const scores = [...bestByQuiz.values()];
           const stamps = [
-            ...moduleIds.map((id) => viewedAt.get(id)).filter((at): at is Date => Boolean(at)),
+            ...sectionIds.map((id) => viewedAt.get(id)).filter((at): at is Date => Boolean(at)),
             ...own.map((attempt) => attempt.completedAt),
             ...(assignment.lastAccessedAt ? [assignment.lastAccessedAt] : []),
           ];
@@ -146,10 +175,12 @@ export default class InsightsService {
               : row.dueDate
                 ? row.dueDate.toISOString()
                 : null,
-            totalModules: moduleIds.length,
-            completedModules,
+            totalSections: sectionIds.length,
+            completedSections,
             percentComplete:
-              moduleIds.length === 0 ? 0 : Math.round((completedModules / moduleIds.length) * 100),
+              sectionIds.length === 0
+                ? 0
+                : Math.round((completedSections / sectionIds.length) * 100),
             totalQuizzes: quizIds.length,
             attemptedQuizzes: bestByQuiz.size,
             averageScore:
@@ -167,11 +198,34 @@ export default class InsightsService {
 
     const live = courses.filter((course): course is LearnerCourseProgress => course !== null);
 
+    // Not filtered by `assignedById`: a one-time quiz is handed over by link, and
+    // the record of what somebody answered is the whole reason it was sent. An
+    // author scoped to their own assignments still only reaches this learner
+    // because one of those assignments named them.
+    const papers = user ? await QuizService.getCompletedOneTimeQuizzes(user.id) : [];
+
     return {
       email,
       name: user?.name ?? null,
       hasAccount: user?.lastSignInAt != null,
       courses: live,
+      oneTimeQuizzes: papers.map((attempt) => ({
+        attemptId: attempt.id,
+        quizId: attempt.quiz.id,
+        title: attempt.quiz.title,
+        score: attempt.score,
+        total: attempt.total,
+        percent: attempt.total > 0 ? Math.round((attempt.score / attempt.total) * 100) : 0,
+        completedAt: attempt.completedAt.toISOString(),
+        answers: attempt.answers.map((answer) => ({
+          questionId: answer.questionId,
+          order: answer.order,
+          prompt: answer.prompt,
+          chosen: answer.chosen,
+          correct: answer.correct,
+          wasCorrect: answer.wasCorrect,
+        })),
+      })),
       overallPercent:
         live.length === 0
           ? 0

@@ -1,12 +1,12 @@
 /**
  * File: element-view.tsx
- * Description: Renders one piece of module content.
+ * Description: Renders one piece of section content.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * Renders one piece of module content.
+ * Renders one piece of section content.
  *
  * Shared by the learner pages and the authoring preview, so what a creator sees
  * while editing is literally the same component the learner gets — the two cannot
@@ -19,7 +19,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useEffect, useRef, useState } from 'react';
 
-import { imageSrc, ModuleElement } from '@/services/curriculum-api';
+import { imageSrc, SectionElement } from '@/services/curriculum-api';
 
 /** Accepts watch/share/embed YouTube links and returns the embeddable form. */
 export function toYouTubeEmbedUrl(url: string): string | null {
@@ -77,12 +77,81 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
       Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((current + delta) * 100) / 100)),
     );
 
-  // Coming back to 1x leaves the box scrolled somewhere arbitrary, which reads
-  // as the picture having moved. Put it back to the middle.
+  /**
+   * Where to keep the picture anchored across the next zoom change.
+   *
+   * Pinching should magnify what is under your fingers, not the top-left corner.
+   * The point being pinched is recorded in image coordinates before the zoom,
+   * and the scroll position is rewritten after it so that same point lands back
+   * under the cursor.
+   */
+  const anchor = useRef<{ contentX: number; contentY: number; x: number; y: number } | null>(null);
+
+  /**
+   * Pinch to zoom.
+   *
+   * A trackpad pinch reaches the browser as a wheel event with `ctrlKey` set —
+   * there is no separate gesture event in Chrome or Firefox — which is also what
+   * ctrl+wheel sends on a desktop mouse, so both work from this one handler.
+   *
+   * Registered natively rather than with React's `onWheel` because that listener
+   * is passive: `preventDefault` there is ignored and the browser zooms the whole
+   * page instead of the picture.
+   */
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || zoom !== 1) return;
-    viewport.scrollTo({ left: 0, top: 0 });
+    if (!viewport) return;
+
+    const onWheel = (event: WheelEvent) => {
+      // A plain two-finger scroll is panning, and the box does that itself.
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+
+      const box = viewport.getBoundingClientRect();
+      const x = event.clientX - box.left;
+      const y = event.clientY - box.top;
+
+      setZoom((current) => {
+        // Proportional rather than a fixed step, so a slow pinch is fine-grained
+        // and a fast one still gets there.
+        const next = Math.min(
+          MAX_ZOOM,
+          Math.max(MIN_ZOOM, Math.round(current * Math.exp(-event.deltaY / 200) * 100) / 100),
+        );
+        if (next !== current) {
+          anchor.current = {
+            contentX: (viewport.scrollLeft + x) / current,
+            contentY: (viewport.scrollTop + y) / current,
+            x,
+            y,
+          };
+        }
+        return next;
+      });
+    };
+
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    // Coming back to 1x leaves the box scrolled somewhere arbitrary, which reads
+    // as the picture having moved. Put it back to the middle.
+    if (zoom === 1) {
+      anchor.current = null;
+      viewport.scrollTo({ left: 0, top: 0 });
+      return;
+    }
+
+    // Put the pinched point back under the cursor now the image has resized.
+    const held = anchor.current;
+    if (!held) return;
+    anchor.current = null;
+    viewport.scrollLeft = held.contentX * zoom - held.x;
+    viewport.scrollTop = held.contentY * zoom - held.y;
   }, [zoom]);
 
   const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -190,7 +259,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
 };
 
 interface ElementViewProps {
-  element: ModuleElement;
+  element: SectionElement;
   /** Preview mode explains empty/invalid content instead of rendering nothing. */
   preview?: boolean;
   /**
@@ -200,7 +269,7 @@ interface ElementViewProps {
    * paragraph and a video does not resize the page and push the notes tab off
    * screen. Overflowing text and PDFs scroll inside the stage; images and videos
    * scale down to fit it. Left off, each item is its natural size — which is what
-   * the small inline preview in the module editor wants.
+   * the small inline preview in the section editor wants.
    */
   fill?: boolean;
 }
@@ -289,7 +358,7 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
     <div className={`mx-auto aspect-video ${fill ? 'h-full max-w-full' : 'w-full max-w-3xl'}`}>
       <iframe
         src={embedUrl}
-        title="Module video"
+        title="Section video"
         allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
         className="h-full w-full rounded-lg border border-gray-300"

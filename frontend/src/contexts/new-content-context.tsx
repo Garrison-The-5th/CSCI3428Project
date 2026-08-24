@@ -82,6 +82,14 @@ export const NewContentProvider: React.FC<{ children: ReactNode }> = ({ children
   return <NewContentContext.Provider value={value}>{children}</NewContentContext.Provider>;
 };
 
+/**
+ * Which courses have gained content since this learner finished them.
+ *
+ * One shared context rather than a fetch per component, because the same answer
+ * drives three separate marks — the red dot on the Learning tab, the dot on the
+ * individual course card, and the "new since you finished" panel on the home
+ * page. Fetching it three times would let them disagree with each other.
+ */
 export const useNewContent = () => {
   const context = useContext(NewContentContext);
   if (context === undefined) {

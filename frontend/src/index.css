@@ -344,19 +344,42 @@ body {
 
 /* Rich lesson text — used by the editor surface and the learner view.
    The markup only ever contains the tags the server allowlist permits. */
-.rich-text h2 { font-size: 1.5rem; font-weight: 700; margin: 0.75rem 0 0.35rem; }
-.rich-text h3 { font-size: 1.2rem; font-weight: 650; margin: 0.65rem 0 0.3rem; }
-.rich-text p { margin: 0 0 0.65rem; }
-.rich-text ul { list-style: disc; padding-left: 1.4rem; margin: 0 0 0.65rem; }
-.rich-text ol { list-style: decimal; padding-left: 1.4rem; margin: 0 0 0.65rem; }
-.rich-text li { margin: 0.15rem 0; }
+.rich-text h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.75rem 0 0.35rem;
+}
+.rich-text h3 {
+  font-size: 1.2rem;
+  font-weight: 650;
+  margin: 0.65rem 0 0.3rem;
+}
+.rich-text p {
+  margin: 0 0 0.65rem;
+}
+.rich-text ul {
+  list-style: disc;
+  padding-left: 1.4rem;
+  margin: 0 0 0.65rem;
+}
+.rich-text ol {
+  list-style: decimal;
+  padding-left: 1.4rem;
+  margin: 0 0 0.65rem;
+}
+.rich-text li {
+  margin: 0.15rem 0;
+}
 .rich-text blockquote {
   border-left: 3px solid var(--color-navy);
   padding-left: 0.9rem;
   margin: 0 0 0.65rem;
   font-style: italic;
 }
-.rich-text a { color: var(--color-green); text-decoration: underline; }
+.rich-text a {
+  color: var(--color-green);
+  text-decoration: underline;
+}
 .rich-text code {
   font-family: ui-monospace, Menlo, monospace;
   background: rgba(0, 0, 0, 0.06);
@@ -377,5 +400,10 @@ body {
   padding: 0.45rem 0.7rem;
   text-align: left;
 }
-.rich-text th { background: rgba(21, 50, 67, 0.06); font-weight: 650; }
-.dark .rich-text th { background: rgba(255, 255, 255, 0.06); }
+.rich-text th {
+  background: rgba(21, 50, 67, 0.06);
+  font-weight: 650;
+}
+.dark .rich-text th {
+  background: rgba(255, 255, 255, 0.06);
+}

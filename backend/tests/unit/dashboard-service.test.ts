@@ -25,7 +25,7 @@ function course(overrides: Partial<Parameters<typeof DashboardService.build>[1][
     required: false,
     dueDate: null,
     contentUpdatedAt: new Date('2026-01-01'),
-    modules: [
+    sections: [
       { id: 'm1', estimatedMinutes: 10, quizzes: [] },
       { id: 'm2', estimatedMinutes: 20, quizzes: [{ id: 'quiz-1' }] },
     ],
@@ -33,10 +33,10 @@ function course(overrides: Partial<Parameters<typeof DashboardService.build>[1][
   };
 }
 
-/** Wires up "this learner has viewed these modules and attempted these quizzes". */
-function givenProgress(moduleIds: string[], quizIds: string[]) {
-  mockCurriculum.getViewedModuleIds.mockResolvedValue(
-    moduleIds.map((moduleId) => ({ moduleId, viewedAt: new Date() })) as never,
+/** Wires up "this learner has viewed these sections and attempted these quizzes". */
+function givenProgress(sectionIds: string[], quizIds: string[]) {
+  mockCurriculum.getViewedSectionIds.mockResolvedValue(
+    sectionIds.map((sectionId) => ({ sectionId, viewedAt: new Date() })) as never,
   );
   mockQuiz.getAttemptsForUser.mockResolvedValue(
     quizIds.map((quizId) => ({ quizId, score: 1, total: 1, completedAt: new Date() })) as never,
@@ -45,52 +45,52 @@ function givenProgress(moduleIds: string[], quizIds: string[]) {
   mockCurriculum.refreshCompletion.mockResolvedValue({} as never);
 }
 
-describe('module completion rule', () => {
+describe('section completion rule', () => {
   /**
-   * A module counts as done when it has been opened AND every quiz inside it
+   * A section counts as done when it has been opened AND every quiz inside it
    * has been attempted. Opening alone is not enough, which is the rule the
    * whole progress figure rests on.
    */
-  it('does not count a viewed module whose quiz is unattempted', async () => {
+  it('does not count a viewed section whose quiz is unattempted', async () => {
     givenProgress(['m1', 'm2'], []);
 
     const result = await DashboardService.build(1, [course()], []);
 
     expect(result.courseProgress[0]).toMatchObject({
-      completedModules: 1,
-      totalModules: 2,
+      completedSections: 1,
+      totalSections: 2,
       percentComplete: 50,
     });
   });
 
-  it('counts the module once its quiz has been attempted', async () => {
+  it('counts the section once its quiz has been attempted', async () => {
     givenProgress(['m1', 'm2'], ['quiz-1']);
 
     const result = await DashboardService.build(1, [course()], []);
 
     expect(result.courseProgress[0]).toMatchObject({
-      completedModules: 2,
+      completedSections: 2,
       percentComplete: 100,
     });
   });
 
-  it('does not count an unviewed module even when its quiz was attempted', async () => {
+  it('does not count an unviewed section even when its quiz was attempted', async () => {
     givenProgress(['m1'], ['quiz-1']);
 
     const result = await DashboardService.build(1, [course()], []);
-    expect(result.courseProgress[0].completedModules).toBe(1);
+    expect(result.courseProgress[0].completedSections).toBe(1);
   });
 
-  it('reports 0% for a course with no modules rather than dividing by zero', async () => {
+  it('reports 0% for a course with no sections rather than dividing by zero', async () => {
     givenProgress([], []);
 
-    const result = await DashboardService.build(1, [course({ modules: [] })], []);
+    const result = await DashboardService.build(1, [course({ sections: [] })], []);
     expect(result.courseProgress[0].percentComplete).toBe(0);
   });
 });
 
 describe('time remaining', () => {
-  it('sums only the minutes of unfinished modules', async () => {
+  it('sums only the minutes of unfinished sections', async () => {
     givenProgress(['m1'], []);
 
     const result = await DashboardService.build(1, [course()], []);
@@ -135,7 +135,7 @@ describe('outstanding work', () => {
         {
           id: 'quiz-1',
           title: 'Fire quiz',
-          moduleId: 'm2',
+          sectionId: 'm2',
           dueDate: null,
           questions: [{ id: 'q' }],
         },
@@ -156,7 +156,7 @@ describe('outstanding work', () => {
     const result = await DashboardService.build(
       1,
       [course()],
-      [{ id: 'quiz-1', title: 'Fire quiz', moduleId: 'm2', dueDate: null, questions: [] }],
+      [{ id: 'quiz-1', title: 'Fire quiz', sectionId: 'm2', dueDate: null, questions: [] }],
     );
 
     expect(result.outstandingQuizzes).toHaveLength(0);
@@ -170,7 +170,7 @@ describe('outstanding work', () => {
     const result = await DashboardService.build(
       1,
       [course({ dueDate: due })],
-      [{ id: 'quiz-1', title: 'Fire quiz', moduleId: 'm2', dueDate: null, questions: [] }],
+      [{ id: 'quiz-1', title: 'Fire quiz', sectionId: 'm2', dueDate: null, questions: [] }],
     );
 
     expect(result.outstandingQuizzes[0].dueDate).toBe(due.toISOString());
@@ -183,7 +183,7 @@ describe('outstanding work', () => {
     const result = await DashboardService.build(
       1,
       [course({ dueDate: new Date('2026-12-01') })],
-      [{ id: 'quiz-1', title: 'Q', moduleId: 'm2', dueDate: quizDue, questions: [] }],
+      [{ id: 'quiz-1', title: 'Q', sectionId: 'm2', dueDate: quizDue, questions: [] }],
     );
 
     expect(result.outstandingQuizzes[0].dueDate).toBe(quizDue.toISOString());
@@ -241,7 +241,7 @@ describe('completion recording', () => {
 
     expect(mockCurriculum.refreshCompletion).toHaveBeenCalledWith(1, 'course-1', 2);
     expect(result.courseProgress[0].hasNewContent).toBe(false);
-    expect(result.courseProgress[0].newModuleCount).toBe(0);
+    expect(result.courseProgress[0].newSectionCount).toBe(0);
   });
 
   it('surfaces new content on a course that is not yet finished', async () => {

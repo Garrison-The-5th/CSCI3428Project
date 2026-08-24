@@ -29,7 +29,7 @@ interface AssignmentRosterProps {
   assignments: Assignment[];
   /** What is being assigned, for the confirm dialog's wording. */
   label: string;
-  /** Which per-person figure is worth showing: modules done, or quiz attempts. */
+  /** Which per-person figure is worth showing: sections done, or quiz attempts. */
   progressOf: 'course' | 'quiz';
   onNotify: (message: string, type?: 'success' | 'error') => void;
   /** Re-read the list after anything changes. */
@@ -190,10 +190,10 @@ const AssignmentRoster = ({
                       : assignment.lastAccessedAt
                         ? `Opened ${new Date(assignment.lastAccessedAt).toLocaleString()}`
                         : 'Not opened yet'}
-                  {progressOf === 'course' && assignment.totalModules !== undefined && (
+                  {progressOf === 'course' && assignment.totalSections !== undefined && (
                     <>
                       {' · '}
-                      {assignment.completedModules}/{assignment.totalModules} modules
+                      {assignment.completedSections}/{assignment.totalSections} sections
                     </>
                   )}
                   {progressOf === 'quiz' && assignment.attempts !== undefined && (

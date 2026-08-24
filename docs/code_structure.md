@@ -22,7 +22,7 @@ Companion documents: [API Reference](./api-reference.md) (every route),
 ## The domain in one page
 
 ```
-Course ─┬─ Section ─── Module ─┬─ Element   (TEXT | YOUTUBE | IMAGE | PDF)
+Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | IMAGE | PDF)
         │                      └─ Quiz ──── Question ──── Option
         ├─ CoursePublication  (a frozen snapshot per published version)
         ├─ Instructor         (many-to-many, credited on the course page)
@@ -30,23 +30,23 @@ Course ─┬─ Section ─── Module ─┬─ Element   (TEXT | YOUTUBE | 
         └─ contributors       (Users allowed to edit this one course)
 ```
 
-17 Prisma models in total. Beyond the tree above: `ModuleProgress` and
+17 Prisma models in total. Beyond the tree above: `SectionProgress` and
 `ElementProgress` (what a learner has opened), `QuizAttempt` and `QuizSession`
 (results and the server-anchored clock on a timed quiz), `CourseCompletion`
 (stamped at 100%), `Note`, and `User`.
 
 - A **Course** is what the UI calls a "lesson". Created by name, then edited.
-- A **Section** is a named group of modules and supplies the first digit of every
-  module number inside it. Authors may tint one from a closed eight-colour palette.
-- A **Module** lives inside a section. Its number (`2.3`) means "third module of the
-  second section" — position in the grid is the only source of truth, and there is no
+- A **Module** is a named group of sections and supplies the first digit of every
+  section number inside it. Authors may tint one from a closed eight-colour palette.
+- A **Section** lives inside a module. Its number (`2.3`) means "third section of the
+  second module" — position in the grid is the only source of truth, and there is no
   free-text number field. `sortKey` is the zero-padded form so `1.10` sorts after `1.2`.
   Every write that can disturb the grid ends by calling `CurriculumService.renumberCourse`.
-- **Elements and quizzes share one ordering sequence** inside a module, so a quiz
+- **Elements and quizzes share one ordering sequence** inside a section, so a quiz
   can sit between two pieces of content.
-- Every **Quiz** belongs to exactly one module. A course's quizzes are its modules'
+- Every **Quiz** belongs to exactly one section. A course's quizzes are its sections'
   quizzes.
-- Progress: `ModuleProgress` (a module auto-completes on view), `ElementProgress`
+- Progress: `SectionProgress` (a section auto-completes on view), `ElementProgress`
   (finer grained, so a sequential course can unlock item by item), `QuizAttempt`,
   `QuizSession` (the deadline on a timed quiz, stored server-side), and
   `CourseCompletion` (stamped at 100%, used to detect new content later).
@@ -109,7 +109,7 @@ backend/
     │   │   ├── authController.ts
     │   │   ├── authMiddleware.ts          # verifies the JWT, attaches req.user/req.auth
     │   │   └── authorizationMiddleware.ts # requireRole / requireAnyRole / requireAuthor
-    │   ├── CurriculumController/          # courses, modules, elements, notes,
+    │   ├── CurriculumController/          # courses, sections, elements, notes,
     │   │                                  #   instructors, contributors, progress
     │   ├── quizController/
     │   ├── assignmentController/          # author-facing link management
@@ -119,7 +119,7 @@ backend/
     │   └── tableController/
     │
     ├── services/              # business logic; no HTTP knowledge
-    │   ├── curriculumService/ # course/module/element rules, numbering, ordering
+    │   ├── curriculumService/ # course/section/element rules, numbering, ordering
     │   ├── quizService/       # grading, answer redaction, question validation
     │   ├── dashboardService/  # progress figures, shared by learners and guests
     │   ├── assignmentService/ # tokens, guest sessions, scoping
@@ -147,7 +147,7 @@ view (published, not deleted, quiz answers stripped). `/curriculum/courses/manag
 and `/quizzes/manage` are the author view (drafts included, answers intact). Keep
 them separate — that separation is what stops answers leaking.
 
-**Deleting is soft.** Courses, modules and quizzes set `deletedAt` and appear in the
+**Deleting is soft.** Courses, sections and quizzes set `deletedAt` and appear in the
 Admin Dashboard recycle bin. Only the `/deleted/...` routes hard delete, and they
 refuse anything not already in the bin.
 
@@ -169,7 +169,7 @@ frontend/src/
 │   └── EditorAccessContext.tsx# which courses this person may edit
 │
 ├── services/                  # everything that talks to the API
-│   ├── curriculumApi.ts       # courses, modules, elements, notes, instructors
+│   ├── curriculumApi.ts       # courses, sections, elements, notes, instructors
 │   ├── quizApi.ts             # quizzes, questions, attempts
 │   ├── assignmentApi.ts       # author link management + public guest endpoints
 │   └── learnerApi.ts          # ⭐ one interface over the JWT and token APIs
@@ -180,7 +180,7 @@ frontend/src/
 ├── components/
 │   ├── ProtectedRoute.tsx     # authenticated / admin / author / canEdit gates
 │   ├── Common/
-│   │   ├── ElementView.tsx    # ⭐ renders module content + plainPreview() helper
+│   │   ├── ElementView.tsx    # ⭐ renders section content + plainPreview() helper
 │   │   ├── ElementEditor.tsx  # one auto-saving content row with a live preview
 │   │   ├── RichTextEditor.tsx # bold/italic/lists/tables toolbar
 │   │   ├── QuizRunner.tsx     # taking a quiz, used everywhere quizzes appear
@@ -197,7 +197,7 @@ frontend/src/
 │   │   ├── learning/
 │   │   │   ├── Learning.tsx           # course card grid
 │   │   │   ├── CourseLanding.tsx      # course overview
-│   │   │   └── CoursePlayer.tsx       # content left, module rail right
+│   │   │   └── CoursePlayer.tsx       # content left, section rail right
 │   │   ├── quizzes/
 │   │   │   ├── Quizzes.tsx            # course card grid
 │   │   │   └── QuizPlayer.tsx         # quiz left, quiz rail right
@@ -205,7 +205,7 @@ frontend/src/
 │   │   │   ├── AdminLearning.tsx      # lesson library (published / drafts) + instructors
 │   │   │   ├── CourseEditor.tsx       # the editor, reached by clicking a card
 │   │   │   ├── CourseEditorList.tsx   # contributors' cut-down lesson list
-│   │   │   └── AdminQuizzes.tsx       # lesson cards → per-module quiz editing
+│   │   │   └── AdminQuizzes.tsx       # lesson cards → per-section quiz editing
 │   │   ├── adminPage/AdminPage.tsx    # recycle bin
 │   │   └── users/, profile/, contactUs/, table/
 │   └── public/
@@ -278,7 +278,7 @@ and only if the author enabled "show answers".
 **Author HTML is sanitised on write**, not on render — `config/richText.ts`. The
 learner view uses `dangerouslySetInnerHTML`, which is only safe because of that.
 
-**Media is base64 in Postgres** (cover photos, module images, PDFs) and travels
+**Media is base64 in Postgres** (cover photos, section images, PDFs) and travels
 inline in the course JSON. Convenient, but the payload grows quickly; a dedicated
 media endpoint is the obvious next refactor.
 
@@ -295,5 +295,5 @@ Kept short here; the full list with reasoning lives in
   hops (Cloudflare -> ingress). If it is unset in production every visitor shares one
   bucket; the app warns about this at startup. It is still per-process, so it also
   needs shared storage before running more than one replica.
-- Drag-reordering modules renumbers them `1..n`, flattening any `2.1` / `2.2` nesting.
-- Quizzes attached to a soft-deleted module remain visible to learners.
+- Drag-reordering sections renumbers them `1..n`, flattening any `2.1` / `2.2` nesting.
+- Quizzes attached to a soft-deleted section remain visible to learners.

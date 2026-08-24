@@ -15,7 +15,7 @@ logger.debug('API URL:', API_URL);
 /**
  * Turns a failed response into an error worth showing.
  *
- * The API explains itself — "already assigned this item", "module 2.3 already
+ * The API explains itself — "already assigned this item", "section 2.3 already
  * exists" — in an `errorMessage` field. Throwing on the status code alone threw
  * that away, so a refusal the user could have acted on arrived as
  * "Response status: 400" and looked like a server fault. The status is kept as
@@ -30,7 +30,8 @@ async function toError(response: Response, method: string, endpoint: string): Pr
 
   return new Error(
     detail ??
-      `Network error for ${method} request to ${API_URL}${endpoint}. Response status: ${response.status}`,
+      `Network error for ${method} request to ${API_URL}${endpoint}. ` +
+        `Response status: ${response.status}`,
   );
 }
 

@@ -27,6 +27,7 @@ const FAILURE_TITLES: Record<AssignmentFailure, string> = {
   unavailable: 'Not available',
   'sign-in': 'Sign in to continue',
   idle: 'Link closed',
+  completed: 'Link no longer enabled',
   error: 'Something went wrong',
 };
 

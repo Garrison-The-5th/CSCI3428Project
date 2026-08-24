@@ -20,22 +20,93 @@ export interface QuizQuestion {
   order: number;
   prompt: string;
   hint: string | null;
-  /** Module number the hint points back to, e.g. "1.2". */
-  hintModuleNumber: string | null;
+  /** Section number the hint points back to, e.g. "1.2". */
+  hintSectionNumber: string | null;
   options: QuizOption[];
+}
+
+/**
+ * The three kinds of quiz. Which one it is decides where it may live, whether it
+ * can be timed, whether the mark is kept, and whether it is ever listed.
+ *
+ * LEARNING_CHECK — inside a lesson section only, never timed, mark never stored,
+ *                  never listed. Must be attempted before the learner may move on.
+ * EXAM           — standalone or in a section, may be timed, scored, listed.
+ * ONE_TIME       — reached through its link only. One attempt, then gone, and
+ *                  never listed even to somebody signed in with the address it
+ *                  was sent to. May stand alone or be the whole of a quiz set;
+ *                  never in a lesson section.
+ */
+export type QuizType = 'LEARNING_CHECK' | 'EXAM' | 'ONE_TIME';
+
+export const QUIZ_TYPE_LABELS: Record<QuizType, string> = {
+  LEARNING_CHECK: 'Learning check',
+  EXAM: 'Exam',
+  ONE_TIME: 'One-time link',
+};
+
+export const QUIZ_TYPE_HINTS: Record<QuizType, string> = {
+  LEARNING_CHECK:
+    'Sits inside a section. No timer, no stored mark — the learner sees a tick or a cross per ' +
+    'question, and cannot move on until they have attempted it.',
+  EXAM: 'Scored and reported. Can stand alone or sit inside a section, and can be timed.',
+  ONE_TIME:
+    'Sent as a link. One attempt only, then it disappears — and it never shows on the Quizzes ' +
+    'tab, even for somebody signed in with that address.',
+};
+
+/**
+ * What each kind is allowed to have, so the editor can grey out the rest.
+ *
+ * Only the two controls that are actually disabled anywhere. Four more used to
+ * be answered here — where a kind may live, whether it may be shared, whether
+ * its results may be hidden — and nothing read any of them, so they were
+ * documentation of intent dressed up as logic: a caller could consult one, get a
+ * confident answer, and be wrong, because the real rule lives on the server in
+ * `enforceTypeRules` and had drifted. Where a quiz may sit is decided there,
+ * because it depends on the kind of course owning the section and this has only
+ * the quiz.
+ */
+export function quizCapabilities(type: QuizType) {
+  return {
+    /** A learning check is deliberately unhurried. */
+    canBeTimed: type !== 'LEARNING_CHECK',
+    /** A learning check's mark is never kept, so there is no due date to chase. */
+    canHaveDueDate: type !== 'LEARNING_CHECK',
+  };
 }
 
 export interface Quiz {
   id: string;
   title: string;
   description: string | null;
-  /** Every quiz belongs to a module; null only on rows predating that rule. */
-  moduleId: string | null;
-  /** Position within the module, shared with element ordering. */
+  type: QuizType;
+  /** The section it sits in. Null for a standalone exam or a one-time quiz. */
+  sectionId: string | null;
+  /** Position within the section, shared with element ordering. */
   order: number;
   published: boolean;
+  /** Show the score ring after submitting. Off moves them straight on. */
+  showResults: boolean;
   showAnswers: boolean;
+  /**
+   * Whether an exam may be sat again. Off is what an exam means unless the
+   * author says otherwise, and it is what decides whether Try again appears on
+   * the result screen.
+   *
+   * Ignored on the other two kinds: a learning check is always retakeable and a
+   * one-time link never is. Optional because older payloads predate it.
+   */
+  allowMultipleAttempts?: boolean;
   dueDate: string | null;
+  /**
+   * How long a learner gets once this is handed to them, in days.
+   *
+   * This is the deadline an author sets now. The date itself is worked out when
+   * the assignment is made — see assignment-api — so the same quiz sent today
+   * and next month gives each person the same run at it.
+   */
+  daysRemaining?: number | null;
   /** Minutes allowed once started. Null means untimed. */
   timeLimitMinutes: number | null;
   questions: QuizQuestion[];
@@ -49,7 +120,8 @@ export interface Quiz {
  * alongside so the page can correct for a device clock that disagrees.
  */
 export interface QuizSession {
-  sessionId: string;
+  /** Null for a learning check, which has no clock and so nothing to resume. */
+  sessionId: string | null;
   startedAt: string;
   expiresAt: string | null;
   timeLimitMinutes: number | null;
@@ -57,6 +129,27 @@ export interface QuizSession {
   serverNow: string;
   /** They had already started and the clock has run out since. */
   expired: boolean;
+  /**
+   * Whether a run is under way. Always true from `startSession`; from
+   * `peekSession` it is what decides between showing the quiz's details behind a
+   * Start button and going straight back into a clock already ticking.
+   */
+  started: boolean;
+  /** A one-time quiz they have already handed in, so there is nothing to open. */
+  completed: boolean;
+  /**
+   * The paper from an attempt already sat, when there is one.
+   *
+   * Any kind of quiz can have one. Coming back to something already handed in —
+   * stepping back through a lesson, reopening it from the rail — has to show
+   * what it showed on the day rather than an empty form, and this is what
+   * carries that. The author's toggles govern what is in it, exactly as they do
+   * on submission, so a second look discloses nothing a first one did not.
+   *
+   * Null while a run is open: the questions are then what the learner came back
+   * for, and an older attempt's marks would be marking the wrong paper.
+   */
+  result: AttemptResult | null;
 }
 
 export interface DeletedQuiz {
@@ -64,23 +157,52 @@ export interface DeletedQuiz {
   title: string;
   deletedAt: string;
   /** Where it came from, so the recycle bin can say which course it belonged to. */
-  module: { title: string; course: { id: string; title: string } | null } | null;
+  section: { title: string; course: { id: string; title: string } | null } | null;
 }
 
-/** What the create-question form sends; the API requires exactly one correct option. */
+/**
+ * What the create-question form sends.
+ *
+ * At least one option must be correct and at least one must not. More than one
+ * correct option makes it a multiple-answer question, which the runner draws
+ * with checkboxes and marks all-or-nothing.
+ */
 export interface QuestionInput {
   prompt: string;
   hint?: string | null;
-  hintModuleNumber?: string | null;
+  hintSectionNumber?: string | null;
   options: Array<{ text: string; isCorrect: boolean }>;
 }
+
+/** A question is multiple-answer when more than one of its options is correct. */
+export function isMultiAnswer(question: QuizQuestion): boolean {
+  return question.options.filter((option) => option.isCorrect).length > 1;
+}
+
+/**
+ * What a learner sends: question id -> the option ids they picked.
+ *
+ * A list even for a single-choice question, so the runner has one shape to hold
+ * and the grader one shape to read. The API still accepts a bare string for
+ * anything older.
+ */
+export type QuizAnswers = Record<string, string[]>;
 
 export interface AttemptResult {
   score: number;
   total: number;
   /** The clock had run out by the time this was graded. */
   timedOut: boolean;
+  type: QuizType;
+  /** Off means the learner is moved straight on without seeing how they did. */
+  showResults: boolean;
   showAnswers: boolean;
+  /**
+   * A tick or a cross per question — the whole of a learning check's feedback —
+   * and what they ticked, so a marked paper can be redrawn on a later visit
+   * rather than coming back with its marks beside empty options.
+   */
+  perQuestion: Array<{ questionId: string; correct: boolean; chosenOptionIds?: string[] }>;
   /** Only populated when the author allows answers to be revealed. */
   correctOptionIds: string[];
 }
@@ -103,22 +225,41 @@ export const quizApi = {
     return response.quizzes ?? [];
   },
 
-  createQuiz: (quiz: { title: string; description?: string; moduleId: string }) =>
-    HttpHelper.post('quizzes', quiz),
+  /** `sectionId` is omitted for a standalone exam or a one-time quiz. */
+  createQuiz: (quiz: {
+    title: string;
+    description?: string;
+    type?: QuizType;
+    sectionId?: string | null;
+  }) => HttpHelper.post('quizzes', quiz),
 
   updateQuiz: (
     quizId: string,
     data: {
       title?: string;
       description?: string | null;
-      /** Move a quiz to a different module. */
-      moduleId?: string | null;
+      type?: QuizType;
+      /** Move a quiz to a different section, or out of one with null. */
+      sectionId?: string | null;
       published?: boolean;
+      showResults?: boolean;
       showAnswers?: boolean;
+      allowMultipleAttempts?: boolean;
       dueDate?: string | null;
+      daysRemaining?: number | null;
       timeLimitMinutes?: number | null;
     },
   ) => HttpHelper.put(`quizzes/${quizId}`, data),
+
+  /**
+   * Reports the run already open, and starts nothing.
+   *
+   * This is what the player asks before it draws a quiz, so that looking at one
+   * is never what starts its clock — the details and a Start button when there
+   * is no run, straight back into the questions when there is.
+   */
+  peekSession: (quizId: string): Promise<QuizSession> =>
+    HttpHelper.get(`quizzes/${quizId}/session`),
 
   /**
    * Opens a run, or reports the one already open. Safe to call on every load —
@@ -128,7 +269,7 @@ export const quizApi = {
     HttpHelper.post(`quizzes/${quizId}/start`, {}),
 
   /** Grades server-side and records the attempt. `answers` is questionId -> optionId. */
-  submitAttempt: (quizId: string, answers: Record<string, string>): Promise<AttemptResult> =>
+  submitAttempt: (quizId: string, answers: QuizAnswers): Promise<AttemptResult> =>
     HttpHelper.post(`quizzes/${quizId}/attempt`, { answers }),
 
   deleteQuiz: (quizId: string) => HttpHelper.delete(`quizzes/${quizId}`),

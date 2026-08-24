@@ -1,6 +1,7 @@
 /**
  * File: index.ts
- * Description: Express entry point — security middleware, routing, error handling and retention sweeps.
+ * Description: Express entry point — security middleware, routing, error handling,
+ *   retention sweeps.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Date: 2026-08-10
@@ -53,7 +54,7 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Vite injects styles inline, and the section tints are computed from
+        // Vite injects styles inline, and the module tints are computed from
         // author-chosen colours at render time.
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
@@ -267,7 +268,7 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-// Started unless this module was imported by a test, which drives `app` directly.
+// Started unless this file was imported by a test, which drives `app` directly.
 if (require.main === module) {
   startServer();
 }

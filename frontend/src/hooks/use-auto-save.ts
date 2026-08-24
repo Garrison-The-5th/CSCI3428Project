@@ -31,6 +31,11 @@ export function useAutoSave<T>(
   const lastSaved = useRef<string | null>(null);
   const inFlight = useRef(0);
   const saveRef = useRef(save);
+  // The newest value, so `saveNow` can be a stable callback: taking `value` as a
+  // dependency would rebuild it on every keystroke and with it every button that
+  // holds one.
+  const latest = useRef(value);
+  latest.current = value;
 
   // Keep the latest callback without making it a dependency of the effect,
   // which would restart the timer on every parent render.
@@ -78,7 +83,41 @@ export function useAutoSave<T>(
     setState('saved');
   }, []);
 
-  return { state, markSaved };
+  /**
+   * Writes now instead of waiting out the delay — what a Save button calls.
+   *
+   * Auto-save is still doing the work; this only skips the pause. Every guard
+   * above holds: the pending timer is dropped so the same value is not written
+   * twice, and the ticket makes a save already in flight stand down rather than
+   * race, so pressing Save mid-keystroke cannot land the older value last.
+   *
+   * It saves even when nothing has changed, deliberately. Somebody presses Save
+   * to be told it is safe, and answering "nothing to do" to a button they just
+   * pressed reads as a failure — one redundant write is the cheaper answer.
+   */
+  const saveNow = useCallback(async () => {
+    if (timer.current) clearTimeout(timer.current);
+
+    const value = latest.current;
+    const serialised = JSON.stringify(value);
+    const ticket = ++inFlight.current;
+
+    setState('saving');
+    try {
+      await saveRef.current(value);
+      if (ticket !== inFlight.current) return true;
+      lastSaved.current = serialised;
+      setState('saved');
+      return true;
+    } catch (err) {
+      if (ticket !== inFlight.current) return false;
+      logger.error('Save failed:', err);
+      setState('error');
+      return false;
+    }
+  }, []);
+
+  return { state, markSaved, saveNow };
 }
 
 /** Short status line for an auto-saving form. */
@@ -90,4 +129,25 @@ export function saveLabel(state: SaveState): string {
       : state === 'error'
         ? 'Could not save'
         : '';
+}
+
+/**
+ * Status line for something that already exists in the database.
+ *
+ * Different from `saveLabel` in what it does with `idle`, and the difference is
+ * the whole point of it. A form that has never been touched has nothing to
+ * report, so `saveLabel` says nothing. A record that is already stored — an
+ * element in a section, a question in a quiz — is *saved*, and saying nothing
+ * about it reads as the opposite: a video added, sitting safely in the
+ * database, showed a blank where every other row showed "Saved", and authors
+ * quite reasonably concluded it had not been.
+ *
+ * `dirty` is the caller's own answer to "does what is on screen match what is
+ * stored", which only it can know, and is what keeps this from claiming a
+ * half-typed edit has been written.
+ */
+export function saveStatus(state: SaveState, dirty = false): string {
+  if (state === 'saving') return 'Saving...';
+  if (state === 'error') return 'Could not save';
+  return dirty ? 'Unsaved changes' : 'Saved';
 }

@@ -8,8 +8,8 @@
 import { newMarkers } from '@/components/common/new-badge';
 
 /**
- * The rule matters more than the pill. A newly published section arrives with
- * every module and element inside it also new, so tagging each one would put
+ * The rule matters more than the pill. A newly published module arrives with
+ * every section and element inside it also new, so tagging each one would put
  * New on twenty lines to say one thing. The tag goes at the highest level that
  * is new and stops there.
  *
@@ -21,8 +21,8 @@ describe('newMarkers', () => {
     const markers = newMarkers(null);
 
     expect(markers.any).toBe(false);
-    expect(markers.section('s1')).toBe(false);
-    expect(markers.module('m1', 's1')).toBe(false);
+    expect(markers.module('s1')).toBe(false);
+    expect(markers.section('m1', 's1')).toBe(false);
     expect(markers.item('e1', 'm1', 's1')).toBe(false);
   });
 
@@ -30,35 +30,35 @@ describe('newMarkers', () => {
     expect(newMarkers(undefined).any).toBe(false);
   });
 
-  it('marks a new section', () => {
+  it('marks a new module', () => {
     const markers = newMarkers({
-      newSectionIds: ['s1'],
-      newModuleIds: [],
+      newModuleIds: ['s1'],
+      newSectionIds: [],
       newElementIds: [],
       newQuizIds: [],
     });
 
-    expect(markers.section('s1')).toBe(true);
+    expect(markers.module('s1')).toBe(true);
     expect(markers.any).toBe(true);
   });
 
-  /** The section heading already says it, so its modules stay unmarked. */
-  it('suppresses a module marker when the whole section is new', () => {
+  /** The module heading already says it, so its sections stay unmarked. */
+  it('suppresses a section marker when the whole module is new', () => {
     const markers = newMarkers({
-      newSectionIds: ['s1'],
-      newModuleIds: ['m1'],
+      newModuleIds: ['s1'],
+      newSectionIds: ['m1'],
       newElementIds: [],
       newQuizIds: [],
     });
 
-    expect(markers.section('s1')).toBe(true);
-    expect(markers.module('m1', 's1')).toBe(false);
+    expect(markers.module('s1')).toBe(true);
+    expect(markers.section('m1', 's1')).toBe(false);
   });
 
-  it('suppresses an item marker when its section is new', () => {
+  it('suppresses an item marker when its module is new', () => {
     const markers = newMarkers({
-      newSectionIds: ['s1'],
-      newModuleIds: [],
+      newModuleIds: ['s1'],
+      newSectionIds: [],
       newElementIds: ['e1'],
       newQuizIds: [],
     });
@@ -66,34 +66,34 @@ describe('newMarkers', () => {
     expect(markers.item('e1', 'm1', 's1')).toBe(false);
   });
 
-  it('suppresses an item marker when its module is new', () => {
+  it('suppresses an item marker when its section is new', () => {
     const markers = newMarkers({
-      newSectionIds: [],
-      newModuleIds: ['m1'],
+      newModuleIds: [],
+      newSectionIds: ['m1'],
       newElementIds: ['e1'],
       newQuizIds: [],
     });
 
-    expect(markers.module('m1', 's1')).toBe(true);
+    expect(markers.section('m1', 's1')).toBe(true);
     expect(markers.item('e1', 'm1', 's1')).toBe(false);
   });
 
   it('marks an item when only that item is new', () => {
     const markers = newMarkers({
-      newSectionIds: [],
       newModuleIds: [],
+      newSectionIds: [],
       newElementIds: ['e1'],
       newQuizIds: [],
     });
 
     expect(markers.item('e1', 'm1', 's1')).toBe(true);
-    expect(markers.module('m1', 's1')).toBe(false);
+    expect(markers.section('m1', 's1')).toBe(false);
   });
 
   it('treats a new quiz as an item', () => {
     const markers = newMarkers({
-      newSectionIds: [],
       newModuleIds: [],
+      newSectionIds: [],
       newElementIds: [],
       newQuizIds: ['q1'],
     });
@@ -101,29 +101,29 @@ describe('newMarkers', () => {
     expect(markers.item('q1', 'm1', 's1')).toBe(true);
   });
 
-  it('marks a module in one section without affecting another', () => {
+  it('marks a section in one module without affecting another', () => {
     const markers = newMarkers({
-      newSectionIds: ['s2'],
-      newModuleIds: ['m1'],
+      newModuleIds: ['s2'],
+      newSectionIds: ['m1'],
       newElementIds: [],
       newQuizIds: [],
     });
 
     // m1 sits in s1, which is not new, so it keeps its own marker.
-    expect(markers.module('m1', 's1')).toBe(true);
-    // A module in the new section is suppressed.
-    expect(markers.module('m2', 's2')).toBe(false);
+    expect(markers.section('m1', 's1')).toBe(true);
+    // A section in the new module is suppressed.
+    expect(markers.section('m2', 's2')).toBe(false);
   });
 
-  it('handles a module with no section without crashing', () => {
+  it('handles a section with no module without crashing', () => {
     const markers = newMarkers({
-      newSectionIds: [],
-      newModuleIds: ['m1'],
+      newModuleIds: [],
+      newSectionIds: ['m1'],
       newElementIds: [],
       newQuizIds: [],
     });
 
-    expect(markers.module('m1', null)).toBe(true);
+    expect(markers.section('m1', null)).toBe(true);
     expect(markers.item('e1', 'm1', null)).toBe(false);
   });
 });

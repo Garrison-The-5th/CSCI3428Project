@@ -56,27 +56,37 @@ const Learning = () => {
   }, [fetchCourses]);
 
   /**
+   * Lessons only.
+   *
+   * A quiz set is a course underneath — one module nobody sees and a section per
+   * quiz — which is what put it on this page alongside real lessons. It belongs
+   * on the Quizzes tab, where it was created and where it reads as what it is,
+   * so which tab a course appears on follows from what it was made as.
+   */
+  const lessons = useMemo(() => courses.filter((course) => course.kind !== 'QUIZ_SET'), [courses]);
+
+  /**
    * Matches on more than the title. Someone looking for "manual handling" is as
-   * likely to remember the tag or a module name as the course's own wording, and
+   * likely to remember the tag or a section name as the course's own wording, and
    * a search that only reads titles quietly fails for them.
    */
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return courses;
+    if (!query) return lessons;
 
-    return courses.filter((course) =>
+    return lessons.filter((course) =>
       [
         course.title,
         course.shortDescription ?? '',
         course.description ?? '',
         ...course.tags,
-        ...course.modules.map((module) => `${module.number} ${module.title}`),
+        ...course.sections.map((section) => `${section.number} ${section.title}`),
       ]
         .join(' ')
         .toLowerCase()
         .includes(query),
     );
-  }, [courses, search]);
+  }, [lessons, search]);
 
   if (loading) {
     return (
@@ -106,7 +116,7 @@ const Learning = () => {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search courses, tags or modules..."
+            placeholder="Search courses, tags or sections..."
             aria-label="Search courses"
             className="bg-white pl-10 text-dark-gray"
           />
@@ -129,8 +139,8 @@ const Learning = () => {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
           {visible.map((course) => {
             const cover = imageSrc(course.imageData, course.imageType);
-            const quizCount = course.modules.reduce(
-              (sum, module) => sum + module.quizzes.length,
+            const quizCount = course.sections.reduce(
+              (sum, section) => sum + section.quizzes.length,
               0,
             );
             const hasNew = newContentCourseIds.has(course.id);
@@ -180,7 +190,7 @@ const Learning = () => {
                   className="flex items-center justify-between border-t border-gray-300 p-4 text-sm
                     font-medium text-dark-gray"
                 >
-                  <span>Lessons: {course.modules.length}</span>
+                  <span>Lessons: {course.sections.length}</span>
                   <span>Quizzes: {quizCount}</span>
                 </CardContent>
               </Card>

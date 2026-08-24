@@ -9,20 +9,23 @@
  * CourseLanding - the overview a learner sees after picking a course card.
  *
  * Left column : header (title, short description, tags, authors, dates,
- *               languages), "What you'll learn", collapsible module preview,
+ *               languages), "What you'll learn", collapsible section preview,
  *               prerequisites, full description, instructors.
  * Right column: cover photo, a button into the player, and the course totals.
  */
 import {
   ArrowLeftIcon,
+  ArrowRightCircleIcon,
+  CheckCircleIcon,
   CheckIcon,
   ChevronDownIcon,
   ClockIcon,
   DocumentTextIcon,
+  LockClosedIcon,
   PlayCircleIcon,
   QuestionMarkCircleIcon,
 } from '@heroicons/react/24/outline';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { plainPreview } from '@/components/common/element-view';
@@ -31,12 +34,24 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+  flattenCourse,
+  hasStartedCourse,
+  itemDoneFor,
+  itemId,
+  moduleUnlocked,
+  NO_PROGRESS,
+  resumeItem,
+  sectionUnlocked,
+  unlockedItemIds,
+} from '@/services/course-progress';
+import {
   Course,
   courseStats,
   imageSrc,
-  moduleContent,
+  LearnerProgress,
+  moduleGroups,
   NewIds,
-  sectionGroups,
+  sectionContent,
 } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { logger } from '@/utils/logger';
@@ -65,7 +80,13 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
   const course = previewCourse ?? fetched;
   const [loading, setLoading] = useState(!previewCourse);
   const [error, setError] = useState<string | null>(null);
-  const [openModuleId, setOpenModuleId] = useState<string | null>(null);
+  const [openSectionId, setOpenSectionId] = useState<string | null>(null);
+  /**
+   * How far they have got. Needed here as well as in the player now that the
+   * content box is a set of shortcuts: a link that jumps into locked content
+   * would be a worse dead end than no link at all.
+   */
+  const [progress, setProgress] = useState<LearnerProgress>(NO_PROGRESS);
 
   const fetchCourse = useCallback(async () => {
     // Preview is handed its course directly; there is nothing to load.
@@ -75,9 +96,16 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
       setError(null);
       // One call for both kinds of visitor: a link holder can have been part
       // way through when a new version went live just as a member can.
-      const withNew = await api.getCourseWithNewIds(courseId);
+      const [withNew, learnerProgress] = await Promise.all([
+        api.getCourseWithNewIds(courseId),
+        // Progress is a nicety here rather than the point of the page, so a
+        // failure to read it leaves the shortcuts locked rather than the page
+        // broken.
+        api.getProgress().catch(() => NO_PROGRESS),
+      ]);
       setFetched(withNew?.course ?? null);
       setNewIds(withNew?.newIds ?? null);
+      setProgress(learnerProgress);
     } catch (err) {
       logger.error('Error loading course:', err);
       setError('Failed to load this course');
@@ -89,6 +117,19 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
   useEffect(() => {
     fetchCourse();
   }, [fetchCourse]);
+
+  /**
+   * The course flattened into reading order, and what that opens.
+   *
+   * In the authoring preview there is no progress to read, so a sequential
+   * course shows everything past the first item locked — which is exactly what
+   * a learner arriving fresh would see, and the honest thing to preview.
+   */
+  const items = useMemo(() => (course ? flattenCourse(course) : []), [course]);
+  const unlocked = useMemo(
+    () => (course ? unlockedItemIds(course, items, progress) : new Set<string>()),
+    [course, items, progress],
+  );
 
   if (loading) {
     return (
@@ -114,11 +155,29 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
   }
 
   const stats = courseStats(course);
-  const groups = sectionGroups(course);
+  const groups = moduleGroups(course);
   const isNew = newMarkers(newIds);
   const cover = imageSrc(course.imageData, course.imageType);
   const updated = new Date(course.updatedAt).toLocaleDateString();
   const published = course.publishedAt ? new Date(course.publishedAt).toLocaleDateString() : null;
+
+  const itemDone = itemDoneFor(course, progress);
+  const started = hasStartedCourse(course, progress);
+
+  /**
+   * Opening the player at a particular item.
+   *
+   * The item id goes in the URL rather than in navigation state so a shortcut
+   * survives a reload and can be copied to somebody — and so the player has one
+   * way of being told where to start rather than two.
+   */
+  const openAt = (id?: string) => {
+    if (preview) return;
+    navigate(`/learning/${course.id}/content${id ? `?item=${encodeURIComponent(id)}` : ''}`);
+  };
+
+  /** Where Continue drops them: the last thing they actually opened. */
+  const resumeAt = resumeItem(course, items, unlocked, progress);
 
   const bulletList = (items: string[]) => (
     <ul className="flex flex-col gap-2">
@@ -196,119 +255,264 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
             </Card>
           )}
 
-          {/* Module preview, grouped into the sections that number them */}
+          {/*
+            Course content — also the way in.
+            Every row here is a shortcut into the player: a module heading jumps
+            to the start of that module, a section heading to that section, and a
+            line inside an open section straight to that item. Anything the
+            learner has not reached yet carries a padlock on the right of its
+            title and does nothing when clicked, so the shortcut can never take
+            somebody somewhere the player would refuse to show them.
+          */}
           <Card className="bg-light-gray shadow-sm">
             <CardHeader className="p-4">
               <CardTitle className="text-lg text-dark-gray">Course content</CardTitle>
               <p className="text-sm text-dark-gray">
-                {course.sections.length} section{course.sections.length === 1 ? '' : 's'} ·{' '}
                 {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
+                {course.sections.length} section{course.sections.length === 1 ? '' : 's'} ·{' '}
                 {formatMinutes(stats.totalMinutes)} total
               </p>
+              {!preview && course.sections.length > 0 && (
+                <p className="text-sm text-dark-gray">
+                  {course.sequential
+                    ? 'Pick anything you have reached to jump straight to it.'
+                    : 'Pick anything to jump straight to it.'}
+                </p>
+              )}
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {course.modules.length === 0 ? (
-                <p className="text-dark-gray">No modules yet.</p>
+              {course.sections.length === 0 ? (
+                <p className="text-dark-gray">No sections yet.</p>
               ) : (
-                groups.map((group) => (
-                  <div key={group.section.id} className="flex flex-col gap-2">
-                    <h3
-                      className="flex flex-wrap items-center gap-2 break-words font-semibold
-                        text-dark-gray"
-                    >
-                      <span>
-                        {group.section.number}. {group.section.title}
-                      </span>
-                      {isNew.section(group.section.id) && <NewBadge />}
-                    </h3>
+                groups.map((group) => {
+                  const moduleOpen = moduleUnlocked(course, items, unlocked, group.sections);
+                  // Where a click on the module heading lands: the first thing
+                  // inside it they can actually open.
+                  const moduleEntry =
+                    items.find(
+                      (item) =>
+                        group.sections.some((section) => section.id === item.sectionId) &&
+                        unlocked.has(itemId(item)),
+                    ) ?? null;
 
-                    {group.modules.length === 0 && (
-                      <p className="text-sm text-dark-gray">Nothing in this section yet.</p>
-                    )}
-
-                    {group.modules.map((module) => {
-                      const isOpen = openModuleId === module.id;
-
-                      return (
-                        <div key={module.id} className="rounded-lg border border-gray-300 bg-white">
-                          <button
-                            onClick={() => setOpenModuleId(isOpen ? null : module.id)}
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left"
-                            aria-expanded={isOpen}
-                          >
-                            <ChevronDownIcon
-                              className={`w-5 h-5 shrink-0 text-dark-gray transition-transform
-                                duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                  return (
+                    <div key={group.module.id} className="flex flex-col gap-2">
+                      <button
+                        onClick={() => moduleEntry && openAt(itemId(moduleEntry))}
+                        disabled={preview || !moduleOpen || !moduleEntry}
+                        title={
+                          moduleOpen
+                            ? preview
+                              ? 'Disabled while previewing'
+                              : `Go to ${group.module.title}`
+                            : 'Finish the previous module to open this one'
+                        }
+                        className={`flex w-full items-center gap-2 rounded-md px-1 py-1 text-left ${
+                          moduleOpen && moduleEntry && !preview
+                            ? 'cursor-pointer hover:bg-white/60'
+                            : 'cursor-default'
+                          }`}
+                      >
+                        <span
+                          className={`flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words
+                            font-semibold ${moduleOpen ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                        >
+                          <span>
+                            {group.module.number}. {group.module.title}
+                          </span>
+                          {isNew.module(group.module.id) && <NewBadge />}
+                        </span>
+                        {moduleOpen ? (
+                          moduleEntry &&
+                          !preview && (
+                            <ArrowRightCircleIcon
+                              className="w-5 h-5 shrink-0 text-navy"
+                              aria-hidden="true"
                             />
-                            <span className="min-w-0 flex-1">
-                              <span
-                                className="flex flex-wrap items-center gap-2 break-words
-                                  font-semibold text-dark-gray"
-                              >
-                                <span>
-                                  {module.number} {module.title}
-                                </span>
-                                {isNew.module(module.id, module.sectionId) && <NewBadge />}
-                              </span>
-                              <span className="block text-sm text-dark-gray">
-                                {module.elements.length} item
-                                {module.elements.length === 1 ? '' : 's'}
-                                {module.quizzes.length > 0 &&
-                                  ` · ${module.quizzes.length} quiz${module.quizzes.length === 1 ? '' : 'zes'}`}{' '}
-                                · {formatMinutes(module.estimatedMinutes)}
-                              </span>
-                            </span>
-                          </button>
+                          )
+                        ) : (
+                          <LockClosedIcon
+                            className="w-5 h-5 shrink-0 text-dark-gray/50"
+                            aria-label="Locked"
+                          />
+                        )}
+                      </button>
 
-                          {isOpen && (
-                            <ul className="border-t border-gray-300 px-4 py-3">
-                              {moduleContent(module).map((item) => (
-                                <li
-                                  key={item.id}
-                                  className="flex items-center gap-2 py-1 text-sm text-dark-gray"
-                                >
-                                  {item.kind === 'quiz' ? (
-                                    <QuestionMarkCircleIcon className="w-4 h-4 shrink-0" />
-                                  ) : item.element.type === 'YOUTUBE' ? (
-                                    <PlayCircleIcon className="w-4 h-4 shrink-0" />
-                                  ) : (
-                                    <DocumentTextIcon className="w-4 h-4 shrink-0" />
-                                  )}
-                                  <span className="min-w-0 flex-1 truncate">
-                                    {item.kind === 'quiz'
-                                      ? plainPreview(item.quiz.title, 70)
-                                      : item.element.type === 'TEXT'
-                                        ? plainPreview(item.element.textContent ?? 'Article')
-                                        : item.element.type === 'YOUTUBE'
-                                          ? plainPreview(item.element.videoUrl ?? 'Video')
-                                          : plainPreview(
-                                              item.element.fileName ?? item.element.type,
-                                            )}
+                      {group.sections.length === 0 && (
+                        <p className="text-sm text-dark-gray">Nothing in this module yet.</p>
+                      )}
+
+                      {group.sections.map((section) => {
+                        const isOpen = openSectionId === section.id;
+                        const open = sectionUnlocked(course, items, unlocked, section.id);
+                        const sectionEntry =
+                          items.find(
+                            (item) => item.sectionId === section.id && unlocked.has(itemId(item)),
+                          ) ?? null;
+                        const finished =
+                          open &&
+                          items
+                            .filter((item) => item.sectionId === section.id)
+                            .every((item) => itemDone(item));
+
+                        return (
+                          <div
+                            key={section.id}
+                            className="rounded-lg border border-gray-300 bg-white"
+                          >
+                            <div className="flex w-full items-center gap-1 px-2 py-1">
+                              {/* Expanding and jumping are separate targets on
+                                  purpose: wanting to see what is inside a section
+                                  is not the same as wanting to be taken there. */}
+                              <button
+                                onClick={() => setOpenSectionId(isOpen ? null : section.id)}
+                                className="shrink-0 rounded-md p-2 text-dark-gray
+                                  hover:bg-light-gray"
+                                aria-expanded={isOpen}
+                                aria-label={isOpen ? 'Hide contents' : 'Show contents'}
+                              >
+                                <ChevronDownIcon
+                                  className={`w-5 h-5 transition-transform duration-200
+                                    ${isOpen ? 'rotate-180' : ''}`}
+                                />
+                              </button>
+
+                              <button
+                                onClick={() => sectionEntry && openAt(itemId(sectionEntry))}
+                                disabled={preview || !open || !sectionEntry}
+                                title={
+                                  open
+                                    ? preview
+                                      ? 'Disabled while previewing'
+                                      : `Go to ${section.title}`
+                                    : 'Finish the item before this one to unlock it'
+                                }
+                                className={`flex min-w-0 flex-1 items-center gap-3 rounded-md px-2
+                                  py-2 text-left ${
+                                    open && sectionEntry && !preview
+                                      ? 'cursor-pointer hover:bg-light-gray'
+                                      : 'cursor-default'
+                                  }`}
+                              >
+                                <span className="min-w-0 flex-1">
+                                  <span
+                                    className={`flex flex-wrap items-center gap-2 break-words
+                                      font-semibold
+                                      ${open ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                                  >
+                                    <span>
+                                      {section.number} {section.title}
+                                    </span>
+                                    {isNew.section(section.id, section.moduleId) && <NewBadge />}
                                   </span>
-                                  {item.kind === 'quiz' ? (
-                                    <span className="shrink-0">
-                                      {item.quiz.questions.length} question
-                                      {item.quiz.questions.length === 1 ? '' : 's'}
-                                    </span>
-                                  ) : item.element.durationMinutes ? (
-                                    <span className="shrink-0">
-                                      {item.element.durationMinutes} min
-                                    </span>
-                                  ) : null}
-                                </li>
-                              ))}
-                              {moduleContent(module).length === 0 && (
-                                <li className="py-1 text-sm text-dark-gray">
-                                  Nothing in here yet.
-                                </li>
-                              )}
-                            </ul>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))
+                                  <span
+                                    className={`block text-sm
+                                      ${open ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                                  >
+                                    {section.elements.length} item
+                                    {section.elements.length === 1 ? '' : 's'}
+                                    {section.quizzes.length > 0 &&
+                                      ` · ${section.quizzes.length} quiz${section.quizzes.length === 1 ? '' : 'zes'}`}{' '}
+                                    · {formatMinutes(section.estimatedMinutes)}
+                                  </span>
+                                </span>
+
+                                {/* The padlock the spec asks for, on the right of
+                                    the title. A finished section gets a tick
+                                    instead; one in progress gets the arrow. */}
+                                {!open ? (
+                                  <LockClosedIcon
+                                    className="w-5 h-5 shrink-0 text-dark-gray/50"
+                                    aria-label="Locked"
+                                  />
+                                ) : finished ? (
+                                  <CheckCircleIcon
+                                    className="w-5 h-5 shrink-0 text-green"
+                                    aria-label="Finished"
+                                  />
+                                ) : (
+                                  !preview && (
+                                    <ArrowRightCircleIcon
+                                      className="w-5 h-5 shrink-0 text-navy"
+                                      aria-hidden="true"
+                                    />
+                                  )
+                                )}
+                              </button>
+                            </div>
+
+                            {isOpen && (
+                              <ul className="border-t border-gray-300 px-2 py-2">
+                                {sectionContent(section).map((item) => {
+                                  const itemOpen = unlocked.has(item.id);
+
+                                  return (
+                                    <li key={item.id}>
+                                      <button
+                                        onClick={() => openAt(item.id)}
+                                        disabled={preview || !itemOpen}
+                                        title={
+                                          itemOpen
+                                            ? preview
+                                              ? 'Disabled while previewing'
+                                              : 'Go to this item'
+                                            : 'Finish the item before this one to unlock it'
+                                        }
+                                        className={`flex w-full items-center gap-2 rounded-md px-2
+                                          py-1 text-left text-sm ${
+                                            itemOpen
+                                              ? 'text-dark-gray' +
+                                                (preview ? '' : ' hover:bg-light-gray')
+                                              : 'cursor-not-allowed text-dark-gray/40'
+                                          }`}
+                                      >
+                                        {!itemOpen ? (
+                                          <LockClosedIcon className="w-4 h-4 shrink-0" />
+                                        ) : item.kind === 'quiz' ? (
+                                          <QuestionMarkCircleIcon className="w-4 h-4 shrink-0" />
+                                        ) : item.element.type === 'YOUTUBE' ? (
+                                          <PlayCircleIcon className="w-4 h-4 shrink-0" />
+                                        ) : (
+                                          <DocumentTextIcon className="w-4 h-4 shrink-0" />
+                                        )}
+                                        <span className="min-w-0 flex-1 truncate">
+                                          {item.kind === 'quiz'
+                                            ? plainPreview(item.quiz.title, 70)
+                                            : item.element.type === 'TEXT'
+                                              ? plainPreview(item.element.textContent ?? 'Article')
+                                              : item.element.type === 'YOUTUBE'
+                                                ? plainPreview(item.element.videoUrl ?? 'Video')
+                                                : plainPreview(
+                                                    item.element.fileName ?? item.element.type,
+                                                  )}
+                                        </span>
+                                        {item.kind === 'quiz' ? (
+                                          <span className="shrink-0">
+                                            {item.quiz.questions.length} question
+                                            {item.quiz.questions.length === 1 ? '' : 's'}
+                                          </span>
+                                        ) : item.element.durationMinutes ? (
+                                          <span className="shrink-0">
+                                            {item.element.durationMinutes} min
+                                          </span>
+                                        ) : null}
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                                {sectionContent(section).length === 0 && (
+                                  <li className="py-1 text-sm text-dark-gray">
+                                    Nothing in here yet.
+                                  </li>
+                                )}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
               )}
             </CardContent>
           </Card>
@@ -396,13 +600,38 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
             </div>
 
             <CardContent className="flex flex-col gap-4 p-4">
+              {/*
+                Start or Continue, decided by whether they have touched this
+                course before. "Continue" resumes at the first thing they have
+                not finished rather than at the top, because that is what the
+                word promises.
+              */}
               <Button
-                onClick={() => !preview && navigate(`/learning/${course.id}/content`)}
+                onClick={() => openAt(started && resumeAt ? itemId(resumeAt) : undefined)}
                 title={preview ? 'Disabled while previewing' : undefined}
                 className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover"
               >
-                Course content
+                {started ? 'Continue' : 'Start course'}
               </Button>
+
+              {started && resumeAt && (
+                <p className="-mt-2 break-words text-center text-sm text-dark-gray">
+                  Picks up at{' '}
+                  {resumeAt.kind === 'quiz'
+                    ? plainPreview(resumeAt.quiz.title, 50)
+                    : plainPreview(
+                        resumeAt.element.textContent ??
+                          resumeAt.element.fileName ??
+                          resumeAt.element.type,
+                        50,
+                      )}
+                </p>
+              )}
+              {started && !resumeAt && (
+                <p className="-mt-2 text-center text-sm text-dark-gray">
+                  You have worked through everything here.
+                </p>
+              )}
 
               <p className="text-sm font-semibold text-dark-gray">This course includes:</p>
               <ul className="flex flex-col gap-2 text-sm text-dark-gray">

@@ -20,6 +20,11 @@ process.env.LOG_LEVEL = 'silent';
  *
  * CI always sets DATABASE_URL, so the suite is never silently skipped there —
  * see the postgres service in .github/workflows/pr-checks.yml.
+ *
+ * Which database that is has already been decided, and vetted, by
+ * `setup-test-db.ts`. It is deliberately never read from the app's own .env:
+ * `resetDatabase` below empties every table, and pointing that at a developer's
+ * working database destroys their content. It has done exactly that once.
  */
 export const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -46,15 +51,15 @@ export async function resetDatabase(): Promise<void> {
     prisma.quizSession.deleteMany(),
     prisma.quizAttempt.deleteMany(),
     prisma.elementProgress.deleteMany(),
-    prisma.moduleProgress.deleteMany(),
+    prisma.sectionProgress.deleteMany(),
     prisma.courseCompletion.deleteMany(),
     prisma.note.deleteMany(),
     prisma.assignment.deleteMany(),
     prisma.coursePublication.deleteMany(),
     prisma.quiz.deleteMany(),
     prisma.element.deleteMany(),
-    prisma.module.deleteMany(),
     prisma.section.deleteMany(),
+    prisma.module.deleteMany(),
     prisma.instructor.deleteMany(),
     prisma.course.deleteMany(),
     prisma.user.deleteMany(),

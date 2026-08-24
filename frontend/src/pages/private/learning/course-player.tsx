@@ -11,9 +11,9 @@
  * Left  : the selected item (video, article, image, PDF or quiz), then tabs for
  *         Learning tools and Notes, then the course title, last-updated date and
  *         description.
- * Right : a scrollable course-content rail of sections, modules and their items.
+ * Right : a scrollable course-content rail of modules, sections and their items.
  *
- * Opening an item records it, which is what marks its module complete and — on a
+ * Opening an item records it, which is what marks its section complete and — on a
  * sequential course — unlocks whatever comes next. The left and right arrow keys
  * step through the course, so a whole lesson can be read without the mouse.
  */
@@ -32,7 +32,7 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import { NewBadge, newMarkers } from '@/components/common/new-badge';
@@ -42,13 +42,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Course,
-  CourseModule,
-  moduleContent,
-  ModuleElement,
+  CourseSection,
+  moduleGroups,
+  moduleTint,
   NewIds,
   Note,
-  sectionGroups,
-  sectionTint,
+  sectionContent,
+  SectionElement,
 } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { Quiz } from '@/services/quiz-api';
@@ -64,8 +64,8 @@ const STAGE_HEIGHT = 'h-[58vh] min-h-80';
 
 /** Whatever is showing in the left pane. */
 type Selection =
-  | { kind: 'element'; moduleId: string; element: ModuleElement }
-  | { kind: 'quiz'; moduleId: string; quiz: Quiz }
+  | { kind: 'element'; sectionId: string; element: SectionElement }
+  | { kind: 'quiz'; sectionId: string; quiz: Quiz }
   | null;
 
 interface CoursePlayerProps {
@@ -90,13 +90,14 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   const api = useLearnerApi();
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [fetched, setFetched] = useState<Course | null>(null);
   const [newIds, setNewIds] = useState<NewIds | null>(null);
   const course = previewCourse ?? fetched;
   const [loading, setLoading] = useState(!previewCourse);
   const [selection, setSelection] = useState<Selection>(null);
-  const [viewedModuleIds, setViewedModuleIds] = useState<Set<string>>(new Set());
+  const [viewedSectionIds, setViewedSectionIds] = useState<Set<string>>(new Set());
   const [viewedElementIds, setViewedElementIds] = useState<Set<string>>(new Set());
   const [attemptedQuizIds, setAttemptedQuizIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'tools' | 'notes'>('tools');
@@ -104,8 +105,8 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   const [noteDraft, setNoteDraft] = useState('');
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState('');
-  /** Sections the learner has folded away. Expanded is the default. */
-  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
+  /** Modules the learner has folded away. Expanded is the default. */
+  const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
 
   const fetchCourse = useCallback(async () => {
     if (previewCourse || !courseId) return;
@@ -128,7 +129,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     if (preview) return;
     try {
       const progress = await api.getProgress();
-      setViewedModuleIds(new Set(progress.viewedModuleIds));
+      setViewedSectionIds(new Set(progress.viewedSectionIds));
       setViewedElementIds(new Set(progress.viewedElementIds ?? []));
       setAttemptedQuizIds(new Set(progress.attemptedQuizIds));
     } catch (err) {
@@ -154,19 +155,19 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   }, [fetchCourse, fetchNotes]);
 
   /**
-   * Every item in the course flattened into reading order: each module's elements
+   * Every item in the course flattened into reading order: each section's elements
    * followed by its quizzes. Drives the opening selection, the prev/next arrows,
    * and — on a sequential course — what is unlocked.
    */
   const flatItems = useMemo<Array<NonNullable<Selection>>>(() => {
     if (!course) return [];
-    return course.modules.flatMap((module) =>
-      // moduleContent interleaves elements and quizzes by their shared order, so
-      // a quiz placed mid-module is reached in the right place.
-      moduleContent(module).map((item) =>
+    return course.sections.flatMap((section) =>
+      // sectionContent interleaves elements and quizzes by their shared order, so
+      // a quiz placed mid-section is reached in the right place.
+      sectionContent(section).map((item) =>
         item.kind === 'element'
-          ? ({ kind: 'element', moduleId: module.id, element: item.element } as const)
-          : ({ kind: 'quiz', moduleId: module.id, quiz: item.quiz } as const),
+          ? ({ kind: 'element', sectionId: section.id, element: item.element } as const)
+          : ({ kind: 'quiz', sectionId: section.id, quiz: item.quiz } as const),
       ),
     );
   }, [course]);
@@ -175,41 +176,41 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     item.kind === 'element' ? item.element.id : item.quiz.id;
 
   /**
-   * Modules that predate per-element tracking.
+   * Sections that predate per-element tracking.
    *
-   * Progress used to be recorded only per module, so an old account has modules
+   * Progress used to be recorded only per section, so an old account has sections
    * marked viewed with no element rows behind them. Reading that as "nothing in
-   * this module has been seen" would re-lock courses people had already worked
-   * through. A viewed module with no element views at all is therefore treated
+   * this section has been seen" would re-lock courses people had already worked
+   * through. A viewed section with no element views at all is therefore treated
    * as fully seen; the moment any element view lands for it — which the first
    * click does — the fine-grained rule takes over.
    */
-  const legacyModuleIds = useMemo(() => {
+  const legacySectionIds = useMemo(() => {
     if (!course) return new Set<string>();
     const legacy = new Set<string>();
-    for (const module of course.modules) {
-      if (!viewedModuleIds.has(module.id)) continue;
-      const seenAny = module.elements.some((element) => viewedElementIds.has(element.id));
-      if (!seenAny) legacy.add(module.id);
+    for (const section of course.sections) {
+      if (!viewedSectionIds.has(section.id)) continue;
+      const seenAny = section.elements.some((element) => viewedElementIds.has(element.id));
+      if (!seenAny) legacy.add(section.id);
     }
     return legacy;
-  }, [course, viewedModuleIds, viewedElementIds]);
+  }, [course, viewedSectionIds, viewedElementIds]);
 
   /** Whether one item counts as done, which is what opens the next one. */
   const itemDone = useCallback(
     (item: NonNullable<Selection>) =>
       item.kind === 'quiz'
         ? attemptedQuizIds.has(item.quiz.id)
-        : viewedElementIds.has(item.element.id) || legacyModuleIds.has(item.moduleId),
-    [attemptedQuizIds, viewedElementIds, legacyModuleIds],
+        : viewedElementIds.has(item.element.id) || legacySectionIds.has(item.sectionId),
+    [attemptedQuizIds, viewedElementIds, legacySectionIds],
   );
 
   /**
    * On a sequential course, items open one at a time: the first is always
-   * available and every other waits for the one before it. Modules and sections
-   * fall out of the same rule rather than being locked separately — a module is
-   * locked when none of its items are reachable, and a section when none of its
-   * modules are.
+   * available and every other waits for the one before it. Sections and modules
+   * fall out of the same rule rather than being locked separately — a section is
+   * locked when none of its items are reachable, and a module when none of its
+   * sections are.
    *
    * Non-sequential courses lock nothing.
    */
@@ -240,20 +241,20 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
 
   const isUnlocked = (item: NonNullable<Selection>) => unlockedItemIds.has(idOf(item));
 
-  /** A module is reachable when any of its items is. */
-  const moduleUnlocked = useCallback(
-    (moduleId: string) =>
+  /** A section is reachable when any of its items is. */
+  const sectionUnlocked = useCallback(
+    (sectionId: string) =>
       !course?.sequential ||
-      flatItems.some((item) => item.moduleId === moduleId && unlockedItemIds.has(idOf(item))) ||
-      // A module with no content at all cannot block anything.
-      !flatItems.some((item) => item.moduleId === moduleId),
+      flatItems.some((item) => item.sectionId === sectionId && unlockedItemIds.has(idOf(item))) ||
+      // A section with no content at all cannot block anything.
+      !flatItems.some((item) => item.sectionId === sectionId),
     [course, flatItems, unlockedItemIds],
   );
 
-  /** Opening anything inside a module counts that module as seen. */
+  /** Opening anything inside a section counts that section as seen. */
   const markViewed = useCallback(
     async (item: NonNullable<Selection>) => {
-      setViewedModuleIds((prev) => new Set(prev).add(item.moduleId));
+      setViewedSectionIds((prev) => new Set(prev).add(item.sectionId));
       if (item.kind === 'element') {
         if (viewedElementIds.has(item.element.id)) return;
         setViewedElementIds((prev) => new Set(prev).add(item.element.id));
@@ -264,10 +265,10 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       if (preview) return;
 
       try {
-        // The element endpoint credits the module too, so a quiz — which has no
-        // element to record — is the only case that needs the module call.
+        // The element endpoint credits the section too, so a quiz — which has no
+        // element to record — is the only case that needs the section call.
         if (item.kind === 'element') await api.recordElementView(item.element.id);
-        else await api.recordModuleView(item.moduleId);
+        else await api.recordSectionView(item.sectionId);
       } catch (err) {
         logger.error('Failed to record progress:', err);
       }
@@ -276,26 +277,41 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     [viewedElementIds, preview],
   );
 
-  // The first item opens on its own, so record it too — otherwise the learner
-  // could read it and never be credited for it.
+  /**
+   * What opens on arrival.
+   *
+   * `?item=` is how the course page's shortcuts say where to land; without one,
+   * the course opens at the top as it always has. The id is checked against what
+   * is actually unlocked rather than trusted, so an old or shared link into
+   * locked content falls back to the beginning instead of stepping over the
+   * sequence — the landing page already refuses to offer such a link, and this is
+   * the same rule enforced where it matters.
+   *
+   * Recorded on open like any other item, because the learner is now reading it.
+   */
   useEffect(() => {
     if (selection || flatItems.length === 0) return;
-    setSelection(flatItems[0]);
-    markViewed(flatItems[0]);
-  }, [flatItems, selection, markViewed]);
+
+    const wanted = searchParams.get('item');
+    const requested = wanted ? flatItems.find((item) => idOf(item) === wanted) : undefined;
+    const target = requested && unlockedItemIds.has(idOf(requested)) ? requested : flatItems[0];
+
+    setSelection(target);
+    markViewed(target);
+  }, [flatItems, selection, markViewed, searchParams, unlockedItemIds]);
 
   const pick = useCallback(
-    (next: NonNullable<Selection>) => {
-      if (!unlockedItemIds.has(idOf(next))) return;
+    (next: NonNullable<Selection>, force = false) => {
+      if (!force && !unlockedItemIds.has(idOf(next))) return;
       setSelection(next);
       markViewed(next);
-      // Jumping into a folded section should show where you landed.
-      setCollapsedSectionIds((prev) => {
+      // Jumping into a folded module should show where you landed.
+      setCollapsedModuleIds((prev) => {
         if (prev.size === 0) return prev;
-        const sectionId = course?.modules.find((m) => m.id === next.moduleId)?.sectionId;
-        if (!sectionId || !prev.has(sectionId)) return prev;
+        const moduleId = course?.sections.find((m) => m.id === next.sectionId)?.moduleId;
+        if (!moduleId || !prev.has(moduleId)) return prev;
         const open = new Set(prev);
-        open.delete(sectionId);
+        open.delete(moduleId);
         return open;
       });
     },
@@ -303,11 +319,12 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   );
 
   /**
-   * A module counts as finished when it has been opened and every quiz in it has
+   * A section counts as finished when it has been opened and every quiz in it has
    * been attempted — the same rule the dashboard uses.
    */
-  const moduleFinished = (module: CourseModule) =>
-    viewedModuleIds.has(module.id) && module.quizzes.every((quiz) => attemptedQuizIds.has(quiz.id));
+  const sectionFinished = (section: CourseSection) =>
+    viewedSectionIds.has(section.id) &&
+    section.quizzes.every((quiz) => attemptedQuizIds.has(quiz.id));
 
   const currentIndex = selection
     ? flatItems.findIndex((item) => idOf(item) === idOf(selection))
@@ -320,6 +337,20 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     currentIndex >= 0 && currentIndex < flatItems.length - 1 ? flatItems[currentIndex + 1] : null;
   // Walking forward must respect the lock too, not just the rail.
   const nextItem = rawNext && isUnlocked(rawNext) ? rawNext : null;
+
+  /**
+   * Moves on from a quiz that has just been handed in.
+   *
+   * Forced past the lock deliberately. Submitting is exactly what unlocks the
+   * next item, but the attempt has only just been recorded and `unlockedItemIds`
+   * is derived state — reading it here would see the world as it was a moment
+   * before the submission and refuse to move. The quiz being finished is the
+   * fact; the recomputed lock catches up on the next render.
+   */
+  const advanceAfterQuiz = useCallback(() => {
+    const next = flatItems[currentIndex + 1];
+    if (next) pick(next, true);
+  }, [flatItems, currentIndex, pick]);
 
   /**
    * Left and right arrows step through the course.
@@ -352,14 +383,14 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   // ---- Notes ----
 
   /**
-   * A note's title is the module it was written on, as "2.3 Working at height".
-   * Notes taken before modules were tracked, or on a module since deleted, still
+   * A note's title is the section it was written on, as "2.3 Working at height".
+   * Notes taken before sections were tracked, or on a section since deleted, still
    * need something to sit under rather than appearing untitled.
    */
-  const moduleTitle = (moduleId: string | null): string => {
-    if (!moduleId) return 'General note';
-    const module = course?.modules.find((candidate) => candidate.id === moduleId);
-    return module ? `${module.number} ${module.title}` : 'Removed module';
+  const sectionTitle = (sectionId: string | null): string => {
+    if (!sectionId) return 'General note';
+    const section = course?.sections.find((candidate) => candidate.id === sectionId);
+    return section ? `${section.number} ${section.title}` : 'Removed section';
   };
 
   const saveNote = async () => {
@@ -371,7 +402,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
         {
           id: `preview-${Date.now()}`,
           courseId: course?.id ?? '',
-          moduleId: selection?.moduleId ?? null,
+          sectionId: selection?.sectionId ?? null,
           body: noteDraft.trim(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -384,7 +415,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
 
     if (!courseId) return;
     try {
-      await api.createNote(courseId, noteDraft.trim(), selection?.moduleId ?? null);
+      await api.createNote(courseId, noteDraft.trim(), selection?.sectionId ?? null);
       setNoteDraft('');
       await fetchNotes();
     } catch (err) {
@@ -458,7 +489,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     );
   }
 
-  const itemIcon = (element: ModuleElement) =>
+  const itemIcon = (element: SectionElement) =>
     element.type === 'YOUTUBE' ? (
       <PlayCircleIcon className="w-4 h-4 shrink-0" />
     ) : element.type === 'IMAGE' ? (
@@ -468,7 +499,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     );
 
   /** One-line label for the rail. Lesson text is markup, so its tags come out. */
-  const itemLabel = (element: ModuleElement) =>
+  const itemLabel = (element: SectionElement) =>
     element.type === 'TEXT'
       ? plainPreview(element.textContent ?? 'Article', 45) || 'Article'
       : element.type === 'YOUTUBE'
@@ -483,16 +514,16 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     (selection?.kind === 'element' && selection.element.id === id) ||
     (selection?.kind === 'quiz' && selection.quiz.id === id);
 
-  const groups = sectionGroups(course);
+  const groups = moduleGroups(course);
   // What arrived in the version this learner is reading. The helper applies the
-  // roll-up rule, so a wholly new section is marked once rather than everywhere.
+  // roll-up rule, so a wholly new module is marked once rather than everywhere.
   const isNew = newMarkers(newIds);
 
-  const toggleSection = (sectionId: string) =>
-    setCollapsedSectionIds((prev) => {
+  const toggleModule = (moduleId: string) =>
+    setCollapsedModuleIds((prev) => {
       const next = new Set(prev);
-      if (next.has(sectionId)) next.delete(sectionId);
-      else next.add(sectionId);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
       return next;
     });
 
@@ -521,20 +552,25 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
               {selection === null ? (
                 <p className="py-16 text-center text-dark-gray">This course has no content yet.</p>
               ) : selection.kind === 'quiz' ? (
-                <>
-                  <h2 className="mb-4 shrink-0 text-xl font-semibold text-dark-gray">
-                    {selection.quiz.title}
-                  </h2>
-                  <div className="min-h-0 flex-1 overflow-y-auto">
-                    <QuizRunner
-                      quiz={selection.quiz}
-                      onCompleted={() => {
-                        setAttemptedQuizIds((prev) => new Set(prev).add(selection.quiz.id));
-                        fetchProgress();
-                      }}
-                    />
-                  </div>
-                </>
+                // The quiz owns the whole stage, title and all. An exam opens on
+                // its details behind a Start button and becomes its questions
+                // from there, without the player having to know which of the two
+                // is on screen — see quiz-runner.
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <QuizRunner
+                    key={selection.quiz.id}
+                    quiz={selection.quiz}
+                    onCompleted={() => {
+                      setAttemptedQuizIds((prev) => new Set(prev).add(selection.quiz.id));
+                      fetchProgress();
+                    }}
+                    // With results on this is the Next button under the ring;
+                    // with them off the runner calls it the moment the paper is
+                    // handed in, so the learner never sees a score.
+                    onFinished={advanceAfterQuiz}
+                    finishLabel={currentIndex < flatItems.length - 1 ? 'Next' : 'Finish'}
+                  />
+                </div>
               ) : (
                 <div className="min-h-0 flex-1">
                   <ElementView element={selection.element} fill />
@@ -544,7 +580,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
           </Card>
 
           {/* Step through the course without touching the rail. Runs past the end
-              of a module straight into the next one, and answers to the arrow keys. */}
+              of a section straight into the next one, and answers to the arrow keys. */}
           {flatItems.length > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Button
@@ -611,7 +647,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                     <p className="text-sm font-medium text-dark-gray">
                       New note on{' '}
                       <span className="font-semibold">
-                        {selection ? moduleTitle(selection.moduleId) : 'this course'}
+                        {selection ? sectionTitle(selection.sectionId) : 'this course'}
                       </span>
                     </p>
                     <Textarea
@@ -641,7 +677,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                           <div className="flex items-start justify-between gap-3">
                             <span className="min-w-0">
                               <span className="block break-words font-semibold text-dark-gray">
-                                {moduleTitle(note.moduleId)}
+                                {sectionTitle(note.sectionId)}
                               </span>
                               <span className="block text-xs text-dark-gray">
                                 {new Date(note.createdAt).toLocaleString()}
@@ -736,37 +772,39 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
             <div className="border-b border-gray-300 p-4">
               <h2 className="font-semibold text-dark-gray">Course content</h2>
               <p className="text-sm text-dark-gray">
-                {course.sections.length} section{course.sections.length === 1 ? '' : 's'} ·{' '}
-                {course.modules.length} module{course.modules.length === 1 ? '' : 's'}
+                {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
+                {course.sections.length} section{course.sections.length === 1 ? '' : 's'}
               </p>
             </div>
 
             <div className="max-h-[70vh] overflow-y-auto p-2">
               {groups.map((group) => {
-                // A section opens once anything inside it does. On a sequential
-                // course that means the section before it has been worked
+                // A module opens once anything inside it does. On a sequential
+                // course that means the module before it has been worked
                 // through, which is the rule stated in terms the rail can draw.
-                const sectionUnlocked = group.modules.some((module) => moduleUnlocked(module.id));
-                const collapsed = collapsedSectionIds.has(group.section.id) || !sectionUnlocked;
-                const tint = sectionTint(group.section.color);
+                const moduleUnlocked = group.sections.some((section) =>
+                  sectionUnlocked(section.id),
+                );
+                const collapsed = collapsedModuleIds.has(group.module.id) || !moduleUnlocked;
+                const tint = moduleTint(group.module.color);
 
                 return (
-                  <div key={group.section.id} className="mb-3">
+                  <div key={group.module.id} className="mb-3">
                     <button
-                      onClick={() => sectionUnlocked && toggleSection(group.section.id)}
-                      disabled={!sectionUnlocked}
+                      onClick={() => moduleUnlocked && toggleModule(group.module.id)}
+                      disabled={!moduleUnlocked}
                       aria-expanded={!collapsed}
                       title={
-                        sectionUnlocked ? undefined : 'Finish the previous section to open this one'
+                        moduleUnlocked ? undefined : 'Finish the previous module to open this one'
                       }
                       className={`flex w-full items-center gap-2 rounded-md border-l-4 px-2 py-2
                       text-left transition-colors ${
-                        sectionUnlocked ? 'cursor-pointer' : 'cursor-not-allowed text-dark-gray/50'
+                        moduleUnlocked ? 'cursor-pointer' : 'cursor-not-allowed text-dark-gray/50'
                       }
-                      ${group.section.color ? '' : 'border-l-navy/30 bg-navy/5'}`}
+                      ${group.module.color ? '' : 'border-l-navy/30 bg-navy/5'}`}
                       style={tint}
                     >
-                      {sectionUnlocked ? (
+                      {moduleUnlocked ? (
                         <ChevronDownIcon
                           className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
                             duration-200 ${collapsed ? '-rotate-90' : ''}`}
@@ -776,24 +814,24 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                       )}
                       <span
                         className={`min-w-0 flex-1 text-xs font-bold uppercase tracking-wide
-                        ${sectionUnlocked ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                        ${moduleUnlocked ? 'text-dark-gray' : 'text-dark-gray/50'}`}
                       >
-                        {group.section.number}. {group.section.title}
+                        {group.module.number}. {group.module.title}
                       </span>
-                      {isNew.section(group.section.id) && <NewBadge />}
+                      {isNew.module(group.module.id) && <NewBadge />}
                     </button>
 
                     {!collapsed &&
-                      group.modules.map((module: CourseModule) => {
-                        const unlocked = moduleUnlocked(module.id);
+                      group.sections.map((section: CourseSection) => {
+                        const unlocked = sectionUnlocked(section.id);
 
                         return (
-                          <section key={module.id} className="mb-2">
+                          <section key={section.id} className="mb-2">
                             <div className="flex items-center gap-2 px-2 py-2">
                               {!unlocked ? (
                                 <LockClosedIcon className="w-4 h-4 shrink-0 text-dark-gray" />
                               ) : (
-                                moduleFinished(module) && (
+                                sectionFinished(section) && (
                                   <CheckCircleIcon className="w-4 h-4 shrink-0 text-green" />
                                 )
                               )}
@@ -801,21 +839,21 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                                 className={`min-w-0 flex-1 text-sm font-semibold
                                 ${unlocked ? 'text-dark-gray' : 'text-dark-gray/50'}`}
                               >
-                                {module.number} {module.title}
+                                {section.number} {section.title}
                               </h3>
-                              {isNew.module(module.id, module.sectionId) && <NewBadge />}
+                              {isNew.section(section.id, section.moduleId) && <NewBadge />}
                             </div>
 
                             <ul className="flex flex-col">
-                              {moduleContent(module).map((item) => {
+                              {sectionContent(section).map((item) => {
                                 const asSelection: NonNullable<Selection> =
                                   item.kind === 'element'
                                     ? {
                                         kind: 'element',
-                                        moduleId: module.id,
+                                        sectionId: section.id,
                                         element: item.element,
                                       }
-                                    : { kind: 'quiz', moduleId: module.id, quiz: item.quiz };
+                                    : { kind: 'quiz', sectionId: section.id, quiz: item.quiz };
                                 const itemUnlocked = isUnlocked(asSelection);
 
                                 return (
@@ -852,7 +890,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                                       {/* New wins over the tick: something
                                           they have already seen is not news, so
                                           the two never both apply. */}
-                                      {isNew.item(item.id, module.id, module.sectionId) ? (
+                                      {isNew.item(item.id, section.id, section.moduleId) ? (
                                         <NewBadge />
                                       ) : (
                                         itemDone(asSelection) &&
@@ -874,7 +912,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                                 );
                               })}
 
-                              {moduleContent(module).length === 0 && (
+                              {sectionContent(section).length === 0 && (
                                 <li className="px-3 py-2 text-sm text-dark-gray">Empty</li>
                               )}
                             </ul>
@@ -882,8 +920,8 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                         );
                       })}
 
-                    {!collapsed && group.modules.length === 0 && (
-                      <p className="px-3 py-2 text-sm text-dark-gray">Empty section</p>
+                    {!collapsed && group.sections.length === 0 && (
+                      <p className="px-3 py-2 text-sm text-dark-gray">Empty module</p>
                     )}
                   </div>
                 );

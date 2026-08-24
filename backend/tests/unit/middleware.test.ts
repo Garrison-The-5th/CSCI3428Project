@@ -6,12 +6,14 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
+import { EventEmitter } from 'events';
 import type { NextFunction, Request, Response } from 'express';
 
 import {
   requireAnyRole,
   requireRole,
 } from '@/controllers/auth-controller/authorization-middleware';
+import { requireCourseEditor } from '@/controllers/auth-controller/course-access-middleware';
 import { enforceJsonContentType } from '@/controllers/middleware/content-type';
 import {
   __resetRateLimitState,
@@ -20,8 +22,12 @@ import {
   UPLOAD_MAX_BYTES_PER_WINDOW,
   UPLOAD_MAX_FILES_PER_WINDOW,
 } from '@/controllers/middleware/rate-limit';
+import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
+jest.mock('@/gateways/publication-gateway/publication-gateway');
+
+const curriculum = CurriculumGateway as jest.Mocked<typeof CurriculumGateway>;
 
 /** A response double that records what the handler did to it. */
 function responseDouble() {
@@ -325,5 +331,115 @@ describe('role gates — §3.4.2', () => {
       next,
     );
     expect(next).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Marking a course's draft as ahead of what learners are served.
+ *
+ * Hung off the response by `requireCourseEditor`, so every edit registers
+ * without thirty handlers having to remember to say so. The catch is that
+ * publishing goes through the same guard — and publishing is the one write whose
+ * whole purpose is to make the two agree.
+ */
+describe('requireCourseEditor — the unpublished-changes marker', () => {
+  /** A response that can actually emit `finish`, which is what the marker waits for. */
+  function finishableResponse() {
+    const emitter = new EventEmitter();
+    const res = {
+      statusCode: 200,
+      on: emitter.on.bind(emitter),
+      finish() {
+        emitter.emit('finish');
+      },
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      send() {
+        return this;
+      },
+    };
+    return res as unknown as Response & typeof res;
+  }
+
+  const author = {
+    auth: { roles: ['admin'], email: 'a@b.c', name: 'A' },
+    user: { id: 1, email: 'a@b.c' },
+  };
+
+  const resolve = async () => 'course-1';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    curriculum.touchDraft.mockResolvedValue({} as never);
+  });
+
+  /** Wait a tick: the marker fires and forgets, so it lands after the emit. */
+  const settle = () => new Promise((done) => setImmediate(done));
+
+  it('marks the draft edited after a successful edit', async () => {
+    const res = finishableResponse();
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...author, method: 'PUT' }) as never,
+      res,
+      jest.fn() as NextFunction,
+    );
+
+    res.finish();
+    await settle();
+
+    expect(curriculum.touchDraft).toHaveBeenCalledWith('course-1');
+  });
+
+  /**
+   * The bug this exists to stop.
+   *
+   * Publishing aligns the draft with the version it just wrote, and then this
+   * marker fired on the way out and pushed the draft back in front of it — so a
+   * course reported unpublished changes from the moment it was published, for
+   * ever, with nothing an author could do to clear it.
+   */
+  it('does not mark the draft edited when the request was a publish', async () => {
+    const res = finishableResponse();
+    await requireCourseEditor(resolve, { marksDraftEdited: false })(
+      requestDouble({ ...author, method: 'POST' }) as never,
+      res,
+      jest.fn() as NextFunction,
+    );
+
+    res.finish();
+    await settle();
+
+    expect(curriculum.touchDraft).not.toHaveBeenCalled();
+  });
+
+  it('does not mark a read', async () => {
+    const res = finishableResponse();
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...author, method: 'GET' }) as never,
+      res,
+      jest.fn() as NextFunction,
+    );
+
+    res.finish();
+    await settle();
+
+    expect(curriculum.touchDraft).not.toHaveBeenCalled();
+  });
+
+  it('does not mark an edit that failed', async () => {
+    const res = finishableResponse();
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...author, method: 'PUT' }) as never,
+      res,
+      jest.fn() as NextFunction,
+    );
+
+    res.statusCode = 400;
+    res.finish();
+    await settle();
+
+    expect(curriculum.touchDraft).not.toHaveBeenCalled();
   });
 });

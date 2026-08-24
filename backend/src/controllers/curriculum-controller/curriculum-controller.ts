@@ -1,6 +1,6 @@
 /**
  * File: curriculum-controller.ts
- * Description: HTTP routes for courses, sections, modules, elements, notes and progress.
+ * Description: HTTP routes for courses, modules, sections, elements, notes and progress.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -21,6 +21,7 @@ import {
   fromElementParam,
   fromModuleParam,
   fromSectionParam,
+  fromVersionParam,
   requireCourseEditor,
 } from '@/controllers/auth-controller/course-access-middleware';
 import { controller, del, get, post, put, use } from '@/controllers/decorators';
@@ -107,7 +108,7 @@ export default class CurriculumController {
     return res.send(deleted);
   }
 
-  /** Restores every deleted course and module in one go. */
+  /** Restores every deleted course and section in one go. */
   @post('/deleted/restore-all')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
@@ -146,16 +147,16 @@ export default class CurriculumController {
     }
   }
 
-  /** Permanently removes one deleted module. */
-  @del('/deleted/modules/:id')
+  /** Permanently removes one deleted section. */
+  @del('/deleted/sections/:id')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async purgeModule(req: Request, res: Response) {
+  async purgeSection(req: Request, res: Response) {
     try {
-      await CurriculumService.purgeModule(param(req, 'id'));
-      return res.send({ message: 'Module permanently deleted' });
+      await CurriculumService.purgeSection(param(req, 'id'));
+      return res.send({ message: 'Section permanently deleted' });
     } catch (error) {
-      return fail(res, error, 'Error permanently deleting module');
+      return fail(res, error, 'Error permanently deleting section');
     }
   }
 
@@ -195,6 +196,27 @@ export default class CurriculumController {
     }
   }
 
+  /**
+   * Creates a quiz set from just a name.
+   *
+   * Its own route rather than a `kind` on the one above, so that "make me a quiz
+   * set" cannot be reached by putting an unexpected value in a body meant to
+   * create a lesson — and so the two can diverge in what they accept later
+   * without either growing a mode flag.
+   */
+  @post('/quiz-sets')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async createQuizSet(req: Request, res: Response) {
+    try {
+      const { title } = req.body as { title?: string };
+      const course = await CurriculumService.createQuizSet(title);
+      return res.send({ message: 'Quiz set created successfully', course });
+    } catch (error) {
+      return fail(res, error, 'Error creating quiz set');
+    }
+  }
+
   @put('/courses/:id')
   @use(requireCourseEditor(fromCourseParam('id')))
   @use(authenticateAndAttachUser)
@@ -214,8 +236,11 @@ export default class CurriculumController {
    * snapshots the course as it currently stands and points learners at it. What
    * the editor calls "Publish updated course" is this.
    */
+  // Publishing must not count as an edit of the draft: it is the write that makes
+  // the draft and the published version agree, and marking it would push the
+  // draft back in front of the version it had just written.
   @post('/courses/:id/publish')
-  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(requireCourseEditor(fromCourseParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async publishCourse(req: AuthenticatedRequest, res: Response) {
     try {
@@ -273,6 +298,45 @@ export default class CurriculumController {
     }
   }
 
+  /**
+   * Puts an archived version back in front of learners, as a new version.
+   *
+   * Gated per course rather than on the global authoring role: this changes what
+   * every learner on the course is reading, so it belongs to whoever may edit
+   * that course — the same rule as publishing it in the first place.
+   */
+  @post('/versions/:id/restore')
+  @use(requireCourseEditor(fromVersionParam('id')))
+  @use(authenticateAndAttachUser)
+  async restoreVersion(req: AuthenticatedRequest, res: Response) {
+    try {
+      const result = await PublicationService.restoreVersion(
+        param(req as Request, 'id'),
+        req.user?.id ?? null,
+      );
+
+      return res.send({
+        message: `Version ${result.restoredFrom} restored — published as version ${result.version}`,
+        ...result,
+      });
+    } catch (error) {
+      return fail(res, error, 'Error restoring that version');
+    }
+  }
+
+  /** Permanently removes one archived version. The live one is refused. */
+  @del('/versions/:id')
+  @use(requireCourseEditor(fromVersionParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteVersion(req: Request, res: Response) {
+    try {
+      const result = await PublicationService.deleteVersion(param(req, 'id'));
+      return res.send({ message: `Version ${result.version} deleted`, ...result });
+    } catch (error) {
+      return fail(res, error, 'Error deleting that version');
+    }
+  }
+
   /** Soft delete — the course moves to the recycle bin and can be restored. */
   @del('/courses/:id')
   @use(requireCourseEditor(fromCourseParam('id')))
@@ -316,81 +380,17 @@ export default class CurriculumController {
     }
   }
 
-  // ---- Sections ----
-
-  @get('/courses/:courseId/sections')
-  @use(requireCourseEditor(fromCourseParam('courseId')))
-  @use(authenticateAndAttachUser)
-  async getSections(req: Request, res: Response) {
-    const sections = await CurriculumService.getSections(param(req, 'courseId'));
-    return res.send({ sections });
-  }
-
-  /** A section takes a title and the place in the course it should occupy. */
-  @post('/courses/:courseId/sections')
-  @use(requireCourseEditor(fromCourseParam('courseId')))
-  @use(authenticateAndAttachUser)
-  async createSection(req: Request, res: Response) {
-    try {
-      const section = await CurriculumService.createSection(param(req, 'courseId'), req.body);
-      return res.send({ message: 'Section created successfully', section });
-    } catch (error) {
-      return fail(res, error, 'Error creating section');
-    }
-  }
-
-  @put('/sections/:id')
-  @use(requireCourseEditor(fromSectionParam('id')))
-  @use(authenticateAndAttachUser)
-  async updateSection(req: Request, res: Response) {
-    try {
-      const section = await CurriculumService.updateSection(param(req, 'id'), req.body);
-      return res.send({ message: 'Section updated successfully', section });
-    } catch (error) {
-      return fail(res, error, 'Error updating section');
-    }
-  }
-
-  /** Soft delete — the section and its modules move to the recycle bin. */
-  @del('/sections/:id')
-  @use(requireCourseEditor(fromSectionParam('id')))
-  @use(authenticateAndAttachUser)
-  async deleteSection(req: Request, res: Response) {
-    try {
-      await CurriculumService.deleteSection(param(req, 'id'));
-      return res.send({ message: 'Section moved to the recycle bin' });
-    } catch (error) {
-      return fail(res, error, 'Error deleting section');
-    }
-  }
-
-  @post('/sections/:id/restore')
-  @use(requireAuthor())
-  @use(authenticateAndAttachUser)
-  async restoreSection(req: Request, res: Response) {
-    try {
-      await CurriculumService.restoreSection(param(req, 'id'));
-      return res.send({ message: 'Section restored' });
-    } catch (error) {
-      return fail(res, error, 'Error restoring section');
-    }
-  }
-
-  /** Permanently removes one deleted section. */
-  @del('/deleted/sections/:id')
-  @use(requireAuthor())
-  @use(authenticateAndAttachUser)
-  async purgeSection(req: Request, res: Response) {
-    try {
-      await CurriculumService.purgeSection(param(req, 'id'));
-      return res.send({ message: 'Section permanently deleted' });
-    } catch (error) {
-      return fail(res, error, 'Error permanently deleting section');
-    }
-  }
-
   // ---- Modules ----
 
+  @get('/courses/:courseId/modules')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async getModules(req: Request, res: Response) {
+    const modules = await CurriculumService.getModules(param(req, 'courseId'));
+    return res.send({ modules });
+  }
+
+  /** A module takes a title and the place in the course it should occupy. */
   @post('/courses/:courseId/modules')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)
@@ -400,31 +400,6 @@ export default class CurriculumController {
       return res.send({ message: 'Module created successfully', module });
     } catch (error) {
       return fail(res, error, 'Error creating module');
-    }
-  }
-
-  /**
-   * Applies a new grid for the whole course — used by drag-to-reorder.
-   * Body: { sections: [{ id, moduleIds: [...] }] }, outer index the section and
-   * inner index the module. Numbers are derived, never sent.
-   */
-  @put('/courses/:courseId/structure')
-  @use(requireCourseEditor(fromCourseParam('courseId')))
-  @use(authenticateAndAttachUser)
-  async reorderStructure(req: Request, res: Response) {
-    try {
-      const { sections } = req.body as {
-        sections?: Array<{ id: string; moduleIds: string[] }>;
-      };
-
-      if (!Array.isArray(sections)) {
-        return res.status(400).send({ errorMessage: 'sections array is required' });
-      }
-
-      const course = await CurriculumService.reorderStructure(param(req, 'courseId'), sections);
-      return res.send({ message: 'Course structure updated', course });
-    } catch (error) {
-      return fail(res, error, 'Error reordering the course');
     }
   }
 
@@ -440,7 +415,7 @@ export default class CurriculumController {
     }
   }
 
-  /** Soft delete — the module moves to the recycle bin and can be restored. */
+  /** Soft delete — the module and its sections move to the recycle bin. */
   @del('/modules/:id')
   @use(requireCourseEditor(fromModuleParam('id')))
   @use(authenticateAndAttachUser)
@@ -465,13 +440,102 @@ export default class CurriculumController {
     }
   }
 
-  /** Uploads an image or PDF and stores it on the module as an element. */
-  @post('/modules/:id/image')
+  /** Permanently removes one deleted module. */
+  @del('/deleted/modules/:id')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async purgeModule(req: Request, res: Response) {
+    try {
+      await CurriculumService.purgeModule(param(req, 'id'));
+      return res.send({ message: 'Module permanently deleted' });
+    } catch (error) {
+      return fail(res, error, 'Error permanently deleting module');
+    }
+  }
+
+  // ---- Sections ----
+
+  @post('/courses/:courseId/sections')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async createSection(req: Request, res: Response) {
+    try {
+      const section = await CurriculumService.createSection(param(req, 'courseId'), req.body);
+      return res.send({ message: 'Section created successfully', section });
+    } catch (error) {
+      return fail(res, error, 'Error creating section');
+    }
+  }
+
+  /**
+   * Applies a new grid for the whole course — used by drag-to-reorder.
+   * Body: { modules: [{ id, sectionIds: [...] }] }, outer index the module and
+   * inner index the section. Numbers are derived, never sent.
+   */
+  @put('/courses/:courseId/structure')
+  @use(requireCourseEditor(fromCourseParam('courseId')))
+  @use(authenticateAndAttachUser)
+  async reorderStructure(req: Request, res: Response) {
+    try {
+      const { modules } = req.body as {
+        modules?: Array<{ id: string; sectionIds: string[] }>;
+      };
+
+      if (!Array.isArray(modules)) {
+        return res.status(400).send({ errorMessage: 'modules array is required' });
+      }
+
+      const course = await CurriculumService.reorderStructure(param(req, 'courseId'), modules);
+      return res.send({ message: 'Course structure updated', course });
+    } catch (error) {
+      return fail(res, error, 'Error reordering the course');
+    }
+  }
+
+  @put('/sections/:id')
+  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(authenticateAndAttachUser)
+  async updateSection(req: Request, res: Response) {
+    try {
+      const section = await CurriculumService.updateSection(param(req, 'id'), req.body);
+      return res.send({ message: 'Section updated successfully', section });
+    } catch (error) {
+      return fail(res, error, 'Error updating section');
+    }
+  }
+
+  /** Soft delete — the section moves to the recycle bin and can be restored. */
+  @del('/sections/:id')
+  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(authenticateAndAttachUser)
+  async deleteSection(req: Request, res: Response) {
+    try {
+      await CurriculumService.deleteSection(param(req, 'id'));
+      return res.send({ message: 'Section moved to the recycle bin' });
+    } catch (error) {
+      return fail(res, error, 'Error deleting section');
+    }
+  }
+
+  @post('/sections/:id/restore')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async restoreSection(req: Request, res: Response) {
+    try {
+      await CurriculumService.restoreSection(param(req, 'id'));
+      return res.send({ message: 'Section restored' });
+    } catch (error) {
+      return fail(res, error, 'Error restoring section');
+    }
+  }
+
+  /** Uploads an image or PDF and stores it on the section as an element. */
+  @post('/sections/:id/image')
   @use(enforceUploadQuota)
   @use(mediaUpload.single('file'))
-  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id')))
   @use(authenticateAndAttachUser)
-  async uploadModuleImage(req: Request, res: Response) {
+  async uploadSectionImage(req: Request, res: Response) {
     try {
       if (!req.file) {
         return res.status(400).send({ errorMessage: 'No file uploaded' });
@@ -483,12 +547,12 @@ export default class CurriculumController {
     }
   }
 
-  /** Modules auto-complete on view, so opening one records progress. */
-  @post('/modules/:id/view')
+  /** Sections auto-complete on view, so opening one records progress. */
+  @post('/sections/:id/view')
   @use(authenticateAndAttachUser)
-  async recordModuleView(req: AuthenticatedRequest, res: Response) {
+  async recordSectionView(req: AuthenticatedRequest, res: Response) {
     try {
-      await CurriculumService.recordModuleView(req.user!.id, param(req as Request, 'id'));
+      await CurriculumService.recordSectionView(req.user!.id, param(req as Request, 'id'));
       return res.send({ message: 'Progress recorded' });
     } catch (error) {
       return fail(res, error, 'Error recording progress');
@@ -511,13 +575,13 @@ export default class CurriculumController {
   }
 
   /**
-   * Reorders a module's content, where elements and quizzes are interleaved.
+   * Reorders a section's content, where elements and quizzes are interleaved.
    * Body: { items: [{ kind: 'element' | 'quiz', id }] } in the new order.
    */
-  @put('/modules/:id/content-order')
-  @use(requireCourseEditor(fromModuleParam('id')))
+  @put('/sections/:id/content-order')
+  @use(requireCourseEditor(fromSectionParam('id')))
   @use(authenticateAndAttachUser)
-  async reorderModuleContent(req: Request, res: Response) {
+  async reorderSectionContent(req: Request, res: Response) {
     try {
       const { items } = req.body as { items?: Array<{ kind: 'element' | 'quiz'; id: string }> };
 
@@ -525,15 +589,15 @@ export default class CurriculumController {
         return res.status(400).send({ errorMessage: 'items array is required' });
       }
 
-      const module = await CurriculumService.reorderModuleContent(param(req, 'id'), items);
-      return res.send({ message: 'Content reordered', module });
+      const section = await CurriculumService.reorderSectionContent(param(req, 'id'), items);
+      return res.send({ message: 'Content reordered', section });
     } catch (error) {
       return fail(res, error, 'Error reordering content');
     }
   }
 
-  @post('/modules/:moduleId/elements')
-  @use(requireCourseEditor(fromModuleParam('moduleId')))
+  @post('/sections/:sectionId/elements')
+  @use(requireCourseEditor(fromSectionParam('sectionId')))
   @use(authenticateAndAttachUser)
   async createElement(req: Request, res: Response) {
     const { type } = req.body as { type?: string };
@@ -543,7 +607,7 @@ export default class CurriculumController {
     }
 
     try {
-      const element = await CurriculumService.createElement(param(req, 'moduleId'), req.body);
+      const element = await CurriculumService.createElement(param(req, 'sectionId'), req.body);
       return res.send({ message: 'Element created successfully', element });
     } catch (error) {
       return fail(res, error, 'Error creating element');
@@ -576,7 +640,7 @@ export default class CurriculumController {
 
   /**
    * What this learner has already done. The player needs it to draw ticks and,
-   * on a sequential course, to know which modules are unlocked.
+   * on a sequential course, to know which sections are unlocked.
    */
   @get('/progress')
   @use(authenticateAndAttachUser)

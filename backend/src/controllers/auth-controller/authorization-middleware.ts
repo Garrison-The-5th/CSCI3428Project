@@ -39,7 +39,8 @@ export function requireAnyRole(allowedRoles: string[]) {
         ip: clientAddress(req),
         method: req.method,
         path: req.path,
-        reason: `requires one of [${allowedRoles.join(', ')}], holds [${req.auth.roles.join(', ')}]`,
+        reason:
+          `requires one of [${allowedRoles.join(', ')}], ` + `holds [${req.auth.roles.join(', ')}]`,
       });
       return res.status(403).send({ errorMessage: 'Forbidden' });
     }
@@ -50,8 +51,16 @@ export function requireAnyRole(allowedRoles: string[]) {
 
 /**
  * Anyone who may author learning content. Contributors have the same rights as
- * admins over courses, modules and quizzes (but not over users).
+ * admins over courses, sections and quizzes (but not over users).
  */
 export const AUTHOR_ROLES = ['admin', 'contributor'];
 
+/**
+ * Guards a route on holding a *global* authoring role.
+ *
+ * Right for things that are not about one course — creating a course, emptying
+ * the recycle bin, listing every draft. Anything that names a particular course
+ * wants `requireCourseEditor` instead, which also admits somebody named as a
+ * contributor on that one course but holding no global role.
+ */
 export const requireAuthor = () => requireAnyRole(AUTHOR_ROLES);

@@ -103,7 +103,7 @@ const PrivacyNotice = ({ onNotify }: PrivacyNoticeProps) => {
             <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm">
               <li>Your name and email address, from your sign-in.</li>
               <li>Which courses and quizzes you have been assigned, and by whom.</li>
-              <li>Which modules you have opened and when.</li>
+              <li>Which sections you have opened and when.</li>
               <li>Your quiz attempts and scores.</li>
               <li>Any notes you write while working through a course.</li>
             </ul>

@@ -6,7 +6,7 @@
  * Date: 2026-08-10
  */
 import { Course, Dashboard, LearnerProgress, NewIds, Note } from '@/services/curriculum-api';
-import { AttemptResult, Quiz, QuizSession } from '@/services/quiz-api';
+import { AttemptResult, Quiz, QuizAnswers, QuizSession } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 import { API_BASE_URL } from '@/utils/utils';
 
@@ -37,8 +37,8 @@ export interface Assignment {
   assignedBy?: { id: number; email: string; name: string | null } | null;
   /** Progress, present on the author-facing list. */
   name?: string | null;
-  totalModules?: number;
-  completedModules?: number;
+  totalSections?: number;
+  completedSections?: number;
   percentComplete?: number;
   attempts?: number;
   /** Latest of anything they did — reads as "who has gone quiet". */
@@ -52,7 +52,7 @@ export interface AssignedCourse {
   imageData: string | null;
   imageType: string | null;
   published: boolean;
-  totalModules: number;
+  totalSections: number;
   assignedCount: number;
   completedCount: number;
   overdueCount: number;
@@ -65,8 +65,8 @@ export interface LearnerCourseProgress {
   imageData: string | null;
   imageType: string | null;
   dueDate: string | null;
-  totalModules: number;
-  completedModules: number;
+  totalSections: number;
+  completedSections: number;
   percentComplete: number;
   totalQuizzes: number;
   attemptedQuizzes: number;
@@ -77,12 +77,40 @@ export interface LearnerCourseProgress {
   revoked: boolean;
 }
 
+/**
+ * One handed-in one-time quiz, with the paper.
+ *
+ * Filed under the learner because that is the only place it makes sense: the
+ * quiz disappears from their side once submitted, so this is the record.
+ */
+export interface OneTimeQuizResult {
+  attemptId: string;
+  quizId: string;
+  title: string;
+  score: number;
+  total: number;
+  percent: number;
+  completedAt: string;
+  answers: Array<{
+    questionId: string;
+    order: number;
+    prompt: string;
+    /** The option texts they picked, frozen at submission. */
+    chosen: string[];
+    /** What would have been right. */
+    correct: string[];
+    wasCorrect: boolean;
+  }>;
+}
+
 export interface LearnerInsight {
   email: string;
   name: string | null;
   /** They have signed in, rather than only being an address on an assignment. */
   hasAccount: boolean;
   courses: LearnerCourseProgress[];
+  /** One-time quizzes they have handed in, newest first. */
+  oneTimeQuizzes: OneTimeQuizResult[];
   overallPercent: number;
 }
 
@@ -101,6 +129,11 @@ export type AssignmentFailure =
   | 'sign-in'
   /** The link sat unused past the inactivity timeout (§3.2.2). */
   | 'idle'
+  /**
+   * A one-time link that has been handed in and whose result has been read. The
+   * visit after that closes it, and the author can turn it back on.
+   */
+  | 'completed'
   | 'error';
 
 export class AssignmentLinkError extends Error {
@@ -173,8 +206,8 @@ export const assignmentApi = {
   getProgress: (token: string): Promise<LearnerProgress> =>
     publicRequest<LearnerProgress>(`public/assignments/${encodeURIComponent(token)}/progress`),
 
-  recordView: (token: string, moduleId: string) =>
-    publicRequest(`public/assignments/${encodeURIComponent(token)}/modules/${moduleId}/view`, {
+  recordView: (token: string, sectionId: string) =>
+    publicRequest(`public/assignments/${encodeURIComponent(token)}/sections/${sectionId}/view`, {
       method: 'POST',
       body: '{}',
     }),
@@ -185,13 +218,19 @@ export const assignmentApi = {
       body: '{}',
     }),
 
+  /** The run already open on an assigned quiz. Starts nothing — see quizApi. */
+  peekSession: (token: string, quizId: string) =>
+    publicRequest<QuizSession>(
+      `public/assignments/${encodeURIComponent(token)}/quizzes/${quizId}/session`,
+    ),
+
   startSession: (token: string, quizId: string) =>
     publicRequest<QuizSession>(
       `public/assignments/${encodeURIComponent(token)}/quizzes/${quizId}/start`,
       { method: 'POST', body: '{}' },
     ),
 
-  submitAttempt: (token: string, quizId: string, answers: Record<string, string>) =>
+  submitAttempt: (token: string, quizId: string, answers: QuizAnswers) =>
     publicRequest<AttemptResult>(
       `public/assignments/${encodeURIComponent(token)}/quizzes/${quizId}/attempt`,
       { method: 'POST', body: JSON.stringify({ answers }) },
@@ -212,10 +251,10 @@ export const assignmentApi = {
     return response.notes ?? [];
   },
 
-  createNote: (token: string, courseId: string, body: string, moduleId?: string | null) =>
+  createNote: (token: string, courseId: string, body: string, sectionId?: string | null) =>
     publicRequest(`public/assignments/${encodeURIComponent(token)}/courses/${courseId}/notes`, {
       method: 'POST',
-      body: JSON.stringify({ body, moduleId }),
+      body: JSON.stringify({ body, sectionId }),
     }),
 
   updateNote: (token: string, noteId: string, body: string) =>
@@ -248,6 +287,12 @@ export const assignmentApi = {
     courseId?: string | null;
     quizId?: string | null;
     dueDate?: string | null;
+    /**
+     * How long this person gets, in days. The server turns it into a date at the
+     * moment the assignment is made; leave it out and the length set on the
+     * course or quiz is used instead.
+     */
+    daysRemaining?: number | null;
     expiresAt?: string | null;
   }): Promise<{ message: string; assignment: Assignment; delivery: Delivery }> =>
     HttpHelper.post('assignments', data),

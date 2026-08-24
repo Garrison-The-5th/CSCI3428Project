@@ -7,11 +7,14 @@
  * Date: 2026-08-10
  */
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
+import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AssignmentService, {
   AssignmentError,
   LINK_IDLE_TIMEOUT_MS,
 } from '@/services/assignment-service/assignment-service';
 import AuthService from '@/services/auth-service/auth-service';
+import EmailService from '@/services/email-service/email-service';
 
 jest.mock('@/gateways/assignment-gateway/assignment-gateway');
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
@@ -24,6 +27,150 @@ jest.mock('@/services/quiz-service/quiz-service');
 
 const mockGateway = AssignmentGateway as jest.Mocked<typeof AssignmentGateway>;
 const mockAuth = AuthService as jest.Mocked<typeof AuthService>;
+const mockCurriculum = CurriculumGateway as jest.Mocked<typeof CurriculumGateway>;
+const mockQuiz = QuizGateway as jest.Mocked<typeof QuizGateway>;
+const mockEmail = EmailService as jest.Mocked<typeof EmailService>;
+
+/**
+ * Assigning something a learner could not open.
+ *
+ * `resolveToken` turns unpublished content into "This training is not available
+ * right now", and nothing used to stop a link being minted and mailed for
+ * exactly that — so the author heard nothing and the recipient opened a dead
+ * end. It was found on a one-time link, which is where it bites hardest: a quiz
+ * is a draft until somebody publishes it, and a link is the only way in, so the
+ * first one ever sent was the first chance to notice.
+ */
+describe('assign — refuses to send a link to a dead end', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAuth.getUserByEmail.mockResolvedValue(null as never);
+    mockAuth.getOrCreateUser.mockResolvedValue({ id: 1, email: 'ada@example.com' } as never);
+    mockGateway.findDuplicate.mockResolvedValue(null as never);
+    mockGateway.create.mockResolvedValue({ id: 'a1', token: 'tok', dueDate: null } as never);
+    mockQuiz.findOneTimeQuiz.mockResolvedValue(null as never);
+    mockEmail.sendAssignmentEmail.mockResolvedValue({ sent: true } as never);
+  });
+
+  const publishedCourse = {
+    id: 'course-1',
+    title: 'Fire safety',
+    kind: 'QUIZ_SET',
+    published: true,
+    publishedVersion: 2,
+  };
+
+  it('refuses a course that is still a draft', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue({
+      ...publishedCourse,
+      published: false,
+    } as never);
+
+    await expect(
+      AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' }),
+    ).rejects.toThrow(/still a draft/);
+    expect(mockGateway.create).not.toHaveBeenCalled();
+    expect(mockEmail.sendAssignmentEmail).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Publishing is versioned, so the flag alone is not enough: with no version
+   * behind it the snapshot is empty and the link opens nothing — which looks
+   * like it worked, and is worse than a refusal.
+   */
+  it('refuses a course flagged published but never actually published', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue({
+      ...publishedCourse,
+      publishedVersion: 0,
+    } as never);
+
+    await expect(
+      AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' }),
+    ).rejects.toThrow(/no published version/);
+    expect(mockGateway.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a quiz that is still a draft', async () => {
+    mockQuiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Assessment',
+      type: 'ONE_TIME',
+      published: false,
+    } as never);
+
+    await expect(
+      AssignmentService.assign({ email: 'ada@example.com', quizId: 'quiz-1' }),
+    ).rejects.toThrow(/still a draft/);
+    expect(mockGateway.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A one-time link cannot be shared until its set is published, which is the
+   * same rule as for anything else — publishing the set is what makes the quiz
+   * inside it reachable, so there is no longer a second state to get wrong.
+   */
+  it('refuses a one-time link whose set is still a draft', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue({
+      ...publishedCourse,
+      published: false,
+    } as never);
+    mockQuiz.findOneTimeQuiz.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Assessment',
+      published: true,
+    } as never);
+
+    await expect(
+      AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' }),
+    ).rejects.toThrow(/still a draft/);
+    expect(mockGateway.create).not.toHaveBeenCalled();
+    expect(mockEmail.sendAssignmentEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends a published set with a published one-time quiz', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue(publishedCourse as never);
+    mockQuiz.findOneTimeQuiz.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Assessment',
+      published: true,
+    } as never);
+
+    await expect(
+      AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' }),
+    ).resolves.toBeDefined();
+    expect(mockGateway.create).toHaveBeenCalled();
+  });
+
+  /**
+   * A one-time quiz set is handed over as a link to the course, so the kind
+   * would otherwise be chosen from whether the address has signed in — and a
+   * colleague with an account would get a platform enrolment: no URL anywhere,
+   * and the quiz on their Quizzes tab, which one-time exists to prevent.
+   */
+  it('always sends a one-time quiz set as a link, even to an existing user', async () => {
+    mockAuth.getUserByEmail.mockResolvedValue({ lastSignInAt: new Date() } as never);
+    mockCurriculum.getCourseById.mockResolvedValue(publishedCourse as never);
+    mockQuiz.findOneTimeQuiz.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Assessment',
+      published: true,
+    } as never);
+
+    await AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' });
+
+    expect(mockGateway.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'LINK' }));
+  });
+
+  /** An ordinary quiz set is still whatever the address calls for. */
+  it('leaves an ordinary set to the usual choice of kind', async () => {
+    mockAuth.getUserByEmail.mockResolvedValue({ lastSignInAt: new Date() } as never);
+    mockCurriculum.getCourseById.mockResolvedValue(publishedCourse as never);
+
+    await AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' });
+
+    expect(mockGateway.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'PLATFORM' }));
+  });
+});
 
 describe('generateToken', () => {
   it('produces a 256-bit token', () => {
@@ -200,6 +347,31 @@ describe('resolveToken — failure reasons', () => {
     await expectReason({ ...baseAssignment, revokedAt: new Date() }, 'revoked');
   });
 
+  /**
+   * A one-time link that closed itself says so, rather than blaming the author
+   * for having turned it off. Both are `revokedAt` on purpose — that is what
+   * makes the author's on switch work on either — and what tells them apart is
+   * having been completed and read.
+   */
+  it('reports a link that closed itself after its result was read as completed', async () => {
+    await expectReason(
+      {
+        ...baseAssignment,
+        revokedAt: new Date(),
+        completedAt: new Date(),
+        resultsSeenAt: new Date(),
+      },
+      'completed',
+    );
+  });
+
+  it('still reports a completed link the author turned off by hand as revoked', async () => {
+    await expectReason(
+      { ...baseAssignment, revokedAt: new Date(), completedAt: new Date(), resultsSeenAt: null },
+      'revoked',
+    );
+  });
+
   it('reports an expired link', async () => {
     await expectReason({ ...baseAssignment, expiresAt: new Date(Date.now() - 1000) }, 'expired');
   });
@@ -248,5 +420,76 @@ describe('resolveToken — failure reasons', () => {
     const { user } = await AssignmentService.resolveToken('tok');
     expect(user.id).toBe(5);
     expect(mockGateway.touch).toHaveBeenCalledWith('a1');
+  });
+});
+
+/**
+ * The life of a one-time link after the paper goes in.
+ *
+ * It is not shut on the spot: the holder gets one more page load, so reloading —
+ * or coming back to the tab — lands on their result rather than on an error
+ * about a link that worked a moment ago. The load after that closes it.
+ *
+ * Counted here rather than in `resolveToken` because this is called once per page
+ * load and that runs on every request, of which one page makes several.
+ */
+describe('getSessionUser — closing a completed one-time link', () => {
+  const completedLink = {
+    id: 'a1',
+    type: 'LINK' as const,
+    email: 'ada@example.com',
+    token: 'tok',
+    courseId: 'course-1',
+    quizId: null,
+    revokedAt: null,
+    expiresAt: null,
+    completedAt: new Date(),
+    resultsSeenAt: null,
+    lastAccessedAt: new Date(),
+    assignedAt: new Date(),
+    course: { id: 'course-1', deletedAt: null, published: true },
+    quiz: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAuth.getOrCreateUser.mockResolvedValue({
+      id: 1,
+      email: 'ada@example.com',
+      name: 'Ada',
+    } as never);
+  });
+
+  it('lets them back in once, and records that it has been used', async () => {
+    mockGateway.findByToken.mockResolvedValue(completedLink as never);
+
+    await expect(AssignmentService.getSessionUser('tok')).resolves.toMatchObject({
+      email: 'ada@example.com',
+    });
+    expect(mockGateway.markResultsSeen).toHaveBeenCalledWith('a1');
+    expect(mockGateway.revoke).not.toHaveBeenCalled();
+  });
+
+  it('closes the link on the load after that, and turns the switch off', async () => {
+    mockGateway.findByToken.mockResolvedValue({
+      ...completedLink,
+      resultsSeenAt: new Date(),
+    } as never);
+
+    await expect(AssignmentService.getSessionUser('tok')).rejects.toMatchObject({
+      reason: 'completed',
+    });
+    // The same state an author's off switch produces, so theirs can undo it.
+    expect(mockGateway.revoke).toHaveBeenCalledWith('a1');
+  });
+
+  /** A link nobody has finished is left entirely alone. */
+  it('does not touch a link that has not been completed', async () => {
+    mockGateway.findByToken.mockResolvedValue({ ...completedLink, completedAt: null } as never);
+
+    await AssignmentService.getSessionUser('tok');
+
+    expect(mockGateway.markResultsSeen).not.toHaveBeenCalled();
+    expect(mockGateway.revoke).not.toHaveBeenCalled();
   });
 });

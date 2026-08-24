@@ -9,14 +9,17 @@ import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway'
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import EnrolmentService from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
+import { BROWSABLE_QUIZ_TYPES } from '@/services/quiz-service/quiz-service';
+
+import { QuizType } from '../../../generated/prisma';
 
 export interface CourseProgress {
   courseId: string;
   title: string;
   required: boolean;
   dueDate: string | null;
-  totalModules: number;
-  completedModules: number;
+  totalSections: number;
+  completedSections: number;
   percentComplete: number;
   totalMinutes: number;
   remainingMinutes: number;
@@ -24,7 +27,7 @@ export interface CourseProgress {
   /** Something has appeared in this course since they started it, unread. */
   hasNewContent: boolean;
   /** How many such items there are. */
-  newModuleCount: number;
+  newSectionCount: number;
 }
 
 export interface OutstandingQuiz {
@@ -38,8 +41,8 @@ export interface OutstandingQuiz {
 /**
  * Everything the home dashboard shows.
  *
- * A module counts as done when the learner has opened it AND attempted every quiz
- * built into it — so a course is only finished once every module has been seen.
+ * A section counts as done when the learner has opened it AND attempted every quiz
+ * built into it — so a course is only finished once every section has been seen.
  * Only published, non-deleted content counts.
  *
  * `build` is typed against the least it needs rather than against a particular
@@ -53,7 +56,7 @@ interface DashboardCourse {
   required: boolean;
   dueDate: Date | null;
   contentUpdatedAt: Date;
-  modules: Array<{
+  sections: Array<{
     id: string;
     estimatedMinutes: number;
     quizzes: Array<{ id: string }>;
@@ -63,7 +66,9 @@ interface DashboardCourse {
 interface DashboardQuiz {
   id: string;
   title: string;
-  moduleId: string | null;
+  /** Absent on rows written before the three kinds existed; those were all exams. */
+  type?: QuizType | null;
+  sectionId: string | null;
   dueDate: Date | null;
   questions: Array<{ id: string }>;
 }
@@ -73,7 +78,7 @@ export default class DashboardService {
    * A signed-in learner's dashboard, over the courses they are enrolled on.
    *
    * Counts come from each course's published snapshot, not the live rows. A
-   * dashboard built off the draft would tell someone they were 8 modules from
+   * dashboard built off the draft would tell someone they were 8 sections from
    * finishing a course that only shows them 6 — and would move their percentage
    * the moment an author started typing.
    */
@@ -100,10 +105,10 @@ export default class DashboardService {
       required: snapshot.required,
       dueDate: snapshot.dueDate ? new Date(snapshot.dueDate) : null,
       contentUpdatedAt: stampById.get(snapshot.id) ?? new Date(0),
-      modules: snapshot.modules.map((module) => ({
-        id: module.id,
-        estimatedMinutes: module.estimatedMinutes,
-        quizzes: (module.quizzes ?? []).map((quiz) => ({ id: quiz.id })),
+      sections: snapshot.sections.map((section) => ({
+        id: section.id,
+        estimatedMinutes: section.estimatedMinutes,
+        quizzes: (section.quizzes ?? []).map((quiz) => ({ id: quiz.id })),
       })),
     }));
 
@@ -111,7 +116,7 @@ export default class DashboardService {
     // version, plus any handed to them on their own.
     const publishedQuizIds = new Set(
       snapshots.flatMap((snapshot) =>
-        snapshot.modules.flatMap((module) => (module.quizzes ?? []).map((quiz) => quiz.id)),
+        snapshot.sections.flatMap((section) => (section.quizzes ?? []).map((quiz) => quiz.id)),
       ),
     );
 
@@ -127,8 +132,8 @@ export default class DashboardService {
           const ids = await PublicationService.getNewIdsForLearner(snapshot.id, userId, snapshot);
           return [
             snapshot.id,
-            ids.newSectionIds.length +
-              ids.newModuleIds.length +
+            ids.newModuleIds.length +
+              ids.newSectionIds.length +
               ids.newElementIds.length +
               ids.newQuizIds.length,
           ];
@@ -160,31 +165,34 @@ export default class DashboardService {
     newCountByCourse: Map<string, number> = new Map(),
   ) {
     const [views, attempts] = await Promise.all([
-      CurriculumGateway.getViewedModuleIds(userId),
+      CurriculumGateway.getViewedSectionIds(userId),
       QuizGateway.getAttemptsForUser(userId),
     ]);
 
-    const viewedModuleIds = new Set(views.map((view) => view.moduleId));
+    const viewedSectionIds = new Set(views.map((view) => view.sectionId));
     const attemptedQuizIds = new Set(attempts.map((attempt) => attempt.quizId));
 
     const courseTitleById = new Map(courses.map((course) => [course.id, course.title]));
     const courseDueById = new Map(courses.map((course) => [course.id, course.dueDate]));
-    const moduleToCourse = new Map<string, string>();
+    const sectionToCourse = new Map<string, string>();
     courses.forEach((course) =>
-      course.modules.forEach((module) => moduleToCourse.set(module.id, course.id)),
+      course.sections.forEach((section) => sectionToCourse.set(section.id, course.id)),
     );
 
-    const isModuleComplete = (module: (typeof courses)[number]['modules'][number]) =>
-      viewedModuleIds.has(module.id) &&
-      module.quizzes.every((quiz) => attemptedQuizIds.has(quiz.id));
+    const isSectionComplete = (section: (typeof courses)[number]['sections'][number]) =>
+      viewedSectionIds.has(section.id) &&
+      section.quizzes.every((quiz) => attemptedQuizIds.has(quiz.id));
 
     const courseProgress: CourseProgress[] = courses.map((course) => {
-      const totalModules = course.modules.length;
-      const completedModules = course.modules.filter(isModuleComplete).length;
-      const totalMinutes = course.modules.reduce((sum, module) => sum + module.estimatedMinutes, 0);
-      const remainingMinutes = course.modules
-        .filter((module) => !isModuleComplete(module))
-        .reduce((sum, module) => sum + module.estimatedMinutes, 0);
+      const totalSections = course.sections.length;
+      const completedSections = course.sections.filter(isSectionComplete).length;
+      const totalMinutes = course.sections.reduce(
+        (sum, section) => sum + section.estimatedMinutes,
+        0,
+      );
+      const remainingMinutes = course.sections
+        .filter((section) => !isSectionComplete(section))
+        .reduce((sum, section) => sum + section.estimatedMinutes, 0);
 
       const newCount = newCountByCourse.get(course.id) ?? 0;
       const hasNewContent = newCount > 0;
@@ -194,15 +202,15 @@ export default class DashboardService {
         title: course.title,
         required: course.required,
         dueDate: course.dueDate ? course.dueDate.toISOString() : null,
-        totalModules,
-        completedModules,
+        totalSections,
+        completedSections,
         percentComplete:
-          totalModules === 0 ? 0 : Math.round((completedModules / totalModules) * 100),
+          totalSections === 0 ? 0 : Math.round((completedSections / totalSections) * 100),
         totalMinutes,
         remainingMinutes,
-        quizCount: course.modules.reduce((sum, module) => sum + module.quizzes.length, 0),
+        quizCount: course.sections.reduce((sum, section) => sum + section.quizzes.length, 0),
         hasNewContent,
-        newModuleCount: newCount,
+        newSectionCount: newCount,
       };
     });
 
@@ -210,28 +218,37 @@ export default class DashboardService {
     // material, move the date forward so the notice clears itself.
     await Promise.all(
       courseProgress
-        .filter((course) => course.totalModules > 0 && course.percentComplete === 100)
+        .filter((course) => course.totalSections > 0 && course.percentComplete === 100)
         .map(async (course) => {
           if (course.hasNewContent) {
-            await CurriculumGateway.refreshCompletion(userId, course.courseId, course.totalModules);
+            await CurriculumGateway.refreshCompletion(
+              userId,
+              course.courseId,
+              course.totalSections,
+            );
             // They are caught up as of this response.
             course.hasNewContent = false;
-            course.newModuleCount = 0;
+            course.newSectionCount = 0;
             return;
           }
-          await CurriculumGateway.recordCompletion(userId, course.courseId, course.totalModules);
+          await CurriculumGateway.recordCompletion(userId, course.courseId, course.totalSections);
         }),
     );
 
     const outstandingCourses = courseProgress.filter(
-      (course) => course.totalModules > 0 && course.completedModules < course.totalModules,
+      (course) => course.totalSections > 0 && course.completedSections < course.totalSections,
     );
 
     const outstandingQuizzes: OutstandingQuiz[] = quizzes
+      // Only exams are outstanding work in their own right. A learning check is
+      // part of the section it sits in and is chased through that course's
+      // progress instead; a one-time quiz is chased by the email it arrived in
+      // and never appears on a signed-in list at all.
+      .filter((quiz) => BROWSABLE_QUIZ_TYPES.includes(quiz.type ?? QuizType.EXAM))
       .filter((quiz) => !attemptedQuizIds.has(quiz.id))
       .map((quiz) => {
-        // Quizzes belong to a module, and the module belongs to a course.
-        const courseId = quiz.moduleId ? moduleToCourse.get(quiz.moduleId) : undefined;
+        // Quizzes belong to a section, and the section belongs to a course.
+        const courseId = quiz.sectionId ? sectionToCourse.get(quiz.sectionId) : undefined;
         // A quiz with no due date of its own falls back to its course's.
         const due = quiz.dueDate ?? (courseId ? (courseDueById.get(courseId) ?? null) : null);
 

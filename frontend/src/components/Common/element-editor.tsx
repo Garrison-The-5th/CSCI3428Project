@@ -1,29 +1,38 @@
 /**
  * File: element-editor.tsx
- * Description: One editable piece of module content.
+ * Description: One editable piece of section content.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * One editable piece of module content.
+ * One editable piece of section content.
  *
- * Edits save themselves a moment after typing stops — there is no save button.
+ * Edits save themselves a moment after typing stops. There is a Save button as
+ * well, which does the same write without the pause — not because auto-save is
+ * unreliable, but because "it saved itself" is a claim the author has to take on
+ * trust, and a button they pressed is not.
+ *
+ * The status beside it says which of three states the row is in — stored, being
+ * written, or edited and not yet written — rather than going blank whenever
+ * nothing is happening. A freshly added video or photo is already stored, and
+ * showing nothing there read as the opposite.
+ *
  * The preview underneath is the same component the learner sees, so what you are
  * looking at is what gets published.
  */
-import { Bars3Icon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, CheckIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import RichTextEditor from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { saveLabel, useAutoSave } from '@/hooks/use-auto-save';
-import { curriculumApi, ModuleElement } from '@/services/curriculum-api';
+import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
+import { curriculumApi, SectionElement } from '@/services/curriculum-api';
 
 interface ElementEditorProps {
-  element: ModuleElement;
+  element: SectionElement;
   onDelete: () => void;
   /** Refresh the parent once a save lands, so counts and previews stay true. */
   onSaved: () => void;
@@ -40,12 +49,15 @@ const ElementEditor = ({
   dragHandleProps,
   dragging,
 }: ElementEditorProps) => {
-  const [draft, setDraft] = useState({
+  /** What is actually stored, in the shape the form holds it. */
+  const stored = {
     textContent: element.textContent ?? '',
     videoUrl: element.videoUrl ?? '',
     imageUrl: element.imageUrl ?? '',
     durationMinutes: element.durationMinutes?.toString() ?? '',
-  });
+  };
+
+  const [draft, setDraft] = useState(stored);
   const [open, setOpen] = useState(false);
 
   // Pull in changes that came from elsewhere (a reorder, another tab).
@@ -58,7 +70,16 @@ const ElementEditor = ({
     });
   }, [element.id]);
 
-  const { state } = useAutoSave(draft, async (value) => {
+  /**
+   * Whether the form has moved on from the record.
+   *
+   * Compared against the element rather than tracked as a flag, so it is right
+   * after a save lands from anywhere — the parent refetches on every write, and
+   * a flag would have to be told about that.
+   */
+  const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
+
+  const { state, saveNow } = useAutoSave(draft, async (value) => {
     await curriculumApi.updateElement(element.id, {
       textContent: element.type === 'TEXT' ? value.textContent : undefined,
       videoUrl: element.type === 'YOUTUBE' ? value.videoUrl : undefined,
@@ -70,7 +91,7 @@ const ElementEditor = ({
   });
 
   /** What the preview should render — the draft, not the last saved copy. */
-  const previewElement: ModuleElement = {
+  const previewElement: SectionElement = {
     ...element,
     textContent: draft.textContent,
     videoUrl: draft.videoUrl,
@@ -109,7 +130,18 @@ const ElementEditor = ({
           </span>
         </button>
 
-        <span className="shrink-0 text-xs text-dark-gray">{saveLabel(state)}</span>
+        <span className="shrink-0 text-xs text-dark-gray">{saveStatus(state, dirty)}</span>
+
+        <Button
+          onClick={saveNow}
+          disabled={state === 'saving'}
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 hover:text-green-hover"
+          title="Save this item now"
+        >
+          <CheckIcon className="w-4 h-4" />
+        </Button>
 
         <Button
           onClick={onDelete}

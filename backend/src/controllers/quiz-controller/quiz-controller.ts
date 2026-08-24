@@ -13,9 +13,9 @@ import {
 } from '@/controllers/auth-controller/auth-middleware';
 import { requireAuthor } from '@/controllers/auth-controller/authorization-middleware';
 import {
-  fromModuleInBody,
   fromQuestionParam,
   fromQuizParam,
+  fromSectionInBody,
   requireCourseEditor,
 } from '@/controllers/auth-controller/course-access-middleware';
 import { controller, del, get, post, put, use } from '@/controllers/decorators';
@@ -111,13 +111,24 @@ export default class QuizController {
     return res.send({ quiz });
   }
 
+  /**
+   * A quiz inside a section is guarded by that section's course, exactly as
+   * before. A standalone quiz — an exam or a one-time link — resolves to no
+   * course, which `requireCourseEditor` lets only a global author past; a
+   * per-course contributor has no course to be a contributor on.
+   */
   @post('/')
-  @use(requireCourseEditor(fromModuleInBody))
+  @use(requireCourseEditor(fromSectionInBody))
   @use(authenticateAndAttachUser)
   async createQuiz(req: Request, res: Response) {
     try {
       const quiz = await QuizService.createQuiz(
-        req.body as { title?: string; description?: string | null; moduleId?: string | null },
+        req.body as {
+          title?: string;
+          description?: string | null;
+          type?: string | null;
+          sectionId?: string | null;
+        },
       );
       return res.send({ message: 'Quiz created successfully', quiz });
     } catch (error) {
@@ -163,6 +174,25 @@ export default class QuizController {
   }
 
   /**
+   * Reports the run already open, and starts nothing.
+   *
+   * The player asks this before it shows a quiz, so it can put the details and a
+   * Start button in front of an unopened one and go straight into a run already
+   * ticking. Reading it must never be what starts the clock, which is why this
+   * is a separate GET rather than a flag on the POST below.
+   */
+  @get('/:id/session')
+  @use(authenticateAndAttachUser)
+  async peekSession(req: AuthenticatedRequest, res: Response) {
+    try {
+      const session = await QuizService.peekSession(req.user!.id, param(req as Request, 'id'));
+      return res.send(session);
+    } catch (error) {
+      return fail(res, error, 'Error reading quiz session');
+    }
+  }
+
+  /**
    * Starts the clock, or reports the clock already running. Safe to call on every
    * page load: an open run is handed back untouched rather than restarted.
    */
@@ -183,7 +213,7 @@ export default class QuizController {
   @use(authenticateAndAttachUser)
   async submitAttempt(req: AuthenticatedRequest, res: Response) {
     try {
-      const { answers } = req.body as { answers?: Record<string, string> };
+      const { answers } = req.body as { answers?: Record<string, string | string[]> };
       const result = await QuizService.submitAttempt(
         req.user!.id,
         param(req as Request, 'id'),

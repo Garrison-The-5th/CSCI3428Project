@@ -28,7 +28,7 @@ import { getNavbarData } from '@/utils/get-navbar-data';
  *
  * The build was one bundle over 500 kB, so every learner downloaded the whole
  * authoring suite — the course editor, the quiz builder, the admin dashboard —
- * to read a module they will never edit. These are split out and fetched only
+ * to read a section they will never edit. These are split out and fetched only
  * when their route is actually visited.
  *
  * The shell, the dashboard and the Learning grid stay eagerly imported: they
@@ -46,6 +46,7 @@ const CoursePlayer = lazy(() => import('@/pages/private/learning/course-player')
 const CourseLanding = lazy(() => import('@/pages/private/learning/course-landing'));
 const QuizPlayer = lazy(() => import('@/pages/private/quizzes/quiz-player'));
 const QuizLanding = lazy(() => import('@/pages/private/quizzes/quiz-landing'));
+const StandaloneQuiz = lazy(() => import('@/pages/private/quizzes/standalone-quiz'));
 const ContactUs = lazy(() => import('@/pages/private/contact-us/contact-us'));
 const About = lazy(() => import('@/pages/public/about'));
 const PublicPage = lazy(() => import('@/pages/public/public-page/public-page'));
@@ -242,6 +243,17 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Quizzes />
+                </ProtectedRoute>
+              }
+            />
+            {/* A quiz that belongs to no course has no course page to sit under,
+              so it gets its own. Declared before the course routes because
+              "standalone" is a real path segment rather than a course id. */}
+            <Route
+              path="/quizzes/standalone/:quizId"
+              element={
+                <ProtectedRoute>
+                  <StandaloneQuiz />
                 </ProtectedRoute>
               }
             />

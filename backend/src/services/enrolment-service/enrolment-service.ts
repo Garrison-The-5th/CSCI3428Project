@@ -25,6 +25,15 @@ export interface Enrolment {
   quizIds: Set<string>;
 }
 
+/**
+ * What a signed-in person is enrolled on, by email address.
+ *
+ * Reads PLATFORM assignments only, and that is the whole point of the class.
+ * A LINK assignment is deliberately invisible here: its token is the credential
+ * and it is reached through its URL alone, so a one-off link must never turn
+ * into a permanent enrolment just because the same person later signs in with
+ * the address it was sent to.
+ */
 export default class EnrolmentService {
   static async forEmail(email: string): Promise<Enrolment> {
     const assignments = await AssignmentGateway.listPlatformForEmail(email.trim().toLowerCase());

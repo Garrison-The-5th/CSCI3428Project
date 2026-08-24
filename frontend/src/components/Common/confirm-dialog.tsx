@@ -7,7 +7,7 @@
  */
 /**
  * Confirmation dialog for destructive actions, so a stray click cannot delete a
- * module or quiz. Clicking the backdrop or Cancel dismisses it.
+ * section or quiz. Clicking the backdrop or Cancel dismisses it.
  */
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 

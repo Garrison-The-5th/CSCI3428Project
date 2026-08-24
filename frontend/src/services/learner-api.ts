@@ -22,7 +22,7 @@ import {
   NewIds,
   Note,
 } from '@/services/curriculum-api';
-import { AttemptResult, Quiz, quizApi, QuizSession } from '@/services/quiz-api';
+import { AttemptResult, Quiz, QuizAnswers, quizApi, QuizSession } from '@/services/quiz-api';
 
 export interface LearnerApi {
   getCourses: () => Promise<Course[]>;
@@ -39,14 +39,20 @@ export interface LearnerApi {
   getQuizzes: () => Promise<Quiz[]>;
   getDashboard: () => Promise<Dashboard>;
   getProgress: () => Promise<LearnerProgress>;
-  recordModuleView: (moduleId: string) => Promise<unknown>;
-  /** One item seen. Credits its module too, so callers never need both. */
+  recordSectionView: (sectionId: string) => Promise<unknown>;
+  /** One item seen. Credits its section too, so callers never need both. */
   recordElementView: (elementId: string) => Promise<unknown>;
+  /**
+   * Reports the run already open at a quiz, without opening one. What lets the
+   * player show a quiz's details behind a Start button and skip that screen for
+   * a run already under way.
+   */
+  peekQuiz: (quizId: string) => Promise<QuizSession>;
   /** Opens a run at a quiz, or reports the one already open. */
   startQuiz: (quizId: string) => Promise<QuizSession>;
-  submitAttempt: (quizId: string, answers: Record<string, string>) => Promise<AttemptResult>;
+  submitAttempt: (quizId: string, answers: QuizAnswers) => Promise<AttemptResult>;
   getNotes: (courseId: string) => Promise<Note[]>;
-  createNote: (courseId: string, body: string, moduleId?: string | null) => Promise<unknown>;
+  createNote: (courseId: string, body: string, sectionId?: string | null) => Promise<unknown>;
   updateNote: (noteId: string, body: string) => Promise<unknown>;
   deleteNote: (noteId: string) => Promise<unknown>;
 }
@@ -68,13 +74,14 @@ export function makeLearnerApi(token: string | null): LearnerApi {
       getQuizzes: () => assignmentApi.getQuizzes(token),
       getDashboard: () => assignmentApi.getDashboard(token),
       getProgress: () => assignmentApi.getProgress(token),
-      recordModuleView: (moduleId) => assignmentApi.recordView(token, moduleId),
+      recordSectionView: (sectionId) => assignmentApi.recordView(token, sectionId),
       recordElementView: (elementId) => assignmentApi.recordElementView(token, elementId),
+      peekQuiz: (quizId) => assignmentApi.peekSession(token, quizId),
       startQuiz: (quizId) => assignmentApi.startSession(token, quizId),
       submitAttempt: (quizId, answers) => assignmentApi.submitAttempt(token, quizId, answers),
       getNotes: (courseId) => assignmentApi.getNotes(token, courseId),
-      createNote: (courseId, body, moduleId) =>
-        assignmentApi.createNote(token, courseId, body, moduleId),
+      createNote: (courseId, body, sectionId) =>
+        assignmentApi.createNote(token, courseId, body, sectionId),
       updateNote: (noteId, body) => assignmentApi.updateNote(token, noteId, body),
       deleteNote: (noteId) => assignmentApi.deleteNote(token, noteId),
     };
@@ -87,12 +94,13 @@ export function makeLearnerApi(token: string | null): LearnerApi {
     getQuizzes: () => quizApi.getQuizzes(),
     getDashboard: () => curriculumApi.getDashboard(),
     getProgress: () => curriculumApi.getProgress(),
-    recordModuleView: (moduleId) => curriculumApi.recordModuleView(moduleId),
+    recordSectionView: (sectionId) => curriculumApi.recordSectionView(sectionId),
     recordElementView: (elementId) => curriculumApi.recordElementView(elementId),
+    peekQuiz: (quizId) => quizApi.peekSession(quizId),
     startQuiz: (quizId) => quizApi.startSession(quizId),
     submitAttempt: (quizId, answers) => quizApi.submitAttempt(quizId, answers),
     getNotes: (courseId) => curriculumApi.getNotes(courseId),
-    createNote: (courseId, body, moduleId) => curriculumApi.createNote(courseId, body, moduleId),
+    createNote: (courseId, body, sectionId) => curriculumApi.createNote(courseId, body, sectionId),
     updateNote: (noteId, body) => curriculumApi.updateNote(noteId, body),
     deleteNote: (noteId) => curriculumApi.deleteNote(noteId),
   };

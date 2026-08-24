@@ -30,7 +30,7 @@ import QuizRunner from '@/components/common/quiz-runner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Course, NewIds, Note, sectionGroups } from '@/services/curriculum-api';
+import { Course, moduleGroups, NewIds, Note } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { Quiz } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
@@ -38,12 +38,12 @@ import { logger } from '@/utils/logger';
 /** A quiz plus where it sits in the course, for grouping in the rail. */
 interface RailEntry {
   quiz: Quiz;
-  sectionId: string;
-  sectionNumber: number;
-  sectionTitle: string;
   moduleId: string;
-  moduleNumber: string;
+  moduleNumber: number;
   moduleTitle: string;
+  sectionId: string;
+  sectionNumber: string;
+  sectionTitle: string;
 }
 
 const QuizPlayer = () => {
@@ -92,20 +92,25 @@ const QuizPlayer = () => {
     loadNotes();
   }, [load, loadNotes]);
 
-  /** Every quiz in the course, in section-then-module order. */
+  /** Every quiz in the course, in module-then-section order. */
   const entries = useMemo<RailEntry[]>(() => {
     if (!course) return [];
-    return sectionGroups(course).flatMap((group) =>
-      group.modules.flatMap((module) =>
-        module.quizzes.map((quiz) => ({
-          quiz,
-          sectionId: group.section.id,
-          sectionNumber: group.section.number,
-          sectionTitle: group.section.title,
-          moduleId: module.id,
-          moduleNumber: module.number,
-          moduleTitle: module.title,
-        })),
+    return moduleGroups(course).flatMap((group) =>
+      group.sections.flatMap((section) =>
+        // Learning checks are taken inside the lesson they belong to and are
+        // never listed here, so the count on this page matches what a learner
+        // can actually open from it.
+        section.quizzes
+          .filter((quiz) => quiz.type !== 'LEARNING_CHECK')
+          .map((quiz) => ({
+            quiz,
+            moduleId: group.module.id,
+            moduleNumber: group.module.number,
+            moduleTitle: group.module.title,
+            sectionId: section.id,
+            sectionNumber: section.number,
+            sectionTitle: section.title,
+          })),
       ),
     );
   }, [course]);
@@ -124,25 +129,48 @@ const QuizPlayer = () => {
 
   const openQuiz = (id: string) => navigate(`/quizzes/${courseId}/take/${id}`);
 
-  /** The rail's headings: sections that actually hold a quiz, in order. */
-  const railSections = useMemo(() => {
-    const bySection = new Map<
+  /**
+   * The next one they have not had a go at, ignoring the one on screen — which
+   * has just been handed in, and whose `attempted` entry may not have landed yet.
+   */
+  const nextUnattempted =
+    entries.find((entry) => entry.quiz.id !== quizId && !attempted.has(entry.quiz.id)) ?? null;
+
+  /**
+   * Leaving a finished quiz.
+   *
+   * With results and answers both off there is no screen to leave, so the runner
+   * calls this the moment the paper is handed in — which is the only way a
+   * learner on those settings ever moves. On to the next unattempted quiz, or
+   * back to the landing page once none remain, where Start reads as done.
+   */
+  const finishQuiz = useCallback(() => {
+    navigate(
+      nextUnattempted
+        ? `/quizzes/${courseId}/take/${nextUnattempted.quiz.id}`
+        : `/quizzes/${courseId}`,
+    );
+  }, [nextUnattempted, courseId, navigate]);
+
+  /** The rail's headings: modules that actually hold a quiz, in order. */
+  const railModules = useMemo(() => {
+    const byModule = new Map<
       string,
       { id: string; number: number; title: string; entries: RailEntry[] }
     >();
 
     for (const entry of entries) {
-      const rail = bySection.get(entry.sectionId) ?? {
-        id: entry.sectionId,
-        number: entry.sectionNumber,
-        title: entry.sectionTitle,
+      const rail = byModule.get(entry.moduleId) ?? {
+        id: entry.moduleId,
+        number: entry.moduleNumber,
+        title: entry.moduleTitle,
         entries: [],
       };
       rail.entries.push(entry);
-      bySection.set(entry.sectionId, rail);
+      byModule.set(entry.moduleId, rail);
     }
 
-    return [...bySection.values()];
+    return [...byModule.values()];
   }, [entries]);
 
   const saveNote = async () => {
@@ -207,19 +235,21 @@ const QuizPlayer = () => {
                 <p className="py-16 text-center text-dark-gray">This course has no quizzes yet.</p>
               ) : (
                 <>
-                  <p className="text-sm text-dark-gray">
-                    {selected.sectionNumber}. {selected.sectionTitle} · {selected.moduleNumber}{' '}
-                    {selected.moduleTitle}
+                  <p className="mb-3 text-sm text-dark-gray">
+                    {selected.moduleNumber}. {selected.moduleTitle} · {selected.sectionNumber}{' '}
+                    {selected.sectionTitle}
                   </p>
-                  <h2 className="mb-4 break-words text-xl font-semibold text-dark-gray">
-                    {selected.quiz.title}
-                  </h2>
+                  {/* Title included: the quiz is one element here, opening on
+                      its details behind a Start button and becoming its
+                      questions from there. */}
                   <QuizRunner
                     key={selected.quiz.id}
                     quiz={selected.quiz}
                     onCompleted={() => {
                       setAttempted((prev) => new Set(prev).add(selected.quiz.id));
                     }}
+                    onFinished={finishQuiz}
+                    finishLabel={nextUnattempted ? 'Next quiz' : 'Back to overview'}
                   />
                 </>
               )}
@@ -330,7 +360,7 @@ const QuizPlayer = () => {
               {entries.length === 0 ? (
                 <p className="px-3 py-2 text-sm text-dark-gray">No quizzes.</p>
               ) : (
-                railSections.map((rail) => (
+                railModules.map((rail) => (
                   <section key={rail.id} className="mb-2">
                     <h3 className="px-2 py-2 text-sm font-semibold text-dark-gray">
                       {rail.number}. {rail.title}
@@ -355,10 +385,10 @@ const QuizPlayer = () => {
                             <span className="min-w-0 flex-1">
                               <span className="block truncate">{entry.quiz.title}</span>
                               <span className="block truncate text-xs">
-                                {entry.moduleNumber} {entry.moduleTitle}
+                                {entry.sectionNumber} {entry.sectionTitle}
                               </span>
                             </span>
-                            {isNew.item(entry.quiz.id, entry.moduleId, entry.sectionId) && (
+                            {isNew.item(entry.quiz.id, entry.sectionId, entry.moduleId) && (
                               <NewBadge />
                             )}
                             <span className="flex shrink-0 items-center gap-1 text-xs">

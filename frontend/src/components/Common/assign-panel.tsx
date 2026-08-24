@@ -46,7 +46,14 @@ const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPan
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [type, setType] = useState<AssignmentType>('PLATFORM');
-  const [dueDate, setDueDate] = useState('');
+  /**
+   * How long this person gets, in days, rather than the date they get it by.
+   *
+   * Blank leaves it to the course or quiz, which carries its own length; the
+   * server turns whichever applies into a date at the moment the assignment is
+   * made. Held as a string because blank is a meaningful value here and 0 is not.
+   */
+  const [daysRemaining, setDaysRemaining] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
 
   const target = courseId ? { courseId } : { quizId: quizId! };
@@ -81,7 +88,7 @@ const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPan
         ...target,
         type,
         email: email.trim(),
-        dueDate: dueDate || null,
+        daysRemaining: daysRemaining.trim() === '' ? null : Number(daysRemaining),
         expiresAt: expiresAt || null,
       });
       await refresh();
@@ -161,12 +168,16 @@ const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPan
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
-            Due date
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-dark-gray"
+            Days remaining
+            <Input
+              type="number"
+              min={1}
+              value={daysRemaining}
+              onChange={(e) => setDaysRemaining(e.target.value)}
+              placeholder="Use default"
+              title="How long this person gets, counted from today. Leave blank to use the
+                deadline set on the course or quiz itself."
+              className={`${inputClass} max-w-32`}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">

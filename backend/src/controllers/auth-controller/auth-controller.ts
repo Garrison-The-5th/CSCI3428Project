@@ -41,14 +41,38 @@ export default class AuthController {
   /**
    * Type-ahead for pickers that name a person — assigning contributors or
    * students. Author-level rather than admin, since authors do the naming.
+   *
+   * `accounts=1` narrows it to people who can actually sign in. The on-platform
+   * picker asks for that: a User row exists for anybody who has ever been
+   * assigned anything, so an unfiltered search happily offers addresses that
+   * have no login behind them, and enrolling one sends that person to a door
+   * they cannot open.
    */
   @get('/search')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
   async searchUsers(req: Request, res: Response) {
     const query = typeof req.query.q === 'string' ? req.query.q : '';
-    const users = await AuthService.searchUsers(query);
+    const accountsOnly = req.query.accounts === '1' || req.query.accounts === 'true';
+    const users = await AuthService.searchUsers(query, { accountsOnly });
     return res.send({ users });
+  }
+
+  /**
+   * Whether one exact address already has an account.
+   *
+   * What the link-only picker checks before it hands out a private URL. Somebody
+   * who can sign in should get the work on their Learning page, where it is
+   * theirs and revocable, rather than a link that is a credential in its own
+   * right — so the column refuses the address and says why.
+   */
+  @get('/has-account')
+  @use(requireAuthor())
+  @use(authenticateAndAttachUser)
+  async hasAccount(req: Request, res: Response) {
+    const email = typeof req.query.email === 'string' ? req.query.email : '';
+    if (!email.trim()) return res.status(400).send({ errorMessage: 'email is required' });
+    return res.send({ hasAccount: await AuthService.hasAccount(email) });
   }
 
   /**

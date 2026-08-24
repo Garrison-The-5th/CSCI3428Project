@@ -8,13 +8,13 @@
 /**
  * The "New" marker, and the rule for where it is allowed to appear.
  *
- * The rule matters more than the pill. A newly published section arrives with
- * every module and every element inside it also new, so tagging each one would
+ * The rule matters more than the pill. A newly published module arrives with
+ * every section and every element inside it also new, so tagging each one would
  * put New on twenty lines to say one thing. Instead the tag goes at the highest
  * level that is new and stops there:
  *
- *   whole section new  -> tag the section heading only
- *   module new         -> tag the module only
+ *   whole module new  -> tag the module heading only
+ *   section new         -> tag the section only
  *   only content new   -> tag those elements and quizzes
  *
  * Both readers of this use the same rule from the same place: the learner's
@@ -42,28 +42,28 @@ export const NewBadge = ({ label = 'New' }: { label?: string }) => (
  * suppression logic cannot drift between the three places that ask.
  */
 export interface NewMarkers {
-  section: (sectionId: string) => boolean;
-  module: (moduleId: string, sectionId: string | null) => boolean;
-  item: (itemId: string, moduleId: string, sectionId: string | null) => boolean;
+  module: (moduleId: string) => boolean;
+  section: (sectionId: string, moduleId: string | null) => boolean;
+  item: (itemId: string, sectionId: string, moduleId: string | null) => boolean;
   /** True when anything at all is new, for a page-level notice. */
   any: boolean;
 }
 
 export function newMarkers(ids: NewIds | null | undefined): NewMarkers {
-  const sections = new Set(ids?.newSectionIds ?? []);
   const modules = new Set(ids?.newModuleIds ?? []);
+  const sections = new Set(ids?.newSectionIds ?? []);
   const items = new Set([...(ids?.newElementIds ?? []), ...(ids?.newQuizIds ?? [])]);
 
-  const sectionIsNew = (sectionId: string | null) => sectionId !== null && sections.has(sectionId);
+  const moduleIsNew = (moduleId: string | null) => moduleId !== null && modules.has(moduleId);
 
   return {
-    section: (sectionId) => sections.has(sectionId),
-    // Suppressed when the whole section is new — the heading already says so.
-    module: (moduleId, sectionId) => !sectionIsNew(sectionId) && modules.has(moduleId),
-    // Suppressed when the module or section above it is new, for the same reason.
-    item: (itemId, moduleId, sectionId) =>
-      !sectionIsNew(sectionId) && !modules.has(moduleId) && items.has(itemId),
-    any: sections.size + modules.size + items.size > 0,
+    module: (moduleId) => modules.has(moduleId),
+    // Suppressed when the whole module is new — the heading already says so.
+    section: (sectionId, moduleId) => !moduleIsNew(moduleId) && sections.has(sectionId),
+    // Suppressed when the section or module above it is new, for the same reason.
+    item: (itemId, sectionId, moduleId) =>
+      !moduleIsNew(moduleId) && !sections.has(sectionId) && items.has(itemId),
+    any: modules.size + sections.size + items.size > 0,
   };
 }
 

@@ -40,7 +40,20 @@ const splitLines = (v: string) =>
     .split('\n')
     .map((x) => x.trim())
     .filter(Boolean);
-const toDateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : '');
+/**
+ * The date a deadline of this many days would land on, for the hint under the
+ * field.
+ *
+ * The author is setting a length, not a date, so the date is the part they
+ * cannot see for themselves — "14" says nothing about whether that clears the
+ * end of the month. Worked out from today because today is when they are
+ * looking; the real one is stamped when the lesson is actually handed over.
+ */
+const dueIfAssignedToday = (days: string) => {
+  const parsed = Number(days);
+  if (!Number.isInteger(parsed) || parsed < 1) return null;
+  return new Date(Date.now() + parsed * 86_400_000).toLocaleDateString();
+};
 
 const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
   const coverRef = useRef<HTMLInputElement>(null);
@@ -53,8 +66,7 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
     languages: '',
     whatYouWillLearn: '',
     prerequisites: '',
-    required: false,
-    dueDate: '',
+    daysRemaining: '',
   });
 
   useEffect(() => {
@@ -66,8 +78,7 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
       languages: course.languages.join(', '),
       whatYouWillLearn: course.whatYouWillLearn.join('\n'),
       prerequisites: course.prerequisites.join('\n'),
-      required: course.required,
-      dueDate: toDateInput(course.dueDate),
+      daysRemaining: course.daysRemaining == null ? '' : String(course.daysRemaining),
     });
   }, [course.id]);
 
@@ -81,8 +92,10 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
       languages: splitCommas(value.languages),
       whatYouWillLearn: splitLines(value.whatYouWillLearn),
       prerequisites: splitLines(value.prerequisites),
-      required: value.required,
-      dueDate: value.dueDate || null,
+      // Blank clears the deadline; anything that is not a whole number of days
+      // is left alone rather than written as a clearance, so a half-typed "1"
+      // on the way to "14" cannot wipe what is already set.
+      daysRemaining: value.daysRemaining.trim() === '' ? null : Number(value.daysRemaining),
       // instructorIds is deliberately omitted: the picker has been removed, and
       // sending an empty list would wipe whoever is already credited.
     });
@@ -236,21 +249,26 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
         <hr className="h-px border-t-0 bg-gray-300" />
 
         <div className="flex flex-wrap items-start gap-8">
-          <ToggleSwitch
-            checked={draft.required}
-            onChange={(v) => setDraft({ ...draft, required: v })}
-            label="Required learning"
-            hint="Shows as required and counts toward due dates"
-          />
-
+          {/* A deadline is a length rather than a date. The same lesson goes out
+              to different people at different times, and one fixed date would
+              give the last of them a week and the first of them a month — so
+              the author says how long somebody gets, and the date is worked out
+              when it is actually handed over. */}
           <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
-            Due date
-            <input
-              type="date"
-              value={draft.dueDate}
-              onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
-              className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-dark-gray"
+            Days remaining
+            <Input
+              type="number"
+              min={1}
+              value={draft.daysRemaining}
+              onChange={(e) => setDraft({ ...draft, daysRemaining: e.target.value })}
+              placeholder="No deadline"
+              className={`${inputClass} max-w-32`}
             />
+            <span className="max-w-56 text-xs font-normal text-dark-gray">
+              How long a learner gets once this is assigned to them.
+              {dueIfAssignedToday(draft.daysRemaining) &&
+                ` Assigned today, it would be due ${dueIfAssignedToday(draft.daysRemaining)}.`}
+            </span>
           </label>
 
           <ToggleSwitch
@@ -258,12 +276,12 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
             onChange={(v) =>
               run(
                 () => curriculumApi.updateCourse(course.id, { sequential: v }),
-                v ? 'Modules now unlock in order' : 'Modules can be taken in any order',
-                'Failed to change module order rule',
+                v ? 'Sections now unlock in order' : 'Sections can be taken in any order',
+                'Failed to change section order rule',
               )
             }
-            label="Unlock modules in order"
-            hint="Each module stays locked until the one before is finished"
+            label="Unlock sections in order"
+            hint="Each section stays locked until the one before is finished"
           />
         </div>
       </CardContent>

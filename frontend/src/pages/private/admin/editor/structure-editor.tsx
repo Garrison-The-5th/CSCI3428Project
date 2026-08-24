@@ -1,23 +1,24 @@
 /**
- * File: module-editor.tsx
- * Description: Module Editor.
+ * File: structure-editor.tsx
+ * Description: The course structure editor — modules, their sections, and the content in them.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * Module Editor.
+ * The course structure editor.
  *
- * Left  : the add-section and add-module forms, a rule, then the course as a
- *         collapsible outline — section headings with their modules underneath.
- *         Numbers are never typed: a module is 2.3 because it is the third module
- *         of the second section, so dragging is what renumbers the course.
- * Right : the selected module's title and time, a rule, the add-content row
+ * Left  : the add-module and add-section forms, a rule, then the course as a
+ *         collapsible outline — module headings with their sections underneath.
+ *         Numbers are never typed: a section is 2.3 because it is the third section
+ *         of the second module, so dragging is what renumbers the course.
+ * Right : the selected section's title and time, a rule, the add-content row
  *         pinned above the list, then the content itself.
  */
 import {
   ArrowUpTrayIcon,
   Bars3Icon,
+  CheckIcon,
   ChevronDownIcon,
   FolderPlusIcon,
   PencilSquareIcon,
@@ -33,18 +34,18 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { saveLabel, useAutoSave } from '@/hooks/use-auto-save';
-import SectionColorPicker from '@/pages/private/admin/editor/section-color-picker';
+import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
+import ModuleColorPicker from '@/pages/private/admin/editor/module-color-picker';
 import {
   Course,
-  CourseModule,
+  CourseSection,
   curriculumApi,
   ElementType,
-  moduleContent,
+  ModuleGroup,
+  moduleGroups,
+  moduleTint,
   NewIds,
-  SectionGroup,
-  sectionGroups,
-  sectionTint,
+  sectionContent,
   UPLOAD_ACCEPT,
 } from '@/services/curriculum-api';
 import { quizApi } from '@/services/quiz-api';
@@ -52,12 +53,12 @@ import { logger } from '@/utils/logger';
 
 interface Props {
   course: Course;
-  selectedModuleId: string | null;
-  onSelectModule: (id: string | null) => void;
+  selectedSectionId: string | null;
+  onSelectSection: (id: string | null) => void;
   onRefresh: () => Promise<void>;
   onNotify: (message: string, type?: 'success' | 'error') => void;
   onDelete: (target: {
-    kind: 'module' | 'section' | 'quiz' | 'element';
+    kind: 'section' | 'module' | 'quiz' | 'element';
     id: string;
     label: string;
   }) => void;
@@ -74,7 +75,7 @@ const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
  * What the Add-content picker offers.
  *
  * A quiz is its own record rather than an element, but authors think of it as one
- * more thing to drop into a module, so it sits in the same list. PDF is absent
+ * more thing to drop into a section, so it sits in the same list. PDF is absent
  * deliberately — those arrive through Upload, not by typing a value.
  */
 type NewContentType = Exclude<ElementType, 'PDF'> | 'QUIZ';
@@ -87,13 +88,13 @@ const CONTENT_PLACEHOLDER: Record<NewContentType, string> = {
   QUIZ: 'New quiz title',
 };
 
-/** What is being dragged, so a module is never dropped onto a section list. */
-type Drag = { kind: 'module'; id: string } | { kind: 'section'; id: string } | null;
+/** What is being dragged, so a section is never dropped onto a module list. */
+type Drag = { kind: 'section'; id: string } | { kind: 'module'; id: string } | null;
 
-const ModuleEditor = ({
+const StructureEditor = ({
   course,
-  selectedModuleId,
-  onSelectModule,
+  selectedSectionId,
+  onSelectSection,
   onRefresh,
   onNotify,
   onDelete,
@@ -104,31 +105,31 @@ const ModuleEditor = ({
   const uploadRef = useRef<HTMLInputElement>(null);
   /** In-flight latch for addElement — see the comment there. */
   const addingRef = useRef(false);
-  /** The section whose title is being edited inline, and the text so far. */
-  const [editingSection, setEditingSection] = useState<{ id: string; title: string } | null>(null);
+  /** The module whose title is being edited inline, and the text so far. */
+  const [editingModule, setEditingModule] = useState<{ id: string; title: string } | null>(null);
 
-  const groups = sectionGroups(course);
+  const groups = moduleGroups(course);
   const isNew = newMarkers(unpublished);
 
-  /** Saves an inline section rename, or quietly drops an empty one. */
-  const saveSectionTitle = async () => {
-    const editing = editingSection;
-    setEditingSection(null);
+  /** Saves an inline module rename, or quietly drops an empty one. */
+  const saveModuleTitle = async () => {
+    const editing = editingModule;
+    setEditingModule(null);
     if (!editing) return;
 
     const title = editing.title.trim();
-    const current = groups.find((group) => group.section.id === editing.id)?.section.title;
+    const current = groups.find((group) => group.module.id === editing.id)?.module.title;
     if (!title || title === current) return;
 
     await run(
-      () => curriculumApi.updateSection(editing.id, { title }),
-      'Section renamed',
-      'Failed to rename the section',
+      () => curriculumApi.updateModule(editing.id, { title }),
+      'Module renamed',
+      'Failed to rename the module',
     );
   };
 
-  const [newSection, setNewSection] = useState({ title: '', number: '' });
-  const [newModule, setNewModule] = useState({ title: '', estimatedMinutes: '', sectionId: '' });
+  const [newModule, setNewModule] = useState({ title: '' });
+  const [newSection, setNewSection] = useState({ title: '', estimatedMinutes: '', moduleId: '' });
   const [newElement, setNewElement] = useState<{ type: NewContentType; value: string }>({
     type: 'TEXT',
     value: '',
@@ -137,91 +138,95 @@ const ModuleEditor = ({
   const [contentDragId, setContentDragId] = useState<string | null>(null);
   const [openQuizId, setOpenQuizId] = useState<string | null>(null);
   /** Collapsed rather than expanded, so reopening the editor looks unchanged. */
-  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
+  const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
 
-  const selectedModule = course.modules.find((m) => m.id === selectedModuleId) ?? null;
+  const selectedSection = course.sections.find((m) => m.id === selectedSectionId) ?? null;
 
-  const [moduleDraft, setModuleDraft] = useState({ title: '', estimatedMinutes: '' });
+  const [sectionDraft, setSectionDraft] = useState({ title: '', estimatedMinutes: '' });
 
   useEffect(() => {
-    if (!selectedModule) return;
-    setModuleDraft({
-      title: selectedModule.title,
-      estimatedMinutes: String(selectedModule.estimatedMinutes),
+    if (!selectedSection) return;
+    setSectionDraft({
+      title: selectedSection.title,
+      estimatedMinutes: String(selectedSection.estimatedMinutes),
     });
-  }, [selectedModule?.id]);
+  }, [selectedSection?.id]);
 
-  const { state: moduleState } = useAutoSave(
-    moduleDraft,
+  /**
+   * Whether the header has moved on from the section as stored. Compared rather
+   * than flagged so it is right after a save lands from anywhere — the parent
+   * refetches on every write.
+   */
+  const sectionDirty = selectedSection
+    ? sectionDraft.title !== selectedSection.title ||
+      sectionDraft.estimatedMinutes !== String(selectedSection.estimatedMinutes)
+    : false;
+
+  const { state: sectionState, saveNow: saveSectionNow } = useAutoSave(
+    sectionDraft,
     async (value) => {
-      if (!selectedModule) return;
+      if (!selectedSection) return;
       if (!value.title.trim()) return;
-      await curriculumApi.updateModule(selectedModule.id, {
+      await curriculumApi.updateSection(selectedSection.id, {
         title: value.title.trim(),
         estimatedMinutes: Number(value.estimatedMinutes) || 0,
       });
       await onRefresh();
     },
-    { enabled: Boolean(selectedModule) },
+    { enabled: Boolean(selectedSection) },
   );
 
-  const toggleSection = (sectionId: string) =>
-    setCollapsedSectionIds((prev) => {
+  const toggleModule = (moduleId: string) =>
+    setCollapsedModuleIds((prev) => {
       const next = new Set(prev);
-      if (next.has(sectionId)) next.delete(sectionId);
-      else next.add(sectionId);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
       return next;
     });
 
-  /** The number you type is the place it takes; everything after shuffles down. */
-  const addSection = async () => {
-    if (!newSection.title.trim()) return onNotify('Give the section a title', 'error');
-
-    const typed = newSection.number.trim();
-    if (typed && !/^\d+$/.test(typed)) {
-      return onNotify('A section number is a whole number, like 2', 'error');
-    }
-
-    const place = typed ? Number(typed) : groups.length + 1;
-    const ok = await run(
-      () =>
-        curriculumApi.createSection(course.id, {
-          title: newSection.title.trim(),
-          number: place,
-        }),
-      `Section added`,
-      'Failed to add section',
-    );
-    if (ok) setNewSection({ title: '', number: '' });
-  };
-
-  /** Lands at the end of the chosen section and takes the next number there. */
+  /** Lands at the end of the course; drag it from the outline to move it. */
   const addModule = async () => {
     if (!newModule.title.trim()) return onNotify('Give the module a title', 'error');
-    if (groups.length === 0) {
-      return onNotify('Add a section first — modules live inside one', 'error');
-    }
 
-    const sectionId = newModule.sectionId || groups[groups.length - 1].section.id;
     const ok = await run(
       () =>
         curriculumApi.createModule(course.id, {
-          sectionId,
           title: newModule.title.trim(),
-          estimatedMinutes: Number(newModule.estimatedMinutes) || 0,
+          number: groups.length + 1,
         }),
-      'Module added',
+      `Module added`,
       'Failed to add module',
     );
-    if (ok) setNewModule({ title: '', estimatedMinutes: '', sectionId });
+    if (ok) setNewModule({ title: '' });
+  };
+
+  /** Lands at the end of the chosen module and takes the next number there. */
+  const addSection = async () => {
+    if (!newSection.title.trim()) return onNotify('Give the section a title', 'error');
+    if (groups.length === 0) {
+      return onNotify('Add a module first — sections live inside one', 'error');
+    }
+
+    const moduleId = newSection.moduleId || groups[groups.length - 1].module.id;
+    const ok = await run(
+      () =>
+        curriculumApi.createSection(course.id, {
+          moduleId,
+          title: newSection.title.trim(),
+          estimatedMinutes: Number(newSection.estimatedMinutes) || 0,
+        }),
+      'Section added',
+      'Failed to add section',
+    );
+    if (ok) setNewSection({ title: '', estimatedMinutes: '', moduleId });
   };
 
   const addQuiz = async (title: string) => {
-    if (!selectedModule || !title.trim()) return;
+    if (!selectedSection || !title.trim()) return;
     try {
       const response = await quizApi.createQuiz({
         title: title.trim(),
-        moduleId: selectedModule.id,
+        sectionId: selectedSection.id,
       });
       setNewElement({ type: 'QUIZ', value: '' });
       await onRefresh();
@@ -246,11 +251,11 @@ const ModuleEditor = ({
    */
   const addElement = async () => {
     const value = newElement.value.trim();
-    if (!selectedModule || !value || addingRef.current) return;
+    if (!selectedSection || !value || addingRef.current) return;
 
     addingRef.current = true;
     try {
-      // The two paths split here: everything else is an element on the module, a
+      // The two paths split here: everything else is an element on the section, a
       // quiz is its own record. The author picked both from the same list.
       if (newElement.type === 'QUIZ') {
         await addQuiz(value);
@@ -265,7 +270,7 @@ const ModuleEditor = ({
             : { type: newElement.type, imageUrl: value };
 
       const ok = await run(
-        () => curriculumApi.createElement(selectedModule.id, payload),
+        () => curriculumApi.createElement(selectedSection.id, payload),
         '',
         'Failed to add content',
       );
@@ -276,12 +281,12 @@ const ModuleEditor = ({
     }
   };
 
-  /** Dragging content renumbers the module's whole sequence, quizzes included. */
+  /** Dragging content renumbers the section's whole sequence, quizzes included. */
   const handleContentDrop = async (targetId: string) => {
-    if (!selectedModule || !contentDragId || contentDragId === targetId) {
+    if (!selectedSection || !contentDragId || contentDragId === targetId) {
       return setContentDragId(null);
     }
-    const ordered = moduleContent(selectedModule);
+    const ordered = sectionContent(selectedSection);
     const from = ordered.findIndex((i) => i.id === contentDragId);
     const to = ordered.findIndex((i) => i.id === targetId);
     setContentDragId(null);
@@ -293,8 +298,8 @@ const ModuleEditor = ({
 
     await run(
       () =>
-        curriculumApi.reorderModuleContent(
-          selectedModule.id,
+        curriculumApi.reorderSectionContent(
+          selectedSection.id,
           next.map((i) => ({ kind: i.kind, id: i.id })),
         ),
       '',
@@ -307,20 +312,20 @@ const ModuleEditor = ({
    * numbers appear under the cursor rather than a round trip later. The previous
    * course is kept so a failed save can put it back exactly as it was.
    */
-  const applyStructure = async (next: SectionGroup[]) => {
+  const applyStructure = async (next: ModuleGroup[]) => {
     const previous = course;
 
     setCourse((prev) =>
       prev
         ? {
             ...prev,
-            sections: next.map((group, index) => ({ ...group.section, number: index + 1 })),
-            modules: next.flatMap((group, sectionIndex) =>
-              group.modules.map((module, moduleIndex) => ({
-                ...module,
-                sectionId: group.section.id,
-                position: moduleIndex + 1,
-                number: `${sectionIndex + 1}.${moduleIndex + 1}`,
+            modules: next.map((group, index) => ({ ...group.module, number: index + 1 })),
+            sections: next.flatMap((group, moduleIndex) =>
+              group.sections.map((section, sectionIndex) => ({
+                ...section,
+                moduleId: group.module.id,
+                position: sectionIndex + 1,
+                number: `${moduleIndex + 1}.${sectionIndex + 1}`,
               })),
             ),
           }
@@ -331,8 +336,8 @@ const ModuleEditor = ({
       await curriculumApi.reorderStructure(
         course.id,
         next.map((group) => ({
-          id: group.section.id,
-          moduleIds: group.modules.map((module) => module.id),
+          id: group.module.id,
+          sectionIds: group.sections.map((section) => section.id),
         })),
       );
       await onRefresh();
@@ -343,38 +348,38 @@ const ModuleEditor = ({
     }
   };
 
-  /** Drops a module before `targetModuleId`, or on the end of a section. */
-  const handleModuleDrop = async (sectionId: string, targetModuleId: string | null) => {
-    const dragged = drag;
-    setDrag(null);
-    if (dragged?.kind !== 'module' || dragged.id === targetModuleId) return;
-
-    const next = groups.map((group) => ({
-      ...group,
-      modules: group.modules.filter((module) => module.id !== dragged.id),
-    }));
-
-    const moved = course.modules.find((module) => module.id === dragged.id);
-    const target = next.find((group) => group.section.id === sectionId);
-    if (!moved || !target) return;
-
-    const at = targetModuleId
-      ? target.modules.findIndex((module) => module.id === targetModuleId)
-      : target.modules.length;
-    target.modules.splice(at < 0 ? target.modules.length : at, 0, moved);
-
-    await applyStructure(next);
-  };
-
-  /** Dragging a section heading moves it and everything inside it. */
-  const handleSectionDrop = async (targetSectionId: string) => {
+  /** Drops a section before `targetSectionId`, or on the end of a module. */
+  const handleSectionDrop = async (moduleId: string, targetSectionId: string | null) => {
     const dragged = drag;
     setDrag(null);
     if (dragged?.kind !== 'section' || dragged.id === targetSectionId) return;
 
+    const next = groups.map((group) => ({
+      ...group,
+      sections: group.sections.filter((section) => section.id !== dragged.id),
+    }));
+
+    const moved = course.sections.find((section) => section.id === dragged.id);
+    const target = next.find((group) => group.module.id === moduleId);
+    if (!moved || !target) return;
+
+    const at = targetSectionId
+      ? target.sections.findIndex((section) => section.id === targetSectionId)
+      : target.sections.length;
+    target.sections.splice(at < 0 ? target.sections.length : at, 0, moved);
+
+    await applyStructure(next);
+  };
+
+  /** Dragging a module heading moves it and everything inside it. */
+  const handleModuleDrop = async (targetModuleId: string) => {
+    const dragged = drag;
+    setDrag(null);
+    if (dragged?.kind !== 'module' || dragged.id === targetModuleId) return;
+
     const next = [...groups];
-    const from = next.findIndex((group) => group.section.id === dragged.id);
-    const to = next.findIndex((group) => group.section.id === targetSectionId);
+    const from = next.findIndex((group) => group.module.id === dragged.id);
+    const to = next.findIndex((group) => group.module.id === targetModuleId);
     if (from < 0 || to < 0) return;
 
     const [moved] = next.splice(from, 1);
@@ -390,120 +395,116 @@ const ModuleEditor = ({
         <CardHeader className="p-4">
           <CardTitle className="text-lg text-dark-gray">Course structure</CardTitle>
           <p className="text-sm text-dark-gray">
-            Sections hold modules: section 2&rsquo;s third module is 2.3. Drag to reorder — numbers
-            follow. The circle sets a colour for the whole section.
+            Modules hold sections: module 2&rsquo;s third section is 2.3. Drag to reorder — numbers
+            follow. The circle sets a colour for the whole module.
           </p>
         </CardHeader>
 
         <CardContent className="flex flex-col gap-3">
+          {/* New module */}
+          <div className="flex flex-col gap-2 rounded-lg border border-navy/30 bg-white/60 p-3">
+            <p className="text-sm font-semibold text-dark-gray">New module</p>
+            {/* Only a name. The number was asked for here and it was the wrong
+                question at the wrong time: a module that does not exist yet has
+                no place in the course to state, and the answer was overwritten
+                by the first drag anyway. It lands at the end and shows its
+                number in the outline below, once it is a real module. */}
+            <Input
+              value={newModule.title}
+              onChange={(e) => setNewModule({ ...newModule, title: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && addModule()}
+              placeholder="Module title"
+              className={inputClass}
+            />
+            <Button onClick={addModule} className={primaryBtn}>
+              <FolderPlusIcon className="w-5 h-5 stroke-2" /> Add module
+            </Button>
+          </div>
+
           {/* New section */}
           <div className="flex flex-col gap-2 rounded-lg border border-navy/30 bg-white/60 p-3">
             <p className="text-sm font-semibold text-dark-gray">New section</p>
             <div className="flex gap-2">
-              <Input
-                value={newSection.number}
-                onChange={(e) => setNewSection({ ...newSection, number: e.target.value })}
-                placeholder={String(groups.length + 1)}
-                title="Where in the course it goes"
-                className={`${inputClass} max-w-20`}
-              />
-              <Input
-                value={newSection.title}
-                onChange={(e) => setNewSection({ ...newSection, title: e.target.value })}
-                onKeyDown={(e) => e.key === 'Enter' && addSection()}
-                placeholder="Section title"
-                className={inputClass}
-              />
-            </div>
-            <Button onClick={addSection} className={primaryBtn}>
-              <FolderPlusIcon className="w-5 h-5 stroke-2" /> Add section
-            </Button>
-          </div>
-
-          {/* New module */}
-          <div className="flex flex-col gap-2 rounded-lg border border-navy/30 bg-white/60 p-3">
-            <p className="text-sm font-semibold text-dark-gray">New module</p>
-            <div className="flex gap-2">
               <select
-                value={newModule.sectionId || groups[groups.length - 1]?.section.id || ''}
-                onChange={(e) => setNewModule({ ...newModule, sectionId: e.target.value })}
+                value={newSection.moduleId || groups[groups.length - 1]?.module.id || ''}
+                onChange={(e) => setNewSection({ ...newSection, moduleId: e.target.value })}
                 disabled={groups.length === 0}
                 className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2
                   text-sm text-dark-gray"
               >
                 {groups.map((group) => (
-                  <option key={group.section.id} value={group.section.id}>
-                    {group.section.number}. {group.section.title}
+                  <option key={group.module.id} value={group.module.id}>
+                    {group.module.title}
                   </option>
                 ))}
               </select>
               <Input
-                value={newModule.estimatedMinutes}
-                onChange={(e) => setNewModule({ ...newModule, estimatedMinutes: e.target.value })}
+                value={newSection.estimatedMinutes}
+                onChange={(e) => setNewSection({ ...newSection, estimatedMinutes: e.target.value })}
                 placeholder="Mins"
                 className={`${inputClass} max-w-20`}
               />
             </div>
             <Input
-              value={newModule.title}
-              onChange={(e) => setNewModule({ ...newModule, title: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && addModule()}
-              placeholder="New module title"
+              value={newSection.title}
+              onChange={(e) => setNewSection({ ...newSection, title: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && addSection()}
+              placeholder="New section title"
               className={inputClass}
             />
-            <Button onClick={addModule} className={primaryBtn} disabled={groups.length === 0}>
-              <PlusIcon className="w-5 h-5 stroke-2" /> Add module
+            <Button onClick={addSection} className={primaryBtn} disabled={groups.length === 0}>
+              <PlusIcon className="w-5 h-5 stroke-2" /> Add section
             </Button>
           </div>
 
           <hr className="h-px border-t-0 bg-gray-300" />
 
           {groups.length === 0 ? (
-            <p className="text-sm text-dark-gray">No sections yet. Add one to get started.</p>
+            <p className="text-sm text-dark-gray">No modules yet. Add one to get started.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {groups.map((group) => {
-                const collapsed = collapsedSectionIds.has(group.section.id);
-                const minutes = group.modules.reduce((sum, m) => sum + m.estimatedMinutes, 0);
+                const collapsed = collapsedModuleIds.has(group.module.id);
+                const minutes = group.sections.reduce((sum, m) => sum + m.estimatedMinutes, 0);
 
                 return (
-                  <div key={group.section.id} className="flex flex-col gap-1">
-                    {/* Section heading — drag it to move the whole section */}
+                  <div key={group.module.id} className="flex flex-col gap-1">
+                    {/* Module heading — drag it to move the whole module */}
                     <div
                       draggable
-                      onDragStart={() => setDrag({ kind: 'section', id: group.section.id })}
+                      onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
                       onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => handleSectionDrop(group.section.id)}
+                      onDrop={() => handleModuleDrop(group.module.id)}
                       onDragEnd={() => setDrag(null)}
                       className={`flex cursor-grab items-center gap-1 rounded-md border px-2 py-2
-                        ${group.section.color ? '' : 'border-navy/40 bg-navy/5'}
-                        ${drag?.kind === 'section' && drag.id === group.section.id ? 'opacity-50' : ''}`}
+                        ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
+                        ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
                       // The tint the learner will see, previewed where it is set.
-                      style={sectionTint(group.section.color)}
+                      style={moduleTint(group.module.color)}
                     >
                       <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
 
-                      {editingSection?.id === group.section.id ? (
+                      {editingModule?.id === group.module.id ? (
                         // Renaming takes over the row: the drag handle and the
                         // collapse toggle would both fight a text field.
                         <Input
                           autoFocus
-                          value={editingSection.title}
+                          value={editingModule.title}
                           onChange={(e) =>
-                            setEditingSection({ id: group.section.id, title: e.target.value })
+                            setEditingModule({ id: group.module.id, title: e.target.value })
                           }
-                          onBlur={saveSectionTitle}
+                          onBlur={saveModuleTitle}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveSectionTitle();
-                            if (e.key === 'Escape') setEditingSection(null);
+                            if (e.key === 'Enter') saveModuleTitle();
+                            if (e.key === 'Escape') setEditingModule(null);
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          aria-label="Section title"
+                          aria-label="Module title"
                           className={`${inputClass} h-8 min-w-0 flex-1`}
                         />
                       ) : (
                         <button
-                          onClick={() => toggleSection(group.section.id)}
+                          onClick={() => toggleModule(group.module.id)}
                           aria-expanded={!collapsed}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
                         >
@@ -514,59 +515,59 @@ const ModuleEditor = ({
                           <span className="min-w-0 flex-1 text-sm text-dark-gray">
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="break-words font-semibold">
-                                {group.section.number}. {group.section.title}
+                                {group.module.number}. {group.module.title}
                               </span>
-                              {isNew.section(group.section.id) && <NewBadge />}
+                              {isNew.module(group.module.id) && <NewBadge />}
                             </span>
                             <span className="block text-xs">
-                              {group.modules.length} module
-                              {group.modules.length === 1 ? '' : 's'}
+                              {group.sections.length} section
+                              {group.sections.length === 1 ? '' : 's'}
                               {minutes > 0 && ` · ${minutes} min`}
                             </span>
                           </span>
                         </button>
                       )}
 
-                      {group.section.id !== 'unsectioned' && (
+                      {group.module.id !== 'unmoduleed' && (
                         <>
-                          <SectionColorPicker
-                            color={group.section.color}
-                            label={group.section.title}
+                          <ModuleColorPicker
+                            color={group.module.color}
+                            label={group.module.title}
                             onSelect={(color) =>
                               run(
-                                () => curriculumApi.updateSection(group.section.id, { color }),
-                                color ? 'Section colour set' : 'Section colour cleared',
-                                'Failed to change the section colour',
+                                () => curriculumApi.updateModule(group.module.id, { color }),
+                                color ? 'Module colour set' : 'Module colour cleared',
+                                'Failed to change the module colour',
                               )
                             }
                           />
                           <Button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setEditingSection({
-                                id: group.section.id,
-                                title: group.section.title,
+                              setEditingModule({
+                                id: group.module.id,
+                                title: group.module.title,
                               });
                             }}
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 shrink-0 hover:text-green-hover"
-                            title="Rename section"
+                            title="Rename module"
                           >
                             <PencilSquareIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             onClick={() =>
                               onDelete({
-                                kind: 'section',
-                                id: group.section.id,
-                                label: `${group.section.number}. ${group.section.title}`,
+                                kind: 'module',
+                                id: group.module.id,
+                                label: `${group.module.number}. ${group.module.title}`,
                               })
                             }
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 shrink-0 hover:text-danger-hover"
-                            title="Delete section"
+                            title="Delete module"
                           >
                             <TrashIcon className="w-4 h-4" />
                           </Button>
@@ -577,59 +578,60 @@ const ModuleEditor = ({
                     {!collapsed && (
                       <div
                         className="flex flex-col gap-1 pl-4"
-                        // Dropping in the gap under the last module appends here,
-                        // which is the only way into an empty section.
+                        // Dropping in the gap under the last section appends here,
+                        // which is the only way into an empty module.
                         onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => handleModuleDrop(group.section.id, null)}
+                        onDrop={() => handleSectionDrop(group.module.id, null)}
                       >
-                        {group.modules.length === 0 ? (
+                        {group.sections.length === 0 ? (
                           <p className="px-2 py-2 text-xs text-dark-gray">
-                            Empty — drag a module here.
+                            Empty — drag a section here.
                           </p>
                         ) : (
-                          group.modules.map((module: CourseModule) => (
+                          group.sections.map((section: CourseSection) => (
                             <div
-                              key={module.id}
+                              key={section.id}
                               draggable
-                              onDragStart={() => setDrag({ kind: 'module', id: module.id })}
+                              onDragStart={() => setDrag({ kind: 'section', id: section.id })}
                               onDragOver={(e) => e.preventDefault()}
                               onDrop={(e) => {
                                 e.stopPropagation();
-                                handleModuleDrop(group.section.id, module.id);
+                                handleSectionDrop(group.module.id, section.id);
                               }}
                               onDragEnd={() => setDrag(null)}
                               className={`flex cursor-grab items-center gap-2 rounded-md border px-3
                                 py-2
-                                ${module.id === selectedModuleId ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}
-                                ${drag?.kind === 'module' && drag.id === module.id ? 'opacity-50' : ''}`}
-                              // The colour is the section's, so its modules read
+                                ${section.id === selectedSectionId ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}
+                                ${drag?.kind === 'section' && drag.id === section.id ? 'opacity-50' : ''}`}
+                              // The colour is the module's, so its sections read
                               // as belonging together down the whole outline.
                               style={
-                                group.section.color
+                                group.module.color
                                   ? {
                                       borderLeftWidth: '4px',
-                                      borderLeftColor: group.section.color,
+                                      borderLeftColor: group.module.color,
                                     }
                                   : undefined
                               }
                             >
                               <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
                               <button
-                                onClick={() => onSelectModule(module.id)}
+                                onClick={() => onSelectSection(section.id)}
                                 className="min-w-0 flex-1 text-left text-sm text-dark-gray"
                               >
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span>
-                                    <span className="font-semibold">{module.number}</span>{' '}
-                                    {module.title}
+                                    <span className="font-semibold">{section.number}</span>{' '}
+                                    {section.title}
                                   </span>
-                                  {isNew.module(module.id, module.sectionId) && <NewBadge />}
+                                  {isNew.section(section.id, section.moduleId) && <NewBadge />}
                                 </span>
                                 <span className="block text-xs">
-                                  {module.elements.length} items
-                                  {module.quizzes.length > 0 && ` · ${module.quizzes.length} quiz`}
-                                  {module.estimatedMinutes > 0 &&
-                                    ` · ${module.estimatedMinutes} min`}
+                                  {section.elements.length} items
+                                  {section.quizzes.length > 0 &&
+                                    ` · ${section.quizzes.length} quiz`}
+                                  {section.estimatedMinutes > 0 &&
+                                    ` · ${section.estimatedMinutes} min`}
                                 </span>
                               </button>
                             </div>
@@ -645,11 +647,11 @@ const ModuleEditor = ({
         </CardContent>
       </Card>
 
-      {/* ---- Selected module ---- */}
+      {/* ---- Selected section ---- */}
       <Card className="bg-light-gray shadow-sm">
-        {!selectedModule ? (
+        {!selectedSection ? (
           <CardContent className="py-16 text-center">
-            <p>Add a module on the left, or pick one to edit.</p>
+            <p>Add a section on the left, or pick one to edit.</p>
           </CardContent>
         ) : (
           <>
@@ -657,14 +659,14 @@ const ModuleEditor = ({
               <div className="flex flex-wrap items-end gap-3">
                 <div className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
                   Number
-                  {/* Read-only: the number is where the module sits, so it moves
+                  {/* Read-only: the number is where the section sits, so it moves
                       by dragging rather than by typing. */}
                   <span
                     className="flex h-9 items-center rounded-md border border-gray-300 bg-gray-100
                       px-3 font-semibold"
-                    title="Set by the module's place in its section — drag to change it"
+                    title="Set by the section's place in its module — drag to change it"
                   >
-                    {selectedModule.number}
+                    {selectedSection.number}
                   </span>
                 </div>
                 <label
@@ -672,17 +674,17 @@ const ModuleEditor = ({
                 >
                   Title
                   <Input
-                    value={moduleDraft.title}
-                    onChange={(e) => setModuleDraft({ ...moduleDraft, title: e.target.value })}
+                    value={sectionDraft.title}
+                    onChange={(e) => setSectionDraft({ ...sectionDraft, title: e.target.value })}
                     className={inputClass}
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
                   Time (mins)
                   <Input
-                    value={moduleDraft.estimatedMinutes}
+                    value={sectionDraft.estimatedMinutes}
                     onChange={(e) =>
-                      setModuleDraft({ ...moduleDraft, estimatedMinutes: e.target.value })
+                      setSectionDraft({ ...sectionDraft, estimatedMinutes: e.target.value })
                     }
                     className={`${inputClass} max-w-28`}
                   />
@@ -690,19 +692,31 @@ const ModuleEditor = ({
               </div>
 
               <div className="flex shrink-0 items-center gap-3">
-                <span className="text-xs text-dark-gray">{saveLabel(moduleState)}</span>
+                <span className="text-xs text-dark-gray">
+                  {saveStatus(sectionState, sectionDirty)}
+                </span>
+                <Button
+                  onClick={saveSectionNow}
+                  disabled={sectionState === 'saving'}
+                  variant="ghost"
+                  size="icon"
+                  className="hover:text-green-hover"
+                  title="Save this section now"
+                >
+                  <CheckIcon className="w-6 h-6" />
+                </Button>
                 <Button
                   onClick={() =>
                     onDelete({
-                      kind: 'module',
-                      id: selectedModule.id,
-                      label: `${selectedModule.number} ${selectedModule.title}`,
+                      kind: 'section',
+                      id: selectedSection.id,
+                      label: `${selectedSection.number} ${selectedSection.title}`,
                     })
                   }
                   variant="ghost"
                   size="icon"
                   className="hover:text-danger-hover"
-                  title="Delete module"
+                  title="Delete section"
                 >
                   <TrashIcon className="w-6 h-6" />
                 </Button>
@@ -763,7 +777,7 @@ const ModuleEditor = ({
                       const file = e.target.files?.[0];
                       if (file) {
                         run(
-                          () => curriculumApi.uploadModuleImage(selectedModule.id, file),
+                          () => curriculumApi.uploadSectionImage(selectedSection.id, file),
                           'File added',
                           'Failed to upload',
                         );
@@ -786,10 +800,10 @@ const ModuleEditor = ({
               </div>
 
               {/* Existing content, draggable */}
-              {moduleContent(selectedModule).length === 0 ? (
-                <p className="text-sm text-dark-gray">Nothing in this module yet.</p>
+              {sectionContent(selectedSection).length === 0 ? (
+                <p className="text-sm text-dark-gray">Nothing in this section yet.</p>
               ) : (
-                moduleContent(selectedModule).map((item) =>
+                sectionContent(selectedSection).map((item) =>
                   item.kind === 'element' ? (
                     <ElementEditor
                       key={item.id}
@@ -877,4 +891,4 @@ const ModuleEditor = ({
   );
 };
 
-export default ModuleEditor;
+export default StructureEditor;

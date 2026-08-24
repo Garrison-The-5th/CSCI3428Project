@@ -74,7 +74,7 @@ const CourseEditorList = () => {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
           {courses.map((course) => {
             const cover = imageSrc(course.imageData, course.imageType);
-            const quizCount = course.modules.reduce((s, m) => s + m.quizzes.length, 0);
+            const quizCount = course.sections.reduce((s, m) => s + m.quizzes.length, 0);
 
             return (
               <Card
@@ -106,7 +106,7 @@ const CourseEditorList = () => {
                   className="flex items-center justify-between border-t border-gray-300 p-4 text-sm
                     font-medium text-dark-gray"
                 >
-                  <span>Modules: {course.modules.length}</span>
+                  <span>Sections: {course.sections.length}</span>
                   <span>Quizzes: {quizCount}</span>
                 </CardContent>
               </Card>

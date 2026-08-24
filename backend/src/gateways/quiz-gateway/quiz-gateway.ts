@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { Prisma } from '../../../generated/prisma';
+import { Prisma, QuizType } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
 type Db = Prisma.TransactionClient;
@@ -40,7 +40,8 @@ export default class QuizGateway {
       select: {
         id: true,
         title: true,
-        moduleId: true,
+        type: true,
+        sectionId: true,
         dueDate: true,
         questions: { select: { id: true } },
       },
@@ -63,11 +64,44 @@ export default class QuizGateway {
     });
   }
 
+  /**
+   * The one-time link inside a course, if it has one.
+   *
+   * Two callers, both needing the same lookup: the rule that a one-time link
+   * owns its whole quiz set, and the check that a link is not about to be sent
+   * for a quiz still in draft. Selects three columns rather than reading the
+   * course tree, which would drag every question, option and piece of base64
+   * media along to answer what is nearly a yes-or-no question.
+   *
+   * Deliberately not filtered on `published` — both callers need to know it is
+   * there precisely so they can say something about the state it is in.
+   */
+  static findOneTimeQuiz(courseId: string) {
+    return prisma.quiz.findFirst({
+      where: { deletedAt: null, type: QuizType.ONE_TIME, section: { courseId, deletedAt: null } },
+      select: { id: true, title: true, published: true },
+    });
+  }
+
+  /**
+   * Marks every quiz in a course published, which is what publishing the course
+   * now does. Returns how many changed, so a publish can say nothing when
+   * nothing did.
+   */
+  static publishQuizzesInCourse(courseId: string) {
+    return prisma.quiz.updateMany({
+      where: { deletedAt: null, published: false, section: { courseId, deletedAt: null } },
+      data: { published: true },
+    });
+  }
+
   static createQuiz(data: {
     title: string;
     description?: string | null;
-    moduleId?: string | null;
+    type?: QuizType;
+    sectionId?: string | null;
     order?: number;
+    published?: boolean;
     dueDate?: Date | null;
     timeLimitMinutes?: number | null;
   }) {
@@ -79,9 +113,11 @@ export default class QuizGateway {
     data: Partial<{
       title: string;
       description: string | null;
-      moduleId: string | null;
-      courseId: string | null;
+      type: QuizType;
+      sectionId: string | null;
+      order: number;
       published: boolean;
+      showResults: boolean;
       showAnswers: boolean;
       dueDate: Date | null;
       timeLimitMinutes: number | null;
@@ -108,7 +144,7 @@ export default class QuizGateway {
         id: true,
         title: true,
         deletedAt: true,
-        module: { select: { title: true, course: { select: { id: true, title: true } } } },
+        section: { select: { title: true, course: { select: { id: true, title: true } } } },
       },
     });
   }
@@ -155,7 +191,7 @@ export default class QuizGateway {
 
   static createQuestion(
     quizId: string,
-    data: { prompt: string; hint?: string | null; hintModuleNumber?: string | null },
+    data: { prompt: string; hint?: string | null; hintSectionNumber?: string | null },
     order: number,
     options: Array<{ text: string; isCorrect: boolean }>,
     db: Db,
@@ -183,7 +219,7 @@ export default class QuizGateway {
     data: {
       prompt?: string;
       hint?: string | null;
-      hintModuleNumber?: string | null;
+      hintSectionNumber?: string | null;
       options?: Array<{ text: string; isCorrect: boolean }>;
     },
   ) {
@@ -240,10 +276,76 @@ export default class QuizGateway {
     return prisma.quizAttempt.create({ data: { userId, quizId, score, total } });
   }
 
+  /** Whether this person has ever handed this quiz in — the one-time gate. */
+  static async hasAttempted(userId: number, quizId: string): Promise<boolean> {
+    const attempt = await prisma.quizAttempt.findFirst({
+      where: { userId, quizId },
+      select: { id: true },
+    });
+    return attempt !== null;
+  }
+
+  /** Stores the paper alongside an attempt. Only one-time quizzes keep one. */
+  static recordAnswers(
+    attemptId: string,
+    answers: Array<{
+      questionId: string;
+      order: number;
+      prompt: string;
+      chosen: string[];
+      correct: string[];
+      wasCorrect: boolean;
+    }>,
+  ) {
+    if (answers.length === 0) return Promise.resolve({ count: 0 });
+    return prisma.quizAnswer.createMany({
+      data: answers.map((answer) => ({ attemptId, ...answer })),
+    });
+  }
+
+  /**
+   * The most recent attempt at one quiz, paper included, so a result can be
+   * handed back without the learner sitting it again. Only a one-time quiz keeps
+   * a paper, which is the one kind that needs this.
+   */
+  static findLatestAttempt(userId: number, quizId: string) {
+    return prisma.quizAttempt.findFirst({
+      where: { userId, quizId },
+      orderBy: { completedAt: 'desc' },
+      select: {
+        id: true,
+        score: true,
+        total: true,
+        answers: { orderBy: { order: 'asc' } },
+      },
+    });
+  }
+
   static getAttemptsForUser(userId: number) {
     return prisma.quizAttempt.findMany({
       where: { userId },
       orderBy: { completedAt: 'desc' },
+    });
+  }
+
+  /**
+   * One person's attempts at quizzes of a given kind, papers included.
+   *
+   * Reads the quiz title off the row rather than off a snapshot: a one-time quiz
+   * stands alone, so there is no published course version to look it up in.
+   */
+  static getAnsweredAttempts(userId: number, type: QuizType) {
+    return prisma.quizAttempt.findMany({
+      where: { userId, quiz: { type } },
+      orderBy: { completedAt: 'desc' },
+      select: {
+        id: true,
+        score: true,
+        total: true,
+        completedAt: true,
+        quiz: { select: { id: true, title: true, type: true } },
+        answers: { orderBy: { order: 'asc' } },
+      },
     });
   }
 

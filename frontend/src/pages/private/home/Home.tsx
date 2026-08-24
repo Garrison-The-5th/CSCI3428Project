@@ -102,8 +102,10 @@ const HomePage = () => {
         </h1>
         <p className="page-subtitle text-dark-gray font-medium">
           {totals && (totals.coursesOutstanding > 0 || totals.quizzesOutstanding > 0)
-            ? `${totals.coursesOutstanding} course${totals.coursesOutstanding === 1 ? '' : 's'} and ` +
-              `${totals.quizzesOutstanding} quiz${totals.quizzesOutstanding === 1 ? '' : 'zes'} outstanding · ` +
+            ? `${totals.coursesOutstanding} course` +
+              `${totals.coursesOutstanding === 1 ? '' : 's'} and ` +
+              `${totals.quizzesOutstanding} quiz` +
+              `${totals.quizzesOutstanding === 1 ? '' : 'zes'} outstanding · ` +
               `about ${formatMinutes(totals.minutesRemaining)} of learning left`
             : 'You are all caught up.'}
         </p>
@@ -134,8 +136,9 @@ const HomePage = () => {
                     <span className="min-w-0">
                       <span className="block font-semibold text-dark-gray">{course.title}</span>
                       <span className="block text-sm text-dark-gray">
-                        {course.newModuleCount
-                          ? `${course.newModuleCount} new module${course.newModuleCount === 1 ? '' : 's'} added`
+                        {course.newSectionCount
+                          ? `${course.newSectionCount} new section` +
+                            `${course.newSectionCount === 1 ? '' : 's'} added`
                           : 'Updated since you last worked on it'}
                       </span>
                     </span>
@@ -185,7 +188,7 @@ const HomePage = () => {
                         <ProgressDonut
                           percent={course.percentComplete}
                           size={DONUT_SIZE}
-                          caption={`${course.completedModules}/${course.totalModules} modules`}
+                          caption={`${course.completedSections}/${course.totalSections} sections`}
                         />
                         {/* Clamped and breaking on any character: the card is
                             fixed-width, so a long unbroken word has to fold
@@ -287,8 +290,8 @@ const HomePage = () => {
                         {formatMinutes(course.remainingMinutes)} left
                       </p>
                       <p className="mt-1 text-sm text-dark-gray">
-                        {course.percentComplete}% complete ({course.completedModules}/
-                        {course.totalModules} modules)
+                        {course.percentComplete}% complete ({course.completedSections}/
+                        {course.totalSections} sections)
                       </p>
                     </li>
                   );

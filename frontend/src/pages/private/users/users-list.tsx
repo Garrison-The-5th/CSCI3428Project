@@ -106,7 +106,9 @@ const UsersList = () => {
           message: mailBody,
         });
         setMailStatus({
-          message: `Email queued for ${response.result?.sentCount ?? 0} of ${response.result?.recipientCount ?? 0} subscribed user(s).`,
+          message:
+            `Email queued for ${response.result?.sentCount ?? 0} of ` +
+            `${response.result?.recipientCount ?? 0} subscribed user(s).`,
           kind: 'success',
         });
         setIsMailDialogOpen(false);

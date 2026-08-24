@@ -45,8 +45,8 @@ export default class PublicationGateway {
     version: number;
     snapshot: Prisma.InputJsonValue;
     publishedById: number | null;
-    newSectionIds: string[];
     newModuleIds: string[];
+    newSectionIds: string[];
     newElementIds: string[];
     newQuizIds: string[];
   }) {
@@ -75,8 +75,8 @@ export default class PublicationGateway {
         version: true,
         publishedAt: true,
         supersededAt: true,
-        newSectionIds: true,
         newModuleIds: true,
+        newSectionIds: true,
         newElementIds: true,
         newQuizIds: true,
         publishedBy: { select: { id: true, email: true, name: true } },
@@ -86,6 +86,28 @@ export default class PublicationGateway {
 
   static getById(id: string) {
     return prisma.coursePublication.findUnique({ where: { id } });
+  }
+
+  /** Permanently removes one archived version. */
+  static deleteById(id: string) {
+    return prisma.coursePublication.delete({ where: { id } });
+  }
+
+  /**
+   * The highest version number this course has ever used.
+   *
+   * Read from the rows rather than from `Course.publishedVersion` because a
+   * restore has to mint a number no earlier version ever held, and the course's
+   * pointer moves backwards when an author rolls back — so it is not a reliable
+   * high-water mark.
+   */
+  static async highestVersion(courseId: string): Promise<number> {
+    const top = await prisma.coursePublication.findFirst({
+      where: { courseId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    return top?.version ?? 0;
   }
 
   /**
@@ -102,8 +124,8 @@ export default class PublicationGateway {
       select: {
         version: true,
         publishedAt: true,
-        newSectionIds: true,
         newModuleIds: true,
+        newSectionIds: true,
         newElementIds: true,
         newQuizIds: true,
       },

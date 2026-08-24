@@ -8,7 +8,7 @@
 /**
  * The recycle bin.
  *
- * Courses, sections, modules and quizzes are soft deleted, so they land here.
+ * Courses, modules, sections and quizzes are soft deleted, so they land here.
  * Each can be restored or permanently removed, and the whole bin can be restored
  * or emptied at once. The server clears anything older than its retention window
  * on its own, so every row says how long it has left rather than only when it
@@ -31,7 +31,7 @@ import { logger } from '@/utils/logger';
 
 /** What the confirm dialog is asking about. `all` empties the whole bin. */
 type Pending =
-  | { kind: 'course' | 'section' | 'module' | 'quiz'; id: string; label: string }
+  | { kind: 'course' | 'module' | 'section' | 'quiz'; id: string; label: string }
   | { kind: 'all' }
   | null;
 
@@ -50,8 +50,8 @@ function timeLeft(deletedAt: string, retentionDays: number): string {
 
 const TrashBin = ({ onNotify }: TrashBinProps) => {
   const [courses, setCourses] = useState<DeletedCourse[]>([]);
-  const [sections, setSections] = useState<DeletedSection[]>([]);
   const [modules, setModules] = useState<DeletedModule[]>([]);
+  const [sections, setSections] = useState<DeletedSection[]>([]);
   const [quizzes, setQuizzes] = useState<DeletedQuiz[]>([]);
   const [retentionDays, setRetentionDays] = useState(14);
   const [loading, setLoading] = useState(true);
@@ -66,8 +66,8 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
         quizApi.getDeletedQuizzes(),
       ]);
       setCourses(curriculum.courses ?? []);
-      setSections(curriculum.sections ?? []);
       setModules(curriculum.modules ?? []);
+      setSections(curriculum.sections ?? []);
       setQuizzes(deletedQuizzes);
       if (curriculum.retentionDays) setRetentionDays(curriculum.retentionDays);
     } catch (err) {
@@ -121,19 +121,19 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
     const call =
       target.kind === 'course'
         ? () => curriculumApi.purgeCourse(target.id)
-        : target.kind === 'section'
-          ? () => curriculumApi.purgeSection(target.id)
-          : target.kind === 'module'
-            ? () => curriculumApi.purgeModule(target.id)
+        : target.kind === 'module'
+          ? () => curriculumApi.purgeModule(target.id)
+          : target.kind === 'section'
+            ? () => curriculumApi.purgeSection(target.id)
             : () => quizApi.purgeQuiz(target.id);
 
     return run(call, `"${target.label}" permanently deleted`, 'Failed to delete permanently');
   };
 
-  const total = courses.length + sections.length + modules.length + quizzes.length;
+  const total = courses.length + modules.length + sections.length + quizzes.length;
 
   const row = (
-    kind: 'course' | 'section' | 'module' | 'quiz',
+    kind: 'course' | 'module' | 'section' | 'quiz',
     id: string,
     title: string,
     origin: string,
@@ -240,29 +240,6 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                 </section>
               )}
 
-              {sections.length > 0 && (
-                <section>
-                  <h3 className="mb-2 font-semibold text-dark-gray">Sections</h3>
-                  <ul className="flex flex-col gap-2">
-                    {sections.map((section) =>
-                      row(
-                        'section',
-                        section.id,
-                        section.title,
-                        `${section.course?.title ?? 'Unknown course'} · comes back at the end`,
-                        section.deletedAt,
-                        () =>
-                          run(
-                            () => curriculumApi.restoreSection(section.id),
-                            `"${section.title}" restored`,
-                            'Failed to restore section',
-                          ),
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-
               {modules.length > 0 && (
                 <section>
                   <h3 className="mb-2 font-semibold text-dark-gray">Modules</h3>
@@ -272,13 +249,36 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                         'module',
                         module.id,
                         module.title,
-                        module.course?.title ?? 'Unknown course',
+                        `${module.course?.title ?? 'Unknown course'} · comes back at the end`,
                         module.deletedAt,
                         () =>
                           run(
                             () => curriculumApi.restoreModule(module.id),
                             `"${module.title}" restored`,
                             'Failed to restore module',
+                          ),
+                      ),
+                    )}
+                  </ul>
+                </section>
+              )}
+
+              {sections.length > 0 && (
+                <section>
+                  <h3 className="mb-2 font-semibold text-dark-gray">Sections</h3>
+                  <ul className="flex flex-col gap-2">
+                    {sections.map((section) =>
+                      row(
+                        'section',
+                        section.id,
+                        section.title,
+                        section.course?.title ?? 'Unknown course',
+                        section.deletedAt,
+                        () =>
+                          run(
+                            () => curriculumApi.restoreSection(section.id),
+                            `"${section.title}" restored`,
+                            'Failed to restore section',
                           ),
                       ),
                     )}
@@ -295,7 +295,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                         'quiz',
                         quiz.id,
                         quiz.title,
-                        quiz.module?.course?.title ?? '',
+                        quiz.section?.course?.title ?? '',
                         quiz.deletedAt,
                         () =>
                           run(
@@ -327,7 +327,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
           ) : (
             <>
               Permanently delete <span className="font-semibold">{pending?.label}</span>?
-              {pending?.kind === 'course' && ' Its modules and content go with it.'}
+              {pending?.kind === 'course' && ' Its sections and content go with it.'}
               <br />
               This cannot be undone.
             </>
