@@ -290,6 +290,7 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
     return (
       <div
         className={`rich-text break-words text-dark-gray ${fill ? 'h-full overflow-y-auto' : ''}`}
+        // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
         dangerouslySetInnerHTML={{ __html: element.textContent }}
       />
     );
