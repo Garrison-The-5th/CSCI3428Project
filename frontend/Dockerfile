@@ -1,5 +1,5 @@
-# Use the official Node.js image as base
-FROM node:lts-bookworm-slim
+# ---- Build stage ----
+FROM node:24-slim AS build
 
 # Set working directory for the frontend inside the container
 WORKDIR /usr/src/frontend
@@ -36,14 +36,12 @@ COPY frontend/ .
 # Build the React app with Vite
 RUN npm run build
 
-# The static server is installed at build time, not fetched at start time.
-#
-# `npx serve` downloads the package on first run, and with no TTY under
-# `docker compose up -d` it stalls waiting to confirm the install — the container
-# reports healthy while nothing is listening. Baking it into the image makes
-# startup deterministic and offline-safe.
-RUN npm install --no-save serve
+# ---- Serve stage ----
+# Fleet pattern for static frontends: multi-stage build served by nginx,
+# rather than a Node process running a dev server or `npx serve`.
+FROM nginx:alpine
 
-# Serve the production build on port 5173
-EXPOSE 5173
-CMD ["npx", "serve", "-s", "dist", "-l", "5173"]
+COPY --from=build /usr/src/frontend/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

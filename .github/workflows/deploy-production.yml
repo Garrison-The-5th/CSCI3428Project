@@ -1,0 +1,15 @@
+# TEMPLATE — edits required: 1 (app-dir, same value as deploy-staging.yml).
+#
+# Deploy to Production — manual promotion only: copies the staging tag to
+# production in k8s-gitops. No build. Refuses no-ops and downgrades.
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  promote:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-deploy-production.yml@main
+    with:
+      app-dir: apps/learning-app      # EDIT: same value as in deploy-staging.yml
+    secrets: inherit

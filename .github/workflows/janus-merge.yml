@@ -1,0 +1,30 @@
+# TEMPLATE — edits required: NONE. Copy as-is.
+#
+# Janus (Merge) — post-merge full-tree security scan (Semgrep + Trivy),
+# maintains the rolling bot-sec/security PR. NON-GATING (detective).
+name: Janus (Merge)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch: {}
+
+concurrency:
+  # Don't cancel an in-flight scan when commits land in quick succession.
+  group: janus-merge-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  janus-merge:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-janus-merge.yml@main
+    with:
+      base-branch: main
+      janus-ref: main
+    secrets: inherit

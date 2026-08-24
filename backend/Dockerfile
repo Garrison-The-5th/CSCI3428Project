@@ -14,6 +14,16 @@ RUN npm install
 # Copy all backend code
 COPY backend/ .
 
+# npm's install-scripts allowlist blocks the `prisma` package's postinstall
+# (which normally runs `prisma generate`), so the client has to be generated
+# explicitly or the build below fails with "Cannot find module '../generated/prisma'".
+#
+# prisma.config.ts requires DATABASE_URL to be resolvable just to load the
+# config; `generate` never connects to it, so a placeholder is fine here and
+# is not persisted — it's a one-off RUN env, not an image ENV.
+RUN DATABASE_URL="postgresql://generate:generate@localhost:5432/generate" \
+    npx prisma generate --config prisma/prisma.config.ts
+
 # Build your app
 RUN npm run build
 

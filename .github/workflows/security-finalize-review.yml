@@ -1,0 +1,21 @@
+# TEMPLATE — edits required: NONE. Copy as-is.
+#
+# On merged security bot PRs: stamps the reviewer's decision into the
+# .security/ triage docs on the base branch ([skip ci]).
+name: Security — finalize review
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  finalize:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-security-finalize-review.yml@main
+    with:
+      janus-ref: main
+    secrets: inherit

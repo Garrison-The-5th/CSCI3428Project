@@ -1,0 +1,31 @@
+# TEMPLATE — edits required: 1 (sonar-project-key, same value as janus.yml).
+#
+# Sonar — main branch scan. Keeps the project's "New Code" baseline fresh so
+# PR-mode scans (Janus Gate 7) diff correctly. NON-GATING.
+name: Sonar — main branch scan
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'docs/**'
+  schedule:
+    - cron: '0 6 * * 1'   # Monday 06:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: sonar-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-sonar-main.yml@main
+    with:
+      sonar-project-key: learning-app  # EDIT: same value as in janus.yml
+      janus-ref: main
+    secrets: inherit
