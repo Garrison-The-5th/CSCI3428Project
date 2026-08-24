@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-08-24-pr32766589258-xss-lesson-view-not-affected.sast.json",
+  "version": 1,
+  "timestamp": "2026-08-24T19:19:46.492Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "32766589258"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:ad1daf9f0a2c",
+        "location": {
+          "file": "frontend/src/components/common/element-view.tsx",
+          "start_line": 293,
+          "end_line": 293,
+          "commit_sha": "35bc3479f0a4a8e0c2b3674f63ebd3d9f993df7b"
+        }
+      },
+      "status": "not_affected",
+      "justification": "inline_mitigations_already_exist",
+      "impact_statement": "The renderer at element-view.tsx:293 injects element.textContent via dangerouslySetInnerHTML for TEXT lesson elements. That field is written only through CurriculumService.createElement / updateElement (backend/src/services/curriculum-service/curriculum-service.ts:1107,1187), both of which pass textContent through sanitizeRichText — a sanitize-html allowlist (backend/src/config/rich-text.ts:50-85) that drops script/iframe/event-handlers/javascript: URLs and restricts style to a fixed property set. No other write path reaches the textContent column (grep of backend/src for CurriculumGateway.createElement/updateElement returns only the service). Sanitization has dedicated unit tests in backend/tests/unit/rich-text.test.ts.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2026-11-22",
+      "references": [
+        "https://semgrep.dev/r?q=typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml"
+      ]
+    }
+  ]
+}
