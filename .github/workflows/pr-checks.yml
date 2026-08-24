@@ -65,7 +65,14 @@ jobs:
 
       # Prisma's generated client is a compile-time dependency of the backend,
       # so it has to exist before tsc runs. No database is needed to generate it.
+      # `prisma generate` reads the schema and writes a client; it never opens a
+      # connection. The config resolves `DATABASE_URL` eagerly all the same, so a
+      # job with no database still has to name one. This placeholder is
+      # deliberately unreachable — if anything here ever did try to connect, it
+      # should fail loudly rather than find a real server.
       - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused?schema=public
         run: npm run prisma:generate --prefix backend
 
       - name: Backend types (src, scripts and prisma)
@@ -101,6 +108,13 @@ jobs:
       # tests that exercise it supply their own signed tokens.
       PUBLICKEY: ${{ secrets.TEST_PUBLICKEY || 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtest' }}
       LOG_LEVEL: silent
+      # The suite exhausts Node's default heap on a runner and dies with exit
+      # 134 part way through, which reads as a test failure but is not one. This
+      # is a ceiling rather than an allocation, so raising it costs nothing when
+      # the suite behaves. It is a bound, not a cure: the run also warns that a
+      # worker fails to exit gracefully, which is a real handle leak worth
+      # chasing separately.
+      NODE_OPTIONS: --max-old-space-size=4096
 
     steps:
       - uses: actions/checkout@v4
@@ -166,7 +180,14 @@ jobs:
           npm ci --no-audit --no-fund --prefix backend
           npm ci --no-audit --no-fund --prefix frontend
 
+      # `prisma generate` reads the schema and writes a client; it never opens a
+      # connection. The config resolves `DATABASE_URL` eagerly all the same, so a
+      # job with no database still has to name one. This placeholder is
+      # deliberately unreachable — if anything here ever did try to connect, it
+      # should fail loudly rather than find a real server.
       - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused?schema=public
         run: npm run prisma:generate --prefix backend
 
       - name: Build backend
