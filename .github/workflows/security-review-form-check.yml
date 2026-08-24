@@ -1,0 +1,23 @@
+# TEMPLATE — edits required: NONE. Copy as-is.
+# Do NOT rename the job id `form-check:` — branch protection matches the
+# check context "form-check / Verdict — security review form" built from it.
+#
+# Validates the review form in security bot PR descriptions; passes
+# trivially on normal PRs.
+name: Verdict — security review form
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  form-check:                     # do not rename (required-check context)
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-security-form-check.yml@main
+    with:
+      janus-ref: main
+    secrets: inherit

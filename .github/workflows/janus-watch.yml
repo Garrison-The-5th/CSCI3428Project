@@ -1,0 +1,27 @@
+# TEMPLATE — edits required: NONE. Copy as-is.
+# To put this repo on the nightly schedule, add it to the matrix in
+# k8s-gitops/.github/workflows/janus-watch-scheduler.yml — not here.
+#
+# Janus (Watch) — nightly Trivy-only CVE-drift watch. Dispatch-only;
+# the cron lives centrally in the scheduler. NON-GATING.
+name: Janus (Watch)
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  # Don't cancel an in-flight watch scan; serialize overlapping runs.
+  group: janus-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  janus-watch:
+    uses: TTGteams/k8s-gitops/.github/workflows/reusable-janus-watch.yml@main
+    with:
+      base-branch: main
+      janus-ref: main
+    secrets: inherit
