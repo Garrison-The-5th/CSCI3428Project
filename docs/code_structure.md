@@ -124,7 +124,7 @@ backend/
     │   ├── dashboardService/  # progress figures, shared by learners and guests
     │   ├── assignmentService/ # tokens, guest sessions, scoping
     │   ├── authService/       # getOrCreateUser (keyed on email)
-    │   ├── emailService/      # Gmail API broadcast (needs GOOGLE_GMAIL_API_CONFIG)
+    │   ├── emailService/      # SMTP email via app password (needs EMAIL_USER + EMAIL_APP_PASSWORD)
     │   └── tableService/
     │
     └── gateways/              # all Prisma access lives here

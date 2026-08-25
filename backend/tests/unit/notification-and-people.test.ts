@@ -30,8 +30,9 @@ const auth = AuthService as jest.Mocked<typeof AuthService>;
 const publications = PublicationService as jest.Mocked<typeof PublicationService>;
 
 // No mail credentials in a unit run, so `deliver` takes the "log it" path and
-// never reaches Gmail. That is the behaviour under test for most of these.
-delete process.env.GOOGLE_GMAIL_API_CONFIG;
+// never opens an SMTP connection. That is the behaviour under test for most of these.
+delete process.env.EMAIL_USER;
+delete process.env.EMAIL_APP_PASSWORD;
 
 describe('EmailService — assignment messages', () => {
   it('never throws when there are no credentials', async () => {
