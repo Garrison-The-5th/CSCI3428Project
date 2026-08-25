@@ -63,7 +63,8 @@ services:
       # Where links in outgoing email should point.
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
       # Optional: leave unset and assignment emails are logged instead of sent.
-      GOOGLE_GMAIL_API_CONFIG: ${GOOGLE_GMAIL_API_CONFIG:-}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_APP_PASSWORD: ${EMAIL_APP_PASSWORD:-}
 
 
   frontend:

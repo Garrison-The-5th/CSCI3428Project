@@ -135,7 +135,7 @@ Still short of 80%, in rough order of how much each is worth:
 | `services/curriculum-service/` | ~46% | The numbering grid and renumbering pass — the most intricate logic in the codebase |
 | `services/quiz-service/` | ~39% | Grading is covered; question CRUD and the recycle-bin paths are not |
 | `services/assignment-service/` | ~24% | Token issuing and throttling covered; the guest-session catalogue is not |
-| `services/email-service/` | ~49% | Composition covered; the Gmail transport is not |
+| `services/email-service/` | ~49% | Composition covered; the SMTP transport is not |
 | `services/privacy-service/` | 0% | New in this pass; needs integration tests against a real database |
 | `services/auth-service/` | ~6% | Thin, but `getOrCreateUser` is on every authenticated request |
 | `services/table-service/` | 0% | Boilerplate demo data; lowest value |

@@ -1,19 +1,18 @@
 /**
  * File: email-service.ts
- * Description: Outbound email through the Gmail API, with redaction and safe headers.
+ * Description: Outbound email over SMTP (app-password auth), with redaction and safe headers.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-08-24
  */
-import { google } from 'googleapis';
+import nodemailer from 'nodemailer';
 
 import { logger } from '@/config/logger';
 
-type GmailApiConfig = {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
+type SmtpConfig = {
+  /** The mailbox everything is sent as, e.g. noreply@ttgteams.com. */
   senderEmail: string;
+  appPassword: string;
 };
 
 type BroadcastEmailRequest = {
@@ -35,13 +34,13 @@ type Delivery = {
 };
 
 /**
- * Who the learner should see the message as coming from.
+ * Who the learner should be answering: the person who set the work, not a
+ * shared mailbox.
  *
- * The person who set the work, not a shared mailbox: a reply then lands with
- * whoever can actually answer it. Gmail only honours a From address the
- * authenticated account is allowed to send as, so Reply-To is set to the same
- * address — that part always works, and a reply reaches the right person even
- * when the From falls back to the configured sender.
+ * The From address is always the configured no-reply mailbox — sending as an
+ * arbitrary user over SMTP would fail SPF/DKIM alignment and land in spam — so
+ * this person appears as the From display name and as Reply-To, and a reply
+ * still reaches whoever can actually answer it.
  */
 type Sender = {
   email: string;
@@ -82,7 +81,7 @@ type NewContentEmailRequest = {
 
 /** True when there is enough configuration to actually send anything. */
 function isConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_GMAIL_API_CONFIG);
+  return Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD);
 }
 
 /**
@@ -115,30 +114,35 @@ function appBaseUrl(): string {
   return (process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/+$/, '');
 }
 
-function parseConfig(): GmailApiConfig {
-  const raw = process.env.GOOGLE_GMAIL_API_CONFIG;
+function parseConfig(): SmtpConfig {
+  const senderEmail = process.env.EMAIL_USER;
+  const appPassword = process.env.EMAIL_APP_PASSWORD;
 
-  if (!raw) {
+  if (!senderEmail || !appPassword) {
     throw new Error(
-      'GOOGLE_GMAIL_API_CONFIG is not set. Add the Google Gmail API credentials JSON to ' +
-        'enable sending email.',
+      'EMAIL_USER and EMAIL_APP_PASSWORD must both be set to enable sending email.',
     );
   }
 
-  const parsed = JSON.parse(raw) as Partial<GmailApiConfig>;
+  return { senderEmail, appPassword };
+}
 
-  if (!parsed.clientId || !parsed.clientSecret || !parsed.refreshToken || !parsed.senderEmail) {
-    throw new Error(
-      'GOOGLE_GMAIL_API_CONFIG must contain clientId, clientSecret, refreshToken, and senderEmail.',
-    );
-  }
-
-  return {
-    clientId: parsed.clientId,
-    clientSecret: parsed.clientSecret,
-    refreshToken: parsed.refreshToken,
-    senderEmail: parsed.senderEmail,
-  };
+/**
+ * One SMTP connection pool per process. Gmail app passwords authenticate a
+ * plain SMTP session; the pool keeps a broadcast from opening a connection per
+ * recipient.
+ */
+function createTransport(config: SmtpConfig) {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT) || 465,
+    secure: (Number(process.env.SMTP_PORT) || 465) === 465,
+    pool: true,
+    auth: {
+      user: config.senderEmail,
+      pass: config.appPassword,
+    },
+  });
 }
 
 /**
@@ -156,37 +160,6 @@ function headerSafe(value: string): string {
 function addressHeader(email: string, name?: string | null): string {
   const safeName = name ? headerSafe(name) : '';
   return safeName ? `"${safeName}" <${headerSafe(email)}>` : headerSafe(email);
-}
-
-function encodeEmail({
-  from,
-  to,
-  subject,
-  body,
-  replyTo,
-}: {
-  from: string;
-  to: string;
-  subject: string;
-  body: string;
-  replyTo?: string;
-}) {
-  const lines = [
-    `From: ${from}`,
-    `To: ${to}`,
-    ...(replyTo ? [`Reply-To: ${replyTo}`] : []),
-    `Subject: ${headerSafe(subject)}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    '',
-    body,
-  ];
-
-  return Buffer.from(lines.join('\r\n'))
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
 }
 
 /** "— sent by Ada Lovelace (ada@example.com)", when we know who assigned it. */
@@ -359,7 +332,7 @@ export default class EmailService {
           subject,
           body: redactTokens(body),
         },
-        'email not sent: GOOGLE_GMAIL_API_CONFIG is unset',
+        'email not sent: EMAIL_USER / EMAIL_APP_PASSWORD are unset',
       );
       return { sent: false, reason: 'Email is not configured, so nothing was sent.' };
     }
@@ -375,13 +348,13 @@ export default class EmailService {
   }
 
   /**
-   * One message through the Gmail API. Throws if it does not go out.
+   * One message over SMTP. Throws if it does not go out.
    *
-   * `sender` is the person the learner should be answering. Gmail will only put
-   * their address in From if the authenticated account is allowed to send as it
-   * (a verified send-as alias or a delegated mailbox) and silently substitutes
-   * the account's own otherwise — so Reply-To carries the same address, and that
-   * one is always honoured.
+   * `sender` is the person the learner should be answering. The From address is
+   * always the authenticated no-reply mailbox — SPF and DKIM only align for the
+   * account the app password belongs to — so the sender appears as the From
+   * display name, and Reply-To carries their real address, which is always
+   * honoured.
    */
   static async send({
     to,
@@ -395,25 +368,21 @@ export default class EmailService {
     sender?: Sender | null;
   }) {
     const config = parseConfig();
-    const oauth2Client = new google.auth.OAuth2(config.clientId, config.clientSecret);
-    oauth2Client.setCredentials({ refresh_token: config.refreshToken });
+    const transport = createTransport(config);
 
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: {
-        raw: encodeEmail({
-          from: sender?.email
-            ? addressHeader(sender.email, sender.name)
-            : addressHeader(config.senderEmail),
-          to,
-          subject,
-          body,
-          ...(sender?.email ? { replyTo: addressHeader(sender.email, sender.name) } : {}),
-        }),
-      },
-    });
+    try {
+      await transport.sendMail({
+        from: sender?.name
+          ? addressHeader(config.senderEmail, sender.name)
+          : addressHeader(config.senderEmail),
+        to: headerSafe(to),
+        subject: headerSafe(subject),
+        text: body,
+        ...(sender?.email ? { replyTo: addressHeader(sender.email, sender.name) } : {}),
+      });
+    } finally {
+      transport.close();
+    }
   }
 
   static async sendBroadcastEmail({
@@ -422,34 +391,20 @@ export default class EmailService {
     message,
   }: BroadcastEmailRequest): Promise<BroadcastEmailResult> {
     const config = parseConfig();
-    const oauth2Client = new google.auth.OAuth2(config.clientId, config.clientSecret);
-
-    oauth2Client.setCredentials({
-      refresh_token: config.refreshToken,
-    });
-
-    const gmail = google.gmail({
-      version: 'v1',
-      auth: oauth2Client,
-    });
+    const transport = createTransport(config);
 
     const sendResults = await Promise.allSettled(
       recipients.map(async (recipient) => {
-        const raw = encodeEmail({
-          from: config.senderEmail,
-          to: recipient.email,
-          subject,
-          body: message,
-        });
-
-        await gmail.users.messages.send({
-          userId: 'me',
-          requestBody: {
-            raw,
-          },
+        await transport.sendMail({
+          from: addressHeader(config.senderEmail),
+          to: headerSafe(recipient.email),
+          subject: headerSafe(subject),
+          text: message,
         });
       }),
     );
+
+    transport.close();
 
     const sentCount = sendResults.filter((result) => result.status === 'fulfilled').length;
 

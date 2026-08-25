@@ -222,7 +222,7 @@ const UsersList = () => {
               <div>
                 <CardTitle id="admin-mail-title">Email subscribed users</CardTitle>
                 <p className="admin-mail-subtitle">
-                  This will be sent through the configured Google/Gmail API connection.
+                  This will be sent from the configured no-reply mailbox.
                 </p>
               </div>
               <Button
