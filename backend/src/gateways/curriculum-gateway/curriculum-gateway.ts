@@ -96,13 +96,53 @@ export default class CurriculumGateway {
     });
   }
 
-  /** Author view: everything that has not been deleted, published or not. */
-  static getAllCourses() {
+  /**
+   * The one rule for who may reach a course, as a `where` clause.
+   *
+   * Two ways in: you made it, or you were named on it. Nothing else — holding
+   * `admin` in Keycloak says you may author, not that you may author *this*.
+   *
+   * `includeUnowned` is the single exception, and it is for history rather than
+   * for roles. Courses created before ownership was recorded, and not
+   * attributable by the migration's backfill, carry a null `createdById`. They
+   * belong to nobody, so somebody has to be able to reach them: global authors
+   * do, and the first person to be named on one takes it out of that pool for
+   * good.
+   */
+  static accessibleCourses(userId: number, includeUnowned: boolean): Prisma.CourseWhereInput {
+    return {
+      OR: [
+        { createdById: userId },
+        { contributors: { some: { id: userId } } },
+        ...(includeUnowned ? [{ createdById: null }] : []),
+      ],
+    };
+  }
+
+  /**
+   * Author view: everything this person may edit that has not been deleted,
+   * published or not.
+   */
+  static getCoursesForAuthor(userId: number, includeUnowned: boolean) {
     return prisma.course.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...CurriculumGateway.accessibleCourses(userId, includeUnowned) },
       orderBy: { createdAt: 'asc' },
       include: { modules: moduleHeadings, sections: sectionTree(false), instructors: true },
     });
+  }
+
+  /**
+   * Ids of every course this person may edit, deleted ones included.
+   *
+   * Deleted ones are deliberately in: this is what scopes the recycle bin, and
+   * everything in the bin is by definition soft deleted.
+   */
+  static async getAccessibleCourseIds(userId: number, includeUnowned: boolean) {
+    const courses = await prisma.course.findMany({
+      where: CurriculumGateway.accessibleCourses(userId, includeUnowned),
+      select: { id: true },
+    });
+    return courses.map((course) => course.id);
   }
 
   static getCourseById(id: string, live = false) {
@@ -112,9 +152,14 @@ export default class CurriculumGateway {
     });
   }
 
-  static createCourse(title: string, kind: CourseKind = CourseKind.LESSON) {
+  /** `createdById` is the owner, and the only thing that makes the course theirs. */
+  static createCourse(
+    title: string,
+    kind: CourseKind = CourseKind.LESSON,
+    createdById: number | null = null,
+  ) {
     return prisma.course.create({
-      data: { title, kind },
+      data: { title, kind, createdById },
       include: { modules: moduleHeadings, sections: sectionTree(false) },
     });
   }
@@ -150,15 +195,6 @@ export default class CurriculumGateway {
 
   // ---- Per-course contributors ----
 
-  /** Courses this person may edit because they were named on them. */
-  static getEditableCourses(userId: number) {
-    return prisma.course.findMany({
-      where: { deletedAt: null, contributors: { some: { id: userId } } },
-      orderBy: { createdAt: 'asc' },
-      include: { modules: moduleHeadings, sections: sectionTree(false), instructors: true },
-    });
-  }
-
   static getContributors(courseId: string) {
     return prisma.course
       .findUnique({ where: { id: courseId } })
@@ -173,10 +209,16 @@ export default class CurriculumGateway {
     });
   }
 
-  /** True when this person is named on the course. */
-  static async isContributor(userId: number, courseId: string) {
+  /**
+   * True when this person may edit this one course.
+   *
+   * Not filtered on `deletedAt`: restoring something from the recycle bin and
+   * emptying it are both guarded through here, and both name content that is
+   * soft deleted by definition.
+   */
+  static async canEditCourse(userId: number, courseId: string, includeUnowned: boolean) {
     const match = await prisma.course.findFirst({
-      where: { id: courseId, contributors: { some: { id: userId } } },
+      where: { id: courseId, ...CurriculumGateway.accessibleCourses(userId, includeUnowned) },
       select: { id: true },
     });
     return match !== null;
@@ -290,9 +332,17 @@ export default class CurriculumGateway {
     return prisma.course.update({ where: { id }, data: { deletedAt: null } });
   }
 
-  static getDeletedCourses() {
+  /**
+   * The recycle bin, scoped to the courses this person may edit.
+   *
+   * Every bin query takes the same `courseIds` list rather than working it out
+   * for itself, so the whole bin is answered from one access decision — and a
+   * course, a module and a section deleted together can never disagree about
+   * whether their owner may see them.
+   */
+  static getDeletedCourses(courseIds: string[]) {
     return prisma.course.findMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, id: { in: courseIds } },
       orderBy: { deletedAt: 'desc' },
       select: { id: true, title: true, deletedAt: true },
     });
@@ -308,24 +358,27 @@ export default class CurriculumGateway {
     return prisma.course.delete({ where: { id } });
   }
 
-  /** Ids of every course still in play, for passes that touch the whole catalogue. */
-  static async getLiveCourseIds() {
+  /**
+   * Ids of the courses still in play out of the ones given, for passes that have
+   * to walk everything they just touched.
+   */
+  static async getLiveCourseIds(courseIds: string[]) {
     const courses = await prisma.course.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, id: { in: courseIds } },
       select: { id: true },
     });
     return courses.map((course) => course.id);
   }
 
-  static restoreAllCourses() {
+  static restoreAllCourses(courseIds: string[]) {
     return prisma.course.updateMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, id: { in: courseIds } },
       data: { deletedAt: null },
     });
   }
 
-  static purgeCourses() {
-    return prisma.course.deleteMany({ where: { deletedAt: { not: null } } });
+  static purgeCourses(courseIds: string[]) {
+    return prisma.course.deleteMany({ where: { deletedAt: { not: null }, id: { in: courseIds } } });
   }
 
   // ---- Expiring the recycle bin ----
@@ -540,9 +593,9 @@ export default class CurriculumGateway {
    * and the number it used to hold now belongs to whatever closed the gap. Naming
    * it in the bin would point at the wrong module.
    */
-  static getDeletedModules() {
+  static getDeletedModules(courseIds: string[]) {
     return prisma.module.findMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
       orderBy: { deletedAt: 'desc' },
       select: {
         id: true,
@@ -553,15 +606,17 @@ export default class CurriculumGateway {
     });
   }
 
-  static restoreAllModules() {
+  static restoreAllModules(courseIds: string[]) {
     return prisma.module.updateMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
       data: { deletedAt: null },
     });
   }
 
-  static purgeModules() {
-    return prisma.module.deleteMany({ where: { deletedAt: { not: null } } });
+  static purgeModules(courseIds: string[]) {
+    return prisma.module.deleteMany({
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
+    });
   }
 
   /**
@@ -663,21 +718,23 @@ export default class CurriculumGateway {
     return prisma.section.delete({ where: { id } });
   }
 
-  static restoreAllSections() {
+  static restoreAllSections(courseIds: string[]) {
     return prisma.section.updateMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
       data: { deletedAt: null },
     });
   }
 
-  static purgeSections() {
-    return prisma.section.deleteMany({ where: { deletedAt: { not: null } } });
+  static purgeSections(courseIds: string[]) {
+    return prisma.section.deleteMany({
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
+    });
   }
 
   /** No `number`, for the same reason as modules — see getDeletedModules. */
-  static getDeletedSections() {
+  static getDeletedSections(courseIds: string[]) {
     return prisma.section.findMany({
-      where: { deletedAt: { not: null } },
+      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
       orderBy: { deletedAt: 'desc' },
       select: {
         id: true,

@@ -373,6 +373,8 @@ describe('requireCourseEditor — the unpublished-changes marker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     curriculum.touchDraft.mockResolvedValue({} as never);
+    // These tests are about the marker, not the access rule; let everyone past.
+    curriculum.canEditCourse.mockResolvedValue(true);
   });
 
   /** Wait a tick: the marker fires and forgets, so it lands after the emit. */
@@ -441,5 +443,82 @@ describe('requireCourseEditor — the unpublished-changes marker', () => {
     await settle();
 
     expect(curriculum.touchDraft).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Who may reach one particular course.
+ *
+ * The bug this exists to stop: authoring rights followed from the Keycloak role
+ * alone, so holding `admin` opened every other admin's lessons and quizzes. The
+ * role now says a person may write content, and the course says whose it is.
+ */
+describe('requireCourseEditor — whose course it is', () => {
+  // GET throughout: opening somebody else's lesson is the thing that has to be
+  // refused, and a read skips the draft marker, so the plain response double is
+  // enough here.
+  const admin = {
+    auth: { roles: ['admin'], email: 'a@b.c', name: 'A' },
+    user: { id: 1, email: 'a@b.c' },
+    method: 'GET',
+  };
+
+  const resolve = async () => 'course-1';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    curriculum.touchDraft.mockResolvedValue({} as never);
+  });
+
+  it('refuses an admin who neither made the course nor was named on it', async () => {
+    curriculum.canEditCourse.mockResolvedValue(false);
+    const res = responseDouble();
+    const next = jest.fn() as NextFunction;
+
+    await requireCourseEditor(resolve)(requestDouble(admin) as never, res, next);
+
+    expect(res.statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('admits whoever the course says may edit it', async () => {
+    curriculum.canEditCourse.mockResolvedValue(true);
+    const next = jest.fn() as NextFunction;
+
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...admin, auth: { roles: [], email: 'c@d.e' } }) as never,
+      responseDouble(),
+      next,
+    );
+
+    expect(next).toHaveBeenCalled();
+  });
+
+  /**
+   * The one thing the role still buys: courses that predate ownership being
+   * recorded carry no creator, so somebody has to be able to reach them.
+   */
+  it('passes the global-author flag through, so unowned courses stay reachable', async () => {
+    curriculum.canEditCourse.mockResolvedValue(true);
+
+    await requireCourseEditor(resolve)(
+      requestDouble(admin) as never,
+      responseDouble(),
+      jest.fn() as NextFunction,
+    );
+
+    expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', true);
+  });
+
+  it('does not extend that flag to someone without an authoring role', async () => {
+    curriculum.canEditCourse.mockResolvedValue(true);
+
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...admin, auth: { roles: [], email: 'c@d.e' } }) as never,
+      responseDouble(),
+      jest.fn() as NextFunction,
+    );
+
+    expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', false);
   });
 });

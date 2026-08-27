@@ -248,7 +248,7 @@ async function main() {
   );
 
   console.log('\nand the bin reports how long it keeps things');
-  const bin = await CurriculumService.getDeletedItems();
+  const bin = await CurriculumService.getDeletedItems(user.id, true);
   check('retention published', bin.retentionDays, 14);
 
   // ---- Clean up ----

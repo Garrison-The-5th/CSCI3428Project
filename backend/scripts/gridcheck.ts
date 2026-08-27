@@ -156,7 +156,7 @@ async function main() {
   });
 
   console.log('\na section cannot be restored while its module is still binned');
-  const charlie = (await CurriculumGateway.getDeletedSections()).find(
+  const charlie = (await CurriculumGateway.getDeletedSections([courseId])).find(
     (m) => m.title === 'Charlie',
   )!;
   try {
@@ -171,7 +171,9 @@ async function main() {
   }
 
   console.log('\nrestoring a module brings it back at the end, renumbered');
-  const gone = (await CurriculumGateway.getDeletedModules()).find((s) => s.title === 'Module 1')!;
+  const gone = (await CurriculumGateway.getDeletedModules([courseId])).find(
+    (s) => s.title === 'Module 1',
+  )!;
   await CurriculumService.restoreModule(gone.id);
   check(
     'modules',

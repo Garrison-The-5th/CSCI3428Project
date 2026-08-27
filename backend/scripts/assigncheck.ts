@@ -36,9 +36,9 @@ function check(label: string, actual: unknown, expected: unknown) {
   }
 }
 
-/** A published course with one section, ready to assign. */
-async function makeCourse(title: string) {
-  const course = await CurriculumService.createCourse(title);
+/** A published course with one section, ready to assign, owned by `authorId`. */
+async function makeCourse(title: string, authorId: number) {
+  const course = await CurriculumService.createCourse(title, undefined, authorId);
   const [module] = await CurriculumGateway.getModules(course!.id);
   await CurriculumService.createSection(course!.id, { moduleId: module.id, title: 'Only' });
   // Going live takes a snapshot, so this is the publish path rather than a
@@ -50,10 +50,15 @@ async function makeCourse(title: string) {
 async function main() {
   const email = 'assigncheck@example.test';
   const other = 'assigncheck-other@example.test';
+  const authorEmail = 'assigncheck-author@example.test';
 
-  const alpha = await makeCourse('ASSIGN TEST Alpha — safe to delete');
-  const bravo = await makeCourse('ASSIGN TEST Bravo — safe to delete');
-  const charlie = await makeCourse('ASSIGN TEST Charlie — safe to delete');
+  // Courses belong to whoever made them, so the author view below is asked for
+  // as a person rather than as a role.
+  const author = await AuthService.getOrCreateUser(authorEmail);
+
+  const alpha = await makeCourse('ASSIGN TEST Alpha — safe to delete', author.id);
+  const bravo = await makeCourse('ASSIGN TEST Bravo — safe to delete', author.id);
+  const charlie = await makeCourse('ASSIGN TEST Charlie — safe to delete', author.id);
 
   console.log('three courses to one person means three separate links');
   // Annotated rather than left to evolve: `assign` returns a union (the
@@ -185,8 +190,19 @@ async function main() {
 
   // The same tree still carries answers for an author, or quizzes could not be
   // edited — which is exactly why the learner path needs its own redaction.
-  const authorView = await CurriculumService.getAllCourses();
+  const authorView = await CurriculumService.getCoursesForAuthor(author.id, false);
   check('author view keeps them', countAnswers(authorView) > 0, true);
+
+  // And it is their view, not everyone's: somebody else holding the same role
+  // is offered none of it.
+  const stranger = await AuthService.getOrCreateUser(other);
+  check(
+    'another author sees none of them',
+    (await CurriculumService.getCoursesForAuthor(stranger.id, false))
+      .map((course) => course.id)
+      .filter((id) => [alpha, bravo, charlie].includes(id)),
+    [],
+  );
 
   console.log('\na course you are not enrolled on reads as not found');
   check('not enrolled', await CurriculumService.getCourseForLearner(other, bravo), null);
@@ -220,7 +236,7 @@ async function main() {
   for (const courseId of [alpha, bravo, charlie]) {
     await prisma.course.delete({ where: { id: courseId } });
   }
-  await prisma.user.deleteMany({ where: { email: { in: [email, other] } } });
+  await prisma.user.deleteMany({ where: { email: { in: [email, other, authorEmail] } } });
   console.log('\ncleaned up.');
 
   console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`);
