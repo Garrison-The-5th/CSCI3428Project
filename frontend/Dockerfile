@@ -48,4 +48,4 @@ COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 ENTRYPOINT ["nginx"]
 CMD ["-g", "daemon off;"]
 
-EXPOSE 5173
+EXPOSE 80
