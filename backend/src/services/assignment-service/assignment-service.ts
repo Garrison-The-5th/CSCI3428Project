@@ -166,7 +166,7 @@ export default class AssignmentService {
       expiresAt?: string | null;
     },
     /** The signed-in author. The learner hears from them, not a shared mailbox. */
-    assigner?: { id: number; email: string; name: string | null } | null,
+    assigner?: { id: number } | null,
   ) {
     const email = normaliseEmail(data.email);
 
@@ -255,7 +255,6 @@ export default class AssignmentService {
       kind: courseId ? 'course' : 'quiz',
       token: assignment.token,
       dueDate: assignment.dueDate,
-      sender: assigner ?? null,
     });
 
     if (delivery.sent) {
@@ -350,10 +349,7 @@ export default class AssignmentService {
    * rather than as an error, because the caller's other work (flipping the
    * switch) has already succeeded and must stand.
    */
-  static async resend(
-    id: string,
-    assigner?: { id: number; email: string; name: string | null } | null,
-  ) {
+  static async resend(id: string) {
     const assignment = await AssignmentGateway.findById(id);
     if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);
 
@@ -373,10 +369,6 @@ export default class AssignmentService {
       title = quiz.title;
     }
 
-    // Whoever originally set the work stays the sender when we know them, so a
-    // reminder does not appear to come from a different person than the original.
-    const sender = assignment.assignedBy ?? assigner ?? null;
-
     const delivery = await EmailService.sendAssignmentEmail({
       to: assignment.email,
       type: assignment.type,
@@ -384,7 +376,6 @@ export default class AssignmentService {
       kind: assignment.courseId ? 'course' : 'quiz',
       token: assignment.token,
       dueDate: assignment.dueDate,
-      sender,
       resend: true,
     });
 
@@ -907,37 +898,47 @@ export default class AssignmentService {
    * and how many have finished. Drives the Assigned learning cards on the admin
    * dashboard, which need the totals without any of the course content.
    */
-  static async listAssignedCourses() {
-    const assigned = await AssignmentGateway.listAssignedCourseIds();
+  static async listAssignedCourses(userId: number, isGlobalAuthor: boolean) {
+    const [assigned, reachable] = await Promise.all([
+      AssignmentGateway.listAssignedCourseIds(),
+      CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor),
+    ]);
+
+    // A dashboard card carries a course's title, cover and roster totals, so it
+    // is scoped by the same rule as the course itself: someone else's programme
+    // is not summarised on your dashboard.
+    const mine = new Set(reachable);
 
     const cards = await Promise.all(
-      assigned.map(async ({ courseId, count }) => {
-        const course = await CurriculumGateway.getCourseById(courseId);
-        if (!course) return null;
+      assigned
+        .filter(({ courseId }) => mine.has(courseId))
+        .map(async ({ courseId, count }) => {
+          const course = await CurriculumGateway.getCourseById(courseId);
+          if (!course) return null;
 
-        const assignments = await AssignmentService.listWithProgress({ courseId });
-        const completed = assignments.filter(
-          (entry) => entry.totalSections > 0 && entry.completedSections >= entry.totalSections,
-        ).length;
-        const overdue = assignments.filter(
-          (entry) =>
-            entry.dueDate !== null &&
-            entry.dueDate.getTime() < Date.now() &&
-            entry.completedSections < entry.totalSections,
-        ).length;
+          const assignments = await AssignmentService.listWithProgress({ courseId });
+          const completed = assignments.filter(
+            (entry) => entry.totalSections > 0 && entry.completedSections >= entry.totalSections,
+          ).length;
+          const overdue = assignments.filter(
+            (entry) =>
+              entry.dueDate !== null &&
+              entry.dueDate.getTime() < Date.now() &&
+              entry.completedSections < entry.totalSections,
+          ).length;
 
-        return {
-          courseId,
-          title: course.title,
-          imageData: course.imageData,
-          imageType: course.imageType,
-          published: course.published,
-          totalSections: course.sections.length,
-          assignedCount: count,
-          completedCount: completed,
-          overdueCount: overdue,
-        };
-      }),
+          return {
+            courseId,
+            title: course.title,
+            imageData: course.imageData,
+            imageType: course.imageType,
+            published: course.published,
+            totalSections: course.sections.length,
+            assignedCount: count,
+            completedCount: completed,
+            overdueCount: overdue,
+          };
+        }),
     );
 
     return cards.filter((card): card is NonNullable<typeof card> => card !== null);

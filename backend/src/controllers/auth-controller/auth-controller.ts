@@ -126,7 +126,12 @@ export default class AuthController {
     });
 
     return res.send({
-      message: 'Email sent to subscribed users',
+      // The mailbox can be unconfigured or unreachable without that being this
+      // request's fault, so the message reports what actually happened rather
+      // than claiming a send that did not occur.
+      message:
+        result.reason ??
+        `Email sent to ${result.sentCount} of ${result.recipientCount} subscribed users`,
       result,
     });
   }

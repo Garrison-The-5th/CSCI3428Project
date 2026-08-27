@@ -11,7 +11,16 @@ import {
   authenticateAndAttachUser,
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
-import { requireAuthor } from '@/controllers/auth-controller/authorization-middleware';
+import {
+  AUTHOR_ROLES,
+  requireAuthor,
+} from '@/controllers/auth-controller/authorization-middleware';
+import {
+  fromAssignmentParam,
+  fromCourseOrQuizBody,
+  fromCourseOrQuizQuery,
+  requireCourseEditor,
+} from '@/controllers/auth-controller/course-access-middleware';
 import { controller, del, get, post, put, use } from '@/controllers/decorators';
 import { fail } from '@/controllers/http-errors';
 import { rateLimit } from '@/controllers/middleware/rate-limit';
@@ -23,19 +32,24 @@ function param(req: Request, name: string): string {
   return String(req.params[name]);
 }
 
-/** The signed-in author, in the shape the mail layer wants for a From address. */
+/** Who to record as having set the work, for `assignedById`. */
 function assignerFrom(req: AuthenticatedRequest) {
   const user = req.user;
   if (!user) return null;
-  return { id: user.id, email: user.email, name: user.name ?? req.auth?.name ?? null };
+  return { id: user.id };
 }
 
 /** Author-facing management of assignment links. */
 @controller('/assignments')
 export default class AssignmentController {
-  /** Links for one course (?courseId=) or one quiz (?quizId=), with progress. */
+  /**
+   * Links for one course (?courseId=) or one quiz (?quizId=), with progress.
+   *
+   * Guarded by the course itself: a roster is the list of people reading that
+   * course, which belongs to whoever owns it and not to every admin.
+   */
   @get('/')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromCourseOrQuizQuery))
   @use(authenticateAndAttachUser)
   async list(req: Request, res: Response) {
     const courseId = typeof req.query.courseId === 'string' ? req.query.courseId : undefined;
@@ -57,8 +71,9 @@ export default class AssignmentController {
   @get('/courses')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async assignedCourses(req: Request, res: Response) {
-    const courses = await AssignmentService.listAssignedCourses();
+  async assignedCourses(req: AuthenticatedRequest, res: Response) {
+    const global = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+    const courses = await AssignmentService.listAssignedCourses(req.user!.id, global);
     return res.send({ courses });
   }
 
@@ -97,9 +112,17 @@ export default class AssignmentController {
     return res.send({ learner });
   }
 
+  /**
+   * Hands a course or quiz to somebody by email.
+   *
+   * Gated on the course being assigned rather than on the authoring role alone:
+   * sending out somebody else's lesson under your own name is a use of their
+   * content. `marksDraftEdited` is off — assigning changes nothing an author
+   * wrote, so it must not make the course claim it has unpublished changes.
+   */
   @post('/')
   @use(rateLimit({ max: 60, windowMs: 60 * 60 * 1000, subject: 'user', scope: 'assign' }))
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromCourseOrQuizBody, { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async assign(req: AuthenticatedRequest, res: Response) {
     try {
@@ -123,7 +146,7 @@ export default class AssignmentController {
 
   /** Moves one person's due date. Everyone else on the course keeps theirs. */
   @put('/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async update(req: Request, res: Response) {
     try {
@@ -140,7 +163,7 @@ export default class AssignmentController {
 
   /** Turns a link off without losing the record or the progress behind it. */
   @post('/:id/revoke')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async revoke(req: Request, res: Response) {
     try {
@@ -159,13 +182,13 @@ export default class AssignmentController {
    * disagreeing with the database.
    */
   @post('/:id/restore')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async restore(req: AuthenticatedRequest, res: Response) {
     try {
       const id = param(req as Request, 'id');
       await AssignmentService.restore(id);
-      const delivery = await AssignmentService.resend(id, assignerFrom(req));
+      const delivery = await AssignmentService.resend(id);
 
       return res.send({
         message: delivery.sent
@@ -180,14 +203,11 @@ export default class AssignmentController {
 
   /** Sends the same message again, on demand. */
   @post('/:id/resend')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async resend(req: AuthenticatedRequest, res: Response) {
     try {
-      const delivery = await AssignmentService.resend(
-        param(req as Request, 'id'),
-        assignerFrom(req),
-      );
+      const delivery = await AssignmentService.resend(param(req as Request, 'id'));
       return res.send({
         message: delivery.sent ? 'Email sent again' : (delivery.reason ?? 'Nothing was sent'),
         delivery,
@@ -198,7 +218,7 @@ export default class AssignmentController {
   }
 
   @del('/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async remove(req: Request, res: Response) {
     try {

@@ -12,7 +12,12 @@ import { clientAddress, configureTrustProxy, parseTrustProxy } from '@/config/cl
 import { safeForLog } from '@/config/logger';
 import { MODULE_COLORS, parseModuleColor } from '@/config/module-colors';
 import { maskSensitivePath } from '@/controllers/middleware/request-logger';
-import { redactEmail, redactTokens } from '@/services/email-service/email-service';
+import {
+  describeSmtpFailure,
+  normaliseAppPassword,
+  redactEmail,
+  redactTokens,
+} from '@/services/email-service/email-service';
 
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
 
@@ -68,6 +73,46 @@ describe('redactEmail', () => {
 
   it('does not leak anything from a malformed address', () => {
     expect(redactEmail('not-an-email')).toBe('[REDACTED]');
+  });
+});
+
+describe('normaliseAppPassword', () => {
+  /**
+   * Google shows an app password as four groups of four, and that is what gets
+   * pasted. Left as-is it fails auth exactly like a wrong password.
+   */
+  it('strips the spaces Google displays the password with', () => {
+    expect(normaliseAppPassword('abcd efgh ijkl mnop')).toBe('abcdefghijklmnop');
+  });
+
+  /** `echo` instead of `echo -n` when base64-encoding a Secret. */
+  it('strips a trailing newline picked up from a Kubernetes Secret', () => {
+    expect(normaliseAppPassword('abcdefghijklmnop\n')).toBe('abcdefghijklmnop');
+  });
+
+  it('leaves a clean password alone', () => {
+    expect(normaliseAppPassword('abcdefghijklmnop')).toBe('abcdefghijklmnop');
+  });
+});
+
+describe('describeSmtpFailure', () => {
+  it.each([
+    ['EAUTH', 'the mail account rejected the app password'],
+    ['ETIMEDOUT', 'the mail server could not be reached'],
+    ['ECONNECTION', 'the mail server could not be reached'],
+    ['EENVELOPE', 'the address was rejected'],
+  ])('turns %s into something an author can act on', (code, expected) => {
+    expect(describeSmtpFailure(Object.assign(new Error('535-5.7.8 banner'), { code }))).toBe(
+      expected,
+    );
+  });
+
+  it('falls back to the message when the code is unrecognised', () => {
+    expect(describeSmtpFailure(new Error('something else'))).toBe('something else');
+  });
+
+  it('handles a non-Error rejection', () => {
+    expect(describeSmtpFailure('nope')).toBe('unknown error');
   });
 });
 

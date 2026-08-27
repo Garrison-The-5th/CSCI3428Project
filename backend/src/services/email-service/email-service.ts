@@ -3,16 +3,37 @@
  * Description: Outbound email over SMTP (app-password auth), with redaction and safe headers.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-24
+ * Date: 2026-08-27
  */
 import nodemailer from 'nodemailer';
 
 import { logger } from '@/config/logger';
 
+/** Gmail's implicit-TLS submission port, and the host an app password belongs to. */
+const DEFAULT_SMTP_HOST = 'smtp.gmail.com';
+const DEFAULT_SMTP_PORT = 465;
+
+/**
+ * Fail fast rather than hang.
+ *
+ * Nodemailer's own defaults are minutes long, and a cluster that blocks outbound
+ * 465 does not refuse the connection — it black-holes it. Without these, the
+ * first assignment after a bad deploy holds an HTTP request open until the OS
+ * gives up on the TCP handshake, and the author watches a spinner instead of
+ * being told. Ten seconds is far longer than a working relay ever needs.
+ */
+const CONNECTION_TIMEOUT_MS = 10_000;
+const GREETING_TIMEOUT_MS = 10_000;
+const SOCKET_TIMEOUT_MS = 20_000;
+
 type SmtpConfig = {
   /** The mailbox everything is sent as, e.g. noreply@ttgteams.com. */
   senderEmail: string;
   appPassword: string;
+  host: string;
+  port: number;
+  /** Implicit TLS (465). Anything else negotiates STARTTLS instead. */
+  secure: boolean;
 };
 
 type BroadcastEmailRequest = {
@@ -24,6 +45,8 @@ type BroadcastEmailRequest = {
 type BroadcastEmailResult = {
   sentCount: number;
   recipientCount: number;
+  /** Set when nothing went out, so the caller can say why instead of "sent". */
+  reason?: string;
 };
 
 /** How an assignment email turned out, so the caller can record or report it. */
@@ -31,20 +54,6 @@ type Delivery = {
   sent: boolean;
   /** Why it did not go out — shown to the author, so keep it plain. */
   reason?: string;
-};
-
-/**
- * Who the learner should be answering: the person who set the work, not a
- * shared mailbox.
- *
- * The From address is always the configured no-reply mailbox — sending as an
- * arbitrary user over SMTP would fail SPF/DKIM alignment and land in spam — so
- * this person appears as the From display name and as Reply-To, and a reply
- * still reaches whoever can actually answer it.
- */
-type Sender = {
-  email: string;
-  name?: string | null;
 };
 
 type AssignmentEmailRequest = {
@@ -56,7 +65,6 @@ type AssignmentEmailRequest = {
   /** Only ever put in the message body for a LINK assignment. */
   token: string;
   dueDate: Date | null;
-  sender?: Sender | null;
   /** A repeat of a message already sent, so the subject says so. */
   resend?: boolean;
 };
@@ -76,12 +84,21 @@ type NewContentEmailRequest = {
   courseId: string;
   courseTitle: string;
   items: NewContentItem[];
-  sender?: Sender | null;
 };
 
-/** True when there is enough configuration to actually send anything. */
-function isConfigured(): boolean {
-  return Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD);
+/**
+ * Strips every space out of an app password.
+ *
+ * Google shows a 16-character app password as four groups of four — `abcd efgh
+ * ijkl mnop` — and that is what gets copied. SMTP auth with the spaces left in
+ * fails as a wrong password, which reads in the logs exactly like a revoked
+ * credential. A Kubernetes Secret adds the other half of this problem: a value
+ * base64-encoded with `echo` instead of `echo -n` carries a trailing newline
+ * that no amount of staring at the manifest reveals. Both are stripped here so
+ * a correct password entered in a reasonable way authenticates.
+ */
+export function normaliseAppPassword(raw: string): string {
+  return raw.replace(/\s+/g, '');
 }
 
 /**
@@ -107,41 +124,101 @@ export function redactEmail(email: string): string {
 }
 
 /**
+ * Turns an SMTP failure into something an author can act on.
+ *
+ * Nodemailer puts the useful part in `code`, and the raw `message` is a server
+ * banner — "535-5.7.8 Username and Password not accepted. Learn more at ..." —
+ * which is both meaningless to whoever clicked Assign and more about our
+ * infrastructure than they need. The raw error still goes to the log; this is
+ * only what reaches the screen.
+ */
+export function describeSmtpFailure(error: unknown): string {
+  const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+
+  switch (code) {
+    case 'EAUTH':
+      return 'the mail account rejected the app password';
+    case 'ETIMEDOUT':
+    case 'ECONNECTION':
+    case 'ESOCKET':
+    case 'EDNS':
+      return 'the mail server could not be reached';
+    case 'EENVELOPE':
+      return 'the address was rejected';
+    case 'EMESSAGE':
+      return 'the message itself was rejected';
+    default:
+      return error instanceof Error && error.message ? error.message : 'unknown error';
+  }
+}
+
+/**
  * Where the app lives, for building links that land on the right host. Falls
- * back to the dev frontend so a local run still produces a clickable URL.
+ * back to the dev frontend so a local run still produces a clickable URL —
+ * which is why `reportConfiguration` complains about it being unset in
+ * production, where that fallback silently mails everyone a dead link.
  */
 function appBaseUrl(): string {
   return (process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/+$/, '');
 }
 
-function parseConfig(): SmtpConfig {
-  const senderEmail = process.env.EMAIL_USER;
-  const appPassword = process.env.EMAIL_APP_PASSWORD;
+/**
+ * The SMTP settings, or null when this deployment has no mailbox wired up.
+ *
+ * Null rather than a throw: sending is a side effect of assigning, and an
+ * environment with no credentials is a normal state (every local checkout
+ * starts there), not an error. Every value is trimmed — a Secret is a string
+ * someone typed, and a stray newline in the host is as fatal as a wrong one.
+ */
+function readConfig(): SmtpConfig | null {
+  const senderEmail = process.env.EMAIL_USER?.trim();
+  const appPassword = process.env.EMAIL_APP_PASSWORD
+    ? normaliseAppPassword(process.env.EMAIL_APP_PASSWORD)
+    : '';
 
-  if (!senderEmail || !appPassword) {
-    throw new Error(
-      'EMAIL_USER and EMAIL_APP_PASSWORD must both be set to enable sending email.',
-    );
-  }
+  if (!senderEmail || !appPassword) return null;
 
-  return { senderEmail, appPassword };
+  const configuredPort = Number.parseInt(process.env.SMTP_PORT?.trim() ?? '', 10);
+  const port =
+    Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
+      ? configuredPort
+      : DEFAULT_SMTP_PORT;
+
+  return {
+    senderEmail,
+    appPassword,
+    host: process.env.SMTP_HOST?.trim() || DEFAULT_SMTP_HOST,
+    port,
+    secure: port === 465,
+  };
 }
 
 /**
- * One SMTP connection pool per process. Gmail app passwords authenticate a
- * plain SMTP session; the pool keeps a broadcast from opening a connection per
- * recipient.
+ * One SMTP connection pool. Gmail app passwords authenticate a plain SMTP
+ * session; the pool keeps a broadcast from opening a connection per recipient.
+ * Every caller closes it when done.
+ *
+ * On any port but 465 the session starts in the clear and upgrades, so
+ * `requireTLS` makes that upgrade mandatory: without it a relay that fails to
+ * offer STARTTLS would get the app password in plaintext.
  */
 function createTransport(config: SmtpConfig) {
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT) || 465,
-    secure: (Number(process.env.SMTP_PORT) || 465) === 465,
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    requireTLS: !config.secure,
     pool: true,
     auth: {
       user: config.senderEmail,
       pass: config.appPassword,
     },
+    // `as const` keeps this a SecureVersion rather than widening to string,
+    // which would drop createTransport onto its generic overload.
+    tls: { minVersion: 'TLSv1.2' as const },
+    connectionTimeout: CONNECTION_TIMEOUT_MS,
+    greetingTimeout: GREETING_TIMEOUT_MS,
+    socketTimeout: SOCKET_TIMEOUT_MS,
   });
 }
 
@@ -156,18 +233,6 @@ function headerSafe(value: string): string {
     .trim();
 }
 
-/** `"Ada Lovelace" <ada@example.com>`, or the bare address when there is no name. */
-function addressHeader(email: string, name?: string | null): string {
-  const safeName = name ? headerSafe(name) : '';
-  return safeName ? `"${safeName}" <${headerSafe(email)}>` : headerSafe(email);
-}
-
-/** "— sent by Ada Lovelace (ada@example.com)", when we know who assigned it. */
-function signature(sender?: Sender | null): string {
-  if (!sender?.email) return '';
-  return `\n\n--\nSent by ${sender.name ? `${sender.name} (${sender.email})` : sender.email}`;
-}
-
 /** The subject and body for each of the two kinds of assignment. */
 function composeAssignmentEmail({
   type,
@@ -175,7 +240,6 @@ function composeAssignmentEmail({
   kind,
   token,
   dueDate,
-  sender,
   resend,
 }: AssignmentEmailRequest): { subject: string; body: string } {
   const due = dueDate ? `\n\nIt is due by ${dueDate.toLocaleDateString('en-GB')}.` : '';
@@ -190,8 +254,7 @@ function composeAssignmentEmail({
       body:
         `You have been enrolled in the ${kind} "${title}".${due}\n\n` +
         `Sign in to get started:\n${base}/login\n\n` +
-        `You will find it on your Learning page once you are signed in.` +
-        signature(sender),
+        `You will find it on your Learning page once you are signed in.`,
     };
   }
 
@@ -201,8 +264,7 @@ function composeAssignmentEmail({
       `You have been given access to the ${kind} "${title}".${due}\n\n` +
       `Open it here — no sign-in needed:\n${base}/a/${token}\n\n` +
       `This link is personal to you. Please do not forward it: anyone who has it ` +
-      `can work through the ${kind} as you.` +
-      signature(sender),
+      `can work through the ${kind} as you.`,
   };
 }
 
@@ -214,7 +276,7 @@ function composeAssignmentEmail({
  * for them, not that an edit happened. Items are grouped under their module
  * heading in the order the course reads.
  */
-function composeNewContentEmail({ courseId, courseTitle, items, sender }: NewContentEmailRequest): {
+function composeNewContentEmail({ courseId, courseTitle, items }: NewContentEmailRequest): {
   subject: string;
   body: string;
 } {
@@ -242,12 +304,87 @@ function composeNewContentEmail({ courseId, courseTitle, items, sender }: NewCon
     body:
       `"${courseTitle}" has gained ${count} new item${count === 1 ? '' : 's'} since you ` +
       `finished it:\n\n${outline}\n\n` +
-      `Pick up where it leaves off:\n${appBaseUrl()}/learning/${courseId}` +
-      signature(sender),
+      `Pick up where it leaves off:\n${appBaseUrl()}/learning/${courseId}`,
   };
 }
 
 export default class EmailService {
+  /**
+   * Says at boot whether this deployment can send mail, and over what.
+   *
+   * Called once from startup. Email that quietly does nothing is the failure
+   * this exists to prevent: with no credentials the app still assigns, still
+   * reports success for everything except the notice, and nothing in the logs
+   * volunteers why until somebody goes looking. One line at boot turns that into
+   * a grep. It never throws and never blocks readiness — a mail relay being
+   * unreachable is not a reason to fail a rollout.
+   */
+  static reportConfiguration(): void {
+    const config = readConfig();
+
+    if (!config) {
+      logger.warn(
+        'email disabled: EMAIL_USER and EMAIL_APP_PASSWORD are unset, so assignment ' +
+          'and notification mail will be logged instead of sent',
+      );
+      return;
+    }
+
+    logger.info(
+      {
+        relay: `${config.host}:${config.port}`,
+        secure: config.secure,
+        as: redactEmail(config.senderEmail),
+      },
+      'email enabled',
+    );
+
+    if (process.env.NODE_ENV === 'production' && !process.env.APP_BASE_URL?.trim()) {
+      logger.warn(
+        { fallback: appBaseUrl() },
+        'APP_BASE_URL is unset: every link in outgoing mail will point at the local dev host',
+      );
+    }
+
+    // Deliberately not awaited. The answer lands in the log a moment after boot,
+    // which is soon enough for the thing it is for — telling an operator that
+    // the credentials in the Secret actually authenticate.
+    void EmailService.verifyConnection().then((result) => {
+      if (result.ok) {
+        logger.info({ relay: `${config.host}:${config.port}` }, 'smtp ready');
+        return;
+      }
+      logger.error(
+        { relay: `${config.host}:${config.port}`, reason: result.reason },
+        'smtp unavailable: mail will fail until this is fixed',
+      );
+    });
+  }
+
+  /**
+   * Opens a session and authenticates, sending nothing.
+   *
+   * Used by the boot check, and safe to call from a console when someone is
+   * asking whether a Secret is right — it proves the credential without putting
+   * a test message in anyone's inbox.
+   */
+  static async verifyConnection(): Promise<{ ok: boolean; reason?: string }> {
+    const config = readConfig();
+    if (!config) return { ok: false, reason: 'Email is not configured.' };
+
+    const transport = createTransport(config);
+
+    try {
+      await transport.verify();
+      return { ok: true };
+    } catch (error) {
+      logger.error({ err: error }, 'smtp verification failed');
+      return { ok: false, reason: describeSmtpFailure(error) };
+    } finally {
+      transport.close();
+    }
+  }
+
   /**
    * Tells someone what they have been assigned.
    *
@@ -263,7 +400,6 @@ export default class EmailService {
       to: request.to,
       subject,
       body,
-      sender: request.sender,
       label: 'assignment email',
       failurePrefix: 'The assignment was saved but the email failed',
     });
@@ -284,7 +420,6 @@ export default class EmailService {
       to: request.to,
       subject,
       body,
-      sender: request.sender,
       label: 'new content email',
       failurePrefix: 'The update was saved but the email failed',
     });
@@ -299,18 +434,18 @@ export default class EmailService {
     to,
     subject,
     body,
-    sender,
     label,
     failurePrefix,
   }: {
     to: string;
     subject: string;
     body: string;
-    sender?: Sender | null;
     label: string;
     failurePrefix: string;
   }): Promise<Delivery> {
-    if (!isConfigured()) {
+    const config = readConfig();
+
+    if (!config) {
       /**
        * Logged so the flow can be exercised before a mailbox is wired up — but
        * with the assignment link masked.
@@ -328,7 +463,6 @@ export default class EmailService {
         {
           label,
           to: redactEmail(to),
-          from: sender?.email ? redactEmail(sender.email) : undefined,
           subject,
           body: redactTokens(body),
         },
@@ -338,88 +472,122 @@ export default class EmailService {
     }
 
     try {
-      await EmailService.send({ to, subject, body, sender });
+      await EmailService.send({ to, subject, body }, config);
       return { sent: true };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'Unknown error';
-      logger.error({ err: error, to: redactEmail(to) }, 'failed to send email');
-      return { sent: false, reason: `${failurePrefix}: ${reason}` };
+      const reason = describeSmtpFailure(error);
+      logger.error(
+        {
+          err: error,
+          to: redactEmail(to),
+          label,
+          relay: `${config.host}:${config.port}`,
+        },
+        'failed to send email',
+      );
+      return { sent: false, reason: `${failurePrefix}: ${reason}.` };
     }
   }
 
   /**
    * One message over SMTP. Throws if it does not go out.
    *
-   * `sender` is the person the learner should be answering. The From address is
-   * always the authenticated no-reply mailbox — SPF and DKIM only align for the
-   * account the app password belongs to — so the sender appears as the From
-   * display name, and Reply-To carries their real address, which is always
-   * honoured.
+   * Everything goes out as the configured no-reply mailbox and nothing else:
+   * SPF and DKIM only align for the account the app password belongs to, so the
+   * From address could never have been the author's. It used to carry the
+   * assigning author as the From display name and in Reply-To, which meant a
+   * placeholder profile in the identity provider — a name of "test test", an
+   * address of user@example.com — was what every learner saw and replied to.
+   * The mailbox is the sender now, so no account's profile can leak into a
+   * message or collect the replies.
    */
-  static async send({
-    to,
-    subject,
-    body,
-    sender,
-  }: {
-    to: string;
-    subject: string;
-    body: string;
-    sender?: Sender | null;
-  }) {
-    const config = parseConfig();
+  static async send(
+    { to, subject, body }: { to: string; subject: string; body: string },
+    config: SmtpConfig | null = readConfig(),
+  ) {
+    if (!config) {
+      throw new Error('EMAIL_USER and EMAIL_APP_PASSWORD must both be set to send email.');
+    }
+
     const transport = createTransport(config);
 
     try {
       await transport.sendMail({
-        from: sender?.name
-          ? addressHeader(config.senderEmail, sender.name)
-          : addressHeader(config.senderEmail),
+        from: headerSafe(config.senderEmail),
         to: headerSafe(to),
         subject: headerSafe(subject),
         text: body,
-        ...(sender?.email ? { replyTo: addressHeader(sender.email, sender.name) } : {}),
       });
     } finally {
       transport.close();
     }
   }
 
+  /**
+   * The same message to every subscriber, over one pooled connection.
+   *
+   * Returns rather than throws when there is nothing to send with: an admin who
+   * has just written a newsletter needs to be told the mailbox is not
+   * configured, and a 500 from the generic error handler tells them only that
+   * something went wrong.
+   */
   static async sendBroadcastEmail({
     recipients,
     subject,
     message,
   }: BroadcastEmailRequest): Promise<BroadcastEmailResult> {
-    const config = parseConfig();
-    const transport = createTransport(config);
+    const config = readConfig();
 
-    const sendResults = await Promise.allSettled(
-      recipients.map(async (recipient) => {
-        await transport.sendMail({
-          from: addressHeader(config.senderEmail),
-          to: headerSafe(recipient.email),
-          subject: headerSafe(subject),
-          text: message,
-        });
-      }),
-    );
-
-    transport.close();
-
-    const sentCount = sendResults.filter((result) => result.status === 'fulfilled').length;
-
-    if (sentCount === 0 && recipients.length > 0) {
-      const rejection = sendResults.find((result) => result.status === 'rejected');
-      throw new Error(
-        rejection && rejection.status === 'rejected' && rejection.reason instanceof Error
-          ? rejection.reason.message
-          : 'Failed to send broadcast email',
+    if (!config) {
+      logger.info(
+        { recipientCount: recipients.length, subject },
+        'broadcast not sent: EMAIL_USER / EMAIL_APP_PASSWORD are unset',
       );
+      return {
+        sentCount: 0,
+        recipientCount: recipients.length,
+        reason: 'Email is not configured, so nothing was sent.',
+      };
     }
 
-    return {
-      sentCount,
-      recipientCount: recipients.length,
-    };
+    const transport = createTransport(config);
+
+    try {
+      const sendResults = await Promise.allSettled(
+        recipients.map(async (recipient) => {
+          await transport.sendMail({
+            from: headerSafe(config.senderEmail),
+            to: headerSafe(recipient.email),
+            subject: headerSafe(subject),
+            text: message,
+          });
+        }),
+      );
+
+      const sentCount = sendResults.filter((result) => result.status === 'fulfilled').length;
+      const rejection = sendResults.find((result) => result.status === 'rejected');
+
+      if (rejection?.status === 'rejected') {
+        logger.error(
+          {
+            err: rejection.reason,
+            sentCount,
+            recipientCount: recipients.length,
+            relay: `${config.host}:${config.port}`,
+          },
+          'broadcast email had failures',
+        );
+      }
+
+      return {
+        sentCount,
+        recipientCount: recipients.length,
+        ...(sentCount === 0 && recipients.length > 0
+          ? { reason: `Nothing was sent: ${describeSmtpFailure(rejection?.reason)}.` }
+          : {}),
+      };
+    } finally {
+      transport.close();
+    }
   }
 }
