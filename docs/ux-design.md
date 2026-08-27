@@ -88,9 +88,10 @@ in which app they load.
                                               │ assign     │ │ → one course │
                                               └────────────┘ └──────────────┘
 
-Contributors (named on individual courses, not global authors) get
-/admin/course-editor instead of the two Create items — the same editor, listing
-only the courses they are named on.
+Both Create items list only the lessons and quiz sets this person made or was
+named on — one admin never sees another's. Contributors (named on individual
+courses, holding no global role) get /admin/course-editor instead of the two
+Create items: the same editor, over the same scoped list.
 ```
 
 ### 2.3 Guest on an assignment link

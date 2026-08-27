@@ -27,7 +27,8 @@ Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | 
         ├─ CoursePublication  (a frozen snapshot per published version)
         ├─ Instructor         (many-to-many, credited on the course page)
         ├─ Assignment         (PLATFORM enrolment or a tokenized LINK)
-        └─ contributors       (Users allowed to edit this one course)
+        ├─ createdBy          (the User who made it, and so owns it)
+        └─ contributors       (other Users allowed to edit this one course)
 ```
 
 17 Prisma models in total. Beyond the tree above: `SectionProgress` and
@@ -270,6 +271,15 @@ and the date (§1.6).
 accepted from either mapping — `authMiddleware` unions them, and the frontend
 mirrors that rule so the UI never offers something the API will refuse. In this
 realm `admin` is a **realm** role.
+
+**A role says you may author; the course says whose it is.** `Course.createdById`
+is stamped at creation and `contributors` is how it is shared, so a lesson or
+quiz set is reachable by the person who made it and by whoever they named — and
+by nobody else, whatever role they hold. `CurriculumGateway.accessibleCourses` is
+the single expression of that rule; every listing and `requireCourseEditor` go
+through it. Its one concession is `includeUnowned`: courses created before this
+column existed carry a null `createdById`, and those stay with the global authors
+rather than with nobody.
 
 **Quiz answers are stripped server-side.** `redactAnswers()` removes `isCorrect`
 before a quiz reaches a learner. Correct answers come back only after submission,

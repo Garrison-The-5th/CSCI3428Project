@@ -48,10 +48,30 @@ export default class QuizGateway {
     });
   }
 
-  /** Author view: everything that has not been deleted. */
-  static getAllQuizzes() {
+  /**
+   * Which quizzes an author may reach, as a `where` clause.
+   *
+   * A quiz belongs to whoever owns the course its section sits in, so the access
+   * decision is made once over courses and handed down here as a list of ids.
+   *
+   * `includeOrphans` covers the quiz that has no section at all. Nothing in the
+   * app creates one any more — every quiz is written inside a set or a lesson —
+   * but older rows exist, and they belong to no course, so like an unowned
+   * course they stay with the global authors rather than with nobody.
+   */
+  static quizzesInCourses(courseIds: string[], includeOrphans: boolean): Prisma.QuizWhereInput {
+    return {
+      OR: [
+        { section: { courseId: { in: courseIds } } },
+        ...(includeOrphans ? [{ sectionId: null }] : []),
+      ],
+    };
+  }
+
+  /** Author view: everything not deleted that this person may reach. */
+  static getQuizzesForAuthor(courseIds: string[], includeOrphans: boolean) {
     return prisma.quiz.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...QuizGateway.quizzesInCourses(courseIds, includeOrphans) },
       orderBy: { title: 'asc' },
       include: questionTree,
     });
@@ -136,9 +156,12 @@ export default class QuizGateway {
   }
 
   /** The bin lists a quiz under the course it came from, so name that too. */
-  static getDeletedQuizzes() {
+  static getDeletedQuizzes(courseIds: string[], includeOrphans: boolean) {
     return prisma.quiz.findMany({
-      where: { deletedAt: { not: null } },
+      where: {
+        deletedAt: { not: null },
+        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
+      },
       orderBy: { deletedAt: 'desc' },
       select: {
         id: true,
@@ -159,15 +182,23 @@ export default class QuizGateway {
     return prisma.quiz.delete({ where: { id } });
   }
 
-  static restoreAllQuizzes() {
+  static restoreAllQuizzes(courseIds: string[], includeOrphans: boolean) {
     return prisma.quiz.updateMany({
-      where: { deletedAt: { not: null } },
+      where: {
+        deletedAt: { not: null },
+        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
+      },
       data: { deletedAt: null },
     });
   }
 
-  static purgeQuizzes() {
-    return prisma.quiz.deleteMany({ where: { deletedAt: { not: null } } });
+  static purgeQuizzes(courseIds: string[], includeOrphans: boolean) {
+    return prisma.quiz.deleteMany({
+      where: {
+        deletedAt: { not: null },
+        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
+      },
+    });
   }
 
   static purgeQuizzesDeletedBefore(cutoff: Date) {

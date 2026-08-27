@@ -29,6 +29,7 @@ import { requestLogger } from '@/controllers/middleware/request-logger';
 import CurriculumService, {
   RECYCLE_BIN_DAYS,
 } from '@/services/curriculum-service/curriculum-service';
+import EmailService from '@/services/email-service/email-service';
 import PublicationService, {
   ARCHIVE_DAYS,
 } from '@/services/publication-service/publication-service';
@@ -219,6 +220,10 @@ async function startServer() {
   const server = app.listen(5002, () => {
     logger.info({ port: 5002 }, 'server running');
   });
+
+  // Say once, at boot, whether this deployment can send mail — see
+  // EmailService.reportConfiguration. Never throws and never blocks readiness.
+  EmailService.reportConfiguration();
 
   /**
    * Expire the recycle bin.

@@ -37,6 +37,17 @@ function param(req: Request, name: string): string {
   return String(req.params[name]);
 }
 
+/**
+ * Whether the caller holds a global authoring role.
+ *
+ * It no longer means "may reach every course". It widens the scoped listings by
+ * exactly the courses that belong to nobody — see
+ * `CurriculumGateway.accessibleCourses`.
+ */
+function isGlobalAuthor(req: AuthenticatedRequest): boolean {
+  return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+}
+
 @controller('/curriculum')
 export default class CurriculumController {
   /**
@@ -51,34 +62,40 @@ export default class CurriculumController {
   }
 
   /**
-   * Courses this person may edit: everything for a global author, only the ones
-   * they are named on for a contributor. Powers the Course Editor page.
+   * Courses this person may edit: the ones they created, plus the ones they were
+   * named on. Powers the Course Editor page.
+   *
+   * A global authoring role no longer widens this to the whole catalogue — it
+   * adds only the courses left unowned by the ownership backfill.
    */
   @get('/courses/editable')
   @use(authenticateAndAttachUser)
   async getEditableCourses(req: AuthenticatedRequest, res: Response) {
-    const isGlobalAuthor = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
-    const courses = isGlobalAuthor
-      ? await CurriculumService.getAllCourses()
-      : await CurriculumService.getEditableCourses(req.user!.id);
-    return res.send({ courses, isGlobalAuthor });
+    const global = isGlobalAuthor(req);
+    const courses = await CurriculumService.getEditableCourses(req.user!.id, global);
+    return res.send({ courses, isGlobalAuthor: global });
   }
 
   @get('/courses/:id/contributors')
   @use(authenticateAndAttachUser)
   async getContributors(req: AuthenticatedRequest, res: Response) {
-    const isGlobalAuthor = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
     const courseId = param(req as Request, 'id');
-    if (!(await CurriculumService.canEditCourse(req.user!.id, courseId, isGlobalAuthor))) {
+    if (!(await CurriculumService.canEditCourse(req.user!.id, courseId, isGlobalAuthor(req)))) {
       return res.status(403).send({ errorMessage: 'You cannot edit that course' });
     }
     const contributors = await CurriculumService.getContributors(courseId);
     return res.send({ contributors });
   }
 
-  /** Only a global author may change who can edit a course. */
+  /**
+   * Naming the other authors on a course. Whoever may edit it may share it —
+   * which for a course somebody created means its owner, and no other admin.
+   *
+   * Not a content edit, so it does not mark the draft as ahead of what learners
+   * are served.
+   */
   @put('/courses/:id/contributors')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromCourseParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async setContributors(req: Request, res: Response) {
     try {
@@ -90,53 +107,63 @@ export default class CurriculumController {
     }
   }
 
-  /** Author view: drafts included. */
+  /** Author view: drafts included, and only what this person owns or was named on. */
   @get('/courses/manage')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async getCoursesForAuthor(req: Request, res: Response) {
-    const courses = await CurriculumService.getAllCourses();
+  async getCoursesForAuthor(req: AuthenticatedRequest, res: Response) {
+    const courses = await CurriculumService.getCoursesForAuthor(req.user!.id, isGlobalAuthor(req));
     return res.send({ courses });
   }
 
-  /** Everything in the recycle bin, for the admin dashboard. */
+  /**
+   * The recycle bin, holding only what this person may edit.
+   *
+   * The bin is one list of everything deleted, so it is scoped by the same rule
+   * as the libraries it was deleted from — otherwise deleting a course would put
+   * it back in front of every other admin.
+   */
   @get('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async getDeleted(req: Request, res: Response) {
-    const deleted = await CurriculumService.getDeletedItems();
+  async getDeleted(req: AuthenticatedRequest, res: Response) {
+    const deleted = await CurriculumService.getDeletedItems(req.user!.id, isGlobalAuthor(req));
     return res.send(deleted);
   }
 
-  /** Restores every deleted course and section in one go. */
+  /** Restores this person's deleted courses and sections in one go. */
   @post('/deleted/restore-all')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async restoreAll(req: Request, res: Response) {
+  async restoreAll(req: AuthenticatedRequest, res: Response) {
     try {
-      const restored = await CurriculumService.restoreAll();
+      const restored = await CurriculumService.restoreAll(req.user!.id, isGlobalAuthor(req));
       return res.send({ message: 'Recycle bin restored', restored });
     } catch (error) {
       return fail(res, error, 'Error restoring items');
     }
   }
 
-  /** Empties the recycle bin. Permanent — nothing survives this. */
+  /** Empties this person's recycle bin. Permanent — nothing survives this. */
   @del('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async purgeAll(req: Request, res: Response) {
+  async purgeAll(req: AuthenticatedRequest, res: Response) {
     try {
-      const purged = await CurriculumService.purgeAll();
+      const purged = await CurriculumService.purgeAll(req.user!.id, isGlobalAuthor(req));
       return res.send({ message: 'Recycle bin emptied', purged });
     } catch (error) {
       return fail(res, error, 'Error emptying the recycle bin');
     }
   }
 
+  // Purging is guarded per course like every other write, and with the draft
+  // marker off: the row is about to stop existing, so there is no draft left to
+  // mark as ahead of what learners are served.
+
   /** Permanently removes one deleted course. */
   @del('/deleted/courses/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromCourseParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async purgeCourse(req: Request, res: Response) {
     try {
@@ -149,7 +176,7 @@ export default class CurriculumController {
 
   /** Permanently removes one deleted section. */
   @del('/deleted/sections/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromSectionParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async purgeSection(req: Request, res: Response) {
     try {
@@ -186,10 +213,13 @@ export default class CurriculumController {
   @post('/courses')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async createCourse(req: Request, res: Response) {
+  async createCourse(req: AuthenticatedRequest, res: Response) {
     try {
       const { title } = req.body as { title?: string };
-      const course = await CurriculumService.createCourse(title);
+      // Stamped with its author here and nowhere else: this is the only route
+      // that brings a lesson into existence, so it is the only place ownership
+      // can be established.
+      const course = await CurriculumService.createCourse(title, undefined, req.user!.id);
       return res.send({ message: 'Course created successfully', course });
     } catch (error) {
       return fail(res, error, 'Error creating course');
@@ -207,10 +237,10 @@ export default class CurriculumController {
   @post('/quiz-sets')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async createQuizSet(req: Request, res: Response) {
+  async createQuizSet(req: AuthenticatedRequest, res: Response) {
     try {
       const { title } = req.body as { title?: string };
-      const course = await CurriculumService.createQuizSet(title);
+      const course = await CurriculumService.createQuizSet(title, req.user!.id);
       return res.send({ message: 'Quiz set created successfully', course });
     } catch (error) {
       return fail(res, error, 'Error creating quiz set');
@@ -285,9 +315,14 @@ export default class CurriculumController {
     return res.send({ hasUnpublishedChanges, unpublished, versions });
   }
 
-  /** One archived version's full tree, for the editor's read-only view. */
+  /**
+   * One archived version's full tree, for the editor's read-only view.
+   *
+   * Gated per course rather than on the global authoring role: a version is the
+   * course's own content, so reading one is reading the course.
+   */
   @get('/versions/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromVersionParam('id')))
   @use(authenticateAndAttachUser)
   async getVersion(req: Request, res: Response) {
     try {
@@ -351,7 +386,7 @@ export default class CurriculumController {
   }
 
   @post('/courses/:id/restore')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromCourseParam('id')))
   @use(authenticateAndAttachUser)
   async restoreCourse(req: Request, res: Response) {
     try {
@@ -429,7 +464,7 @@ export default class CurriculumController {
   }
 
   @post('/modules/:id/restore')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromModuleParam('id')))
   @use(authenticateAndAttachUser)
   async restoreModule(req: Request, res: Response) {
     try {
@@ -442,7 +477,7 @@ export default class CurriculumController {
 
   /** Permanently removes one deleted module. */
   @del('/deleted/modules/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromModuleParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async purgeModule(req: Request, res: Response) {
     try {
@@ -518,7 +553,7 @@ export default class CurriculumController {
   }
 
   @post('/sections/:id/restore')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromSectionParam('id')))
   @use(authenticateAndAttachUser)
   async restoreSection(req: Request, res: Response) {
     try {

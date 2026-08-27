@@ -36,7 +36,7 @@ hour.
 | signed in | Any valid Keycloak session |
 | author/admin | Holds the `admin` or `contributor` role, on the client or the realm |
 | admin | Holds the `admin` role |
-| can edit this course | A global author, or named as a contributor on that course |
+| can edit this course | Created that course, or was named as an author on it. A global authoring role adds only the courses that predate ownership being recorded |
 | rate limited | Carries a tighter per-user or per-address limit than the global one |
 
 ### Error codes
@@ -70,16 +70,16 @@ Defined in `backend/src/controllers/**/assignment-controller.ts`.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| `GET` | `/assignments/` | signed in, author/admin | Links for one course (?courseId=) or one quiz (?quizId=), with progress |
-| `GET` | `/assignments/courses` | signed in, author/admin | Every course that has been handed to someone, as summary cards |
+| `GET` | `/assignments/` | signed in, can edit this course | Links for one course (?courseId=) or one quiz (?quizId=), with progress |
+| `GET` | `/assignments/courses` | signed in, author/admin | This person's courses that have been handed to someone, as summary cards |
 | `GET` | `/assignments/insights` | signed in, author/admin, rate limited | Learners and how far they have got, for the dashboard's Student insights |
 | `GET` | `/assignments/insights/:email` | signed in, author/admin | One learner's full picture, for the drill-down page |
-| `POST` | `/assignments/` | signed in, author/admin, rate limited | One learner's full picture, for the drill-down page |
-| `PUT` | `/assignments/:id` | signed in, author/admin | Moves one person's due date |
-| `POST` | `/assignments/:id/revoke` | signed in, author/admin | Turns a link off without losing the record or the progress behind it |
-| `POST` | `/assignments/:id/restore` | signed in, author/admin | Turns a link back on and tells the person it works again |
-| `POST` | `/assignments/:id/resend` | signed in, author/admin | Sends the same message again, on demand |
-| `DELETE` | `/assignments/:id` | signed in, author/admin | Sends the same message again, on demand |
+| `POST` | `/assignments/` | signed in, can edit this course, rate limited | Hands a course or quiz to somebody by email |
+| `PUT` | `/assignments/:id` | signed in, can edit this course | Moves one person's due date |
+| `POST` | `/assignments/:id/revoke` | signed in, can edit this course | Turns a link off without losing the record or the progress behind it |
+| `POST` | `/assignments/:id/restore` | signed in, can edit this course | Turns a link back on and tells the person it works again |
+| `POST` | `/assignments/:id/resend` | signed in, can edit this course | Sends the same message again, on demand |
+| `DELETE` | `/assignments/:id` | signed in, can edit this course | Takes an assignment away, and the progress inside it |
 
 ### `/auth`
 
@@ -100,35 +100,35 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | `GET` | `/curriculum/courses` | signed in | Learner view: the published courses assigned to this person |
-| `GET` | `/curriculum/courses/editable` | signed in | Courses this person may edit: everything for a global author, only the ones they are named on for a contributor |
-| `GET` | `/curriculum/courses/:id/contributors` | signed in | Courses this person may edit: everything for a global author, only the ones they are named on for a contributor |
-| `PUT` | `/curriculum/courses/:id/contributors` | signed in, author/admin | Only a global author may change who can edit a course |
-| `GET` | `/curriculum/courses/manage` | signed in, author/admin | Author view: drafts included |
-| `GET` | `/curriculum/deleted` | signed in, author/admin | Everything in the recycle bin, for the admin dashboard |
-| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores every deleted course and section in one go |
-| `DELETE` | `/curriculum/deleted` | signed in, author/admin | Empties the recycle bin |
-| `DELETE` | `/curriculum/deleted/courses/:id` | signed in, author/admin | Permanently removes one deleted course |
-| `DELETE` | `/curriculum/deleted/sections/:id` | signed in, author/admin | Permanently removes one deleted section |
+| `GET` | `/curriculum/courses/editable` | signed in | Courses this person may edit: the ones they created plus the ones they were named on |
+| `GET` | `/curriculum/courses/:id/contributors` | signed in, can edit this course | Who else may edit this course |
+| `PUT` | `/curriculum/courses/:id/contributors` | signed in, can edit this course | Names the other authors on this course |
+| `GET` | `/curriculum/courses/manage` | signed in, author/admin | Author view: drafts included, scoped to what this person owns or was named on |
+| `GET` | `/curriculum/deleted` | signed in, author/admin | This person's recycle bin, for the admin dashboard |
+| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores this person's deleted courses and sections in one go |
+| `DELETE` | `/curriculum/deleted` | signed in, author/admin | Empties this person's recycle bin |
+| `DELETE` | `/curriculum/deleted/courses/:id` | signed in, can edit this course | Permanently removes one deleted course |
+| `DELETE` | `/curriculum/deleted/sections/:id` | signed in, can edit this course | Permanently removes one deleted section |
 | `GET` | `/curriculum/courses/:id` | signed in | One course for a learner |
 | `POST` | `/curriculum/courses` | signed in, author/admin | Creates a course from just a name; everything else is set by editing it |
 | `PUT` | `/curriculum/courses/:id` | signed in, can edit this course | Creates a course from just a name; everything else is set by editing it |
 | `POST` | `/curriculum/courses/:id/publish` | signed in, can edit this course | Puts the course live as a new version |
 | `GET` | `/curriculum/courses/:id/publication` | signed in, can edit this course | Whether there is anything to publish, and what |
-| `GET` | `/curriculum/versions/:id` | signed in, author/admin | One archived version's full tree, for the editor's read-only view |
+| `GET` | `/curriculum/versions/:id` | signed in, can edit this course | One archived version's full tree, for the editor's read-only view |
 | `DELETE` | `/curriculum/courses/:id` | signed in, can edit this course | Soft delete — the course moves to the recycle bin and can be restored |
-| `POST` | `/curriculum/courses/:id/restore` | signed in, author/admin | Soft delete — the course moves to the recycle bin and can be restored |
+| `POST` | `/curriculum/courses/:id/restore` | signed in, can edit this course | Brings a course back out of the recycle bin |
 | `POST` | `/curriculum/courses/:id/image` | signed in, can edit this course, upload quota | Uploads the course cover photo shown on the Learning page |
 | `GET` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | Uploads the course cover photo shown on the Learning page |
 | `POST` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
 | `PUT` | `/curriculum/modules/:id` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
 | `DELETE` | `/curriculum/modules/:id` | signed in, can edit this course | Soft delete — the module and its sections move to the recycle bin |
-| `POST` | `/curriculum/modules/:id/restore` | signed in, author/admin | Soft delete — the module and its sections move to the recycle bin |
-| `DELETE` | `/curriculum/deleted/modules/:id` | signed in, author/admin | Permanently removes one deleted module |
+| `POST` | `/curriculum/modules/:id/restore` | signed in, can edit this course | Brings a module back out of the recycle bin |
+| `DELETE` | `/curriculum/deleted/modules/:id` | signed in, can edit this course | Permanently removes one deleted module |
 | `POST` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | Permanently removes one deleted module |
 | `PUT` | `/curriculum/courses/:courseId/structure` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
 | `PUT` | `/curriculum/sections/:id` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
 | `DELETE` | `/curriculum/sections/:id` | signed in, can edit this course | Soft delete — the section moves to the recycle bin and can be restored |
-| `POST` | `/curriculum/sections/:id/restore` | signed in, author/admin | Soft delete — the section moves to the recycle bin and can be restored |
+| `POST` | `/curriculum/sections/:id/restore` | signed in, can edit this course | Brings a section back out of the recycle bin |
 | `POST` | `/curriculum/sections/:id/image` | signed in, can edit this course, upload quota | Uploads an image or PDF and stores it on the section as an element |
 | `POST` | `/curriculum/sections/:id/view` | signed in | Sections auto-complete on view, so opening one records progress |
 | `POST` | `/curriculum/elements/:id/view` | signed in | Records one piece of content as seen |
@@ -208,16 +208,16 @@ it is a state to render, not a request to fix.
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | `GET` | `/quizzes/` | signed in | Learner view: the quizzes this person can reach, with the correct answers stripped out |
-| `GET` | `/quizzes/manage` | signed in, author/admin | Author view: drafts included, answers intact so they can be edited |
-| `GET` | `/quizzes/deleted` | signed in, author/admin | Author view: drafts included, answers intact so they can be edited |
-| `POST` | `/quizzes/deleted/restore-all` | signed in, author/admin | Restores every deleted quiz in one go |
-| `DELETE` | `/quizzes/deleted` | signed in, author/admin | Permanently removes every deleted quiz |
-| `DELETE` | `/quizzes/deleted/:id` | signed in, author/admin | Permanently removes one deleted quiz |
+| `GET` | `/quizzes/manage` | signed in, author/admin | Author view: drafts included, answers intact — the quizzes inside courses this person may edit |
+| `GET` | `/quizzes/deleted` | signed in, author/admin | The quizzes in this person's recycle bin |
+| `POST` | `/quizzes/deleted/restore-all` | signed in, author/admin | Restores this person's deleted quizzes in one go |
+| `DELETE` | `/quizzes/deleted` | signed in, author/admin | Permanently removes this person's deleted quizzes |
+| `DELETE` | `/quizzes/deleted/:id` | signed in, can edit this course | Permanently removes one deleted quiz |
 | `GET` | `/quizzes/:id` | signed in | One quiz for a learner: authenticated, scoped to what they can reach |
 | `POST` | `/quizzes/` | signed in, can edit this course | One quiz for a learner: authenticated, scoped to what they can reach |
 | `PUT` | `/quizzes/:id` | signed in, can edit this course | One quiz for a learner: authenticated, scoped to what they can reach |
 | `DELETE` | `/quizzes/:id` | signed in, can edit this course | Soft delete — the quiz moves to the recycle bin and can be restored |
-| `POST` | `/quizzes/:id/restore` | signed in, author/admin | Soft delete — the quiz moves to the recycle bin and can be restored |
+| `POST` | `/quizzes/:id/restore` | signed in, can edit this course | Brings a quiz back out of the recycle bin |
 | `POST` | `/quizzes/:id/start` | signed in | Starts the clock, or reports the clock already running |
 | `POST` | `/quizzes/:id/attempt` | signed in, rate limited | Grades server-side and records the attempt so the quiz stops being outstanding |
 | `POST` | `/quizzes/:quizId/questions` | signed in, can edit this course | Grades server-side and records the attempt so the quiz stops being outstanding |

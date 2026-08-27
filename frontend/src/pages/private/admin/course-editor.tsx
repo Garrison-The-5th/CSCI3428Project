@@ -132,7 +132,6 @@ const CourseEditor = ({
   const navigate = useNavigate();
 
   const [course, setCourse] = useState<Course | null>(null);
-  const [isGlobalAuthor, setIsGlobalAuthor] = useState(false);
   const [loading, setLoading] = useState(true);
   // The quiz shell opens on its own pane: somebody who came here to write
   // questions should not have to click past the landing page first.
@@ -170,11 +169,11 @@ const CourseEditor = ({
   const fetchCourse = useCallback(async () => {
     if (!courseId) return;
     try {
-      // The editable endpoint returns everything for a global author and only the
-      // named lessons for a contributor, so one call covers both.
+      // The editable endpoint returns exactly what this person may open — the
+      // lessons they made and the ones they were named on — so a lesson that is
+      // not theirs simply is not in the list, and the page reports it missing.
       const editable = await HttpHelper.get('curriculum/courses/editable');
       const list: Course[] = editable.courses ?? [];
-      setIsGlobalAuthor(editable.isGlobalAuthor === true);
       setCourse(list.find((c) => c.id === courseId) ?? null);
       await fetchPublication();
     } catch (err) {
@@ -521,13 +520,13 @@ const CourseEditor = ({
             />
           )}
 
+          {/*
+            Anyone who can open this editor either made the lesson or was named on
+            it, and either way may share it: there is no wider admin who can reach
+            it over their head, so there is nobody left to defer to.
+          */}
           {pane === 'access' && (
-            <CourseAccess
-              course={course}
-              canManageAuthors={isGlobalAuthor}
-              mode={mode}
-              onNotify={notify}
-            />
+            <CourseAccess course={course} canManageAuthors mode={mode} onNotify={notify} />
           )}
 
           {pane === 'versions' && (

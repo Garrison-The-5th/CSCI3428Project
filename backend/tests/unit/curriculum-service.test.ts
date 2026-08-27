@@ -89,10 +89,24 @@ describe('createCourse', () => {
 
     await CurriculumService.createCourse('  New  ');
 
-    expect(gateway.createCourse).toHaveBeenCalledWith('New', 'LESSON');
+    expect(gateway.createCourse).toHaveBeenCalledWith('New', 'LESSON', null);
     expect(gateway.createModule).toHaveBeenCalledWith(
       expect.objectContaining({ courseId: 'c1', number: 1 }),
     );
+  });
+
+  /**
+   * Ownership is what makes a lesson somebody's rather than every admin's, and
+   * this is the only route that can establish it — a course is created once.
+   */
+  it('records who created it', async () => {
+    gateway.createCourse.mockResolvedValue({ id: 'c1', title: 'New' } as never);
+    gateway.createModule.mockResolvedValue({} as never);
+    gateway.getCourseById.mockResolvedValue({ id: 'c1' } as never);
+
+    await CurriculumService.createCourse('New', undefined, 7);
+
+    expect(gateway.createCourse).toHaveBeenCalledWith('New', 'LESSON', 7);
   });
 
   /**
@@ -106,7 +120,7 @@ describe('createCourse', () => {
 
     await CurriculumService.createQuizSet('  Fire safety  ');
 
-    expect(gateway.createCourse).toHaveBeenCalledWith('Fire safety', 'QUIZ_SET');
+    expect(gateway.createCourse).toHaveBeenCalledWith('Fire safety', 'QUIZ_SET', null);
     expect(gateway.createModule).toHaveBeenCalledWith(
       expect.objectContaining({ courseId: 'q1', number: 1, title: 'Fire safety' }),
     );

@@ -54,7 +54,11 @@ import { logger } from '@/utils/logger';
 
 interface Props {
   course: Course;
-  /** Only a global author may change who can edit a lesson. */
+  /**
+   * Whether the author list can be changed here. True for anyone who can open
+   * the editor at all, since reaching it means they own the lesson or were named
+   * on it; kept as a prop so a read-only view of a lesson stays possible.
+   */
   canManageAuthors: boolean;
   /** Names the thing on screen — a quiz set is not "a course" to its author. */
   mode?: 'lesson' | 'quiz';
@@ -281,8 +285,8 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">Authors</CardTitle>
             <p className="text-sm text-dark-gray">
-              People who can edit this {noun}. They see it under Course Editor, and lose access when
-              removed from their last one.
+              Besides you, who can edit this {noun}. It appears on their authoring pages while they
+              are named here, and disappears again when they are removed.
             </p>
           </CardHeader>
 
@@ -308,7 +312,7 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
                 {results(authorResults, addAuthor)}
               </div>
             ) : (
-              <p className="text-sm text-dark-gray">Only an admin can change this list.</p>
+              <p className="text-sm text-dark-gray">You cannot change this list.</p>
             )}
 
             <hr className="h-px border-t-0 bg-gray-300" />

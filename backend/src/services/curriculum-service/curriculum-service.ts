@@ -192,9 +192,15 @@ export default class CurriculumService {
     return { course, newIds };
   }
 
-  /** Author view: drafts included. */
-  static getAllCourses() {
-    return CurriculumGateway.getAllCourses();
+  /**
+   * Author view: drafts included, and only what this person may edit.
+   *
+   * `isGlobalAuthor` no longer means "everything". It admits the unowned courses
+   * that predate the ownership column and nothing more — see
+   * `CurriculumGateway.accessibleCourses`.
+   */
+  static getCoursesForAuthor(userId: number, isGlobalAuthor: boolean) {
+    return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
   static getCourseById(id: string, live = false) {
@@ -206,10 +212,14 @@ export default class CurriculumService {
    * It gets one empty module so the author can add a section immediately —
    * sections live inside modules, so a course with none has nowhere to put them.
    */
-  static async createCourse(title?: string, kind: CourseKind = CourseKind.LESSON) {
+  static async createCourse(
+    title?: string,
+    kind: CourseKind = CourseKind.LESSON,
+    createdById: number | null = null,
+  ) {
     const clean = requiredText(title, 'title', 'title');
 
-    const course = await CurriculumGateway.createCourse(clean, kind);
+    const course = await CurriculumGateway.createCourse(clean, kind, createdById);
 
     /*
      * One module to hang sections off, because a section cannot exist without
@@ -244,14 +254,14 @@ export default class CurriculumService {
    * The section under it is the row that carries the name, the minutes and the
    * order; the author never sees it as a thing of its own.
    */
-  static async createQuizSet(title?: string) {
+  static async createQuizSet(title?: string, createdById: number | null = null) {
     // Cleaned here as well as inside createCourse, so the section and the quiz
     // are named from what the author typed rather than from whatever the
     // gateway echoes back — the round trip is a read of the new row, and
     // depending on a field of it to name two more is a needless coupling.
     const clean = requiredText(title, 'title', 'title');
 
-    const course = await CurriculumService.createCourse(clean, CourseKind.QUIZ_SET);
+    const course = await CurriculumService.createCourse(clean, CourseKind.QUIZ_SET, createdById);
     if (!course) throw new Error('the quiz set could not be created');
 
     const section = await CurriculumService.createSection(course.id, {
@@ -374,8 +384,8 @@ export default class CurriculumService {
 
   // ---- Per-course contributors ----
 
-  static getEditableCourses(userId: number) {
-    return CurriculumGateway.getEditableCourses(userId);
+  static getEditableCourses(userId: number, isGlobalAuthor: boolean) {
+    return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
   static getContributors(courseId: string) {
@@ -403,12 +413,12 @@ export default class CurriculumService {
   }
 
   /**
-   * Whether this person may edit this course. Global authors may edit anything;
-   * a contributor may edit only what they are named on.
+   * Whether this person may edit this course: they made it, or they were named
+   * on it. A global authoring role adds only the unowned courses that predate
+   * ownership being recorded.
    */
-  static async canEditCourse(userId: number, courseId: string, isGlobalAuthor: boolean) {
-    if (isGlobalAuthor) return true;
-    return CurriculumGateway.isContributor(userId, courseId);
+  static canEditCourse(userId: number, courseId: string, isGlobalAuthor: boolean) {
+    return CurriculumGateway.canEditCourse(userId, courseId, isGlobalAuthor);
   }
 
   // ---- Instructors ----
@@ -541,13 +551,17 @@ export default class CurriculumService {
    * what comes back can never contain something that should already have expired.
    * `index.ts` runs the same sweep on a timer for the case where nobody looks.
    */
-  static async getDeletedItems() {
+  static async getDeletedItems(userId: number, isGlobalAuthor: boolean) {
     await CurriculumService.purgeExpired();
 
+    // One access decision for the whole bin, so a course and the sections that
+    // went down with it can never disagree about who may see them.
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+
     const [courses, modules, sections] = await Promise.all([
-      CurriculumGateway.getDeletedCourses(),
-      CurriculumGateway.getDeletedModules(),
-      CurriculumGateway.getDeletedSections(),
+      CurriculumGateway.getDeletedCourses(courseIds),
+      CurriculumGateway.getDeletedModules(courseIds),
+      CurriculumGateway.getDeletedSections(courseIds),
     ]);
     return { courses, modules, sections, retentionDays: RECYCLE_BIN_DAYS };
   }
@@ -604,16 +618,19 @@ export default class CurriculumService {
     return CurriculumGateway.hardDeleteModule(id);
   }
 
-  static async restoreAll() {
+  /** Empties the bin back into place, for this person's courses only. */
+  static async restoreAll(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+
     // Outermost first: restoring a section whose module is still deleted would
     // leave it stranded, and restoring a container does not touch its contents.
-    const courses = await CurriculumGateway.restoreAllCourses();
-    const modules = await CurriculumGateway.restoreAllModules();
-    const sections = await CurriculumGateway.restoreAllSections();
+    const courses = await CurriculumGateway.restoreAllCourses(courseIds);
+    const modules = await CurriculumGateway.restoreAllModules(courseIds);
+    const sections = await CurriculumGateway.restoreAllSections(courseIds);
 
     // Everything came back on the parked numbers it was deleted with, so the
     // grid has to be rebuilt before any of it is readable.
-    for (const courseId of await CurriculumGateway.getLiveCourseIds()) {
+    for (const courseId of await CurriculumGateway.getLiveCourseIds(courseIds)) {
       await CurriculumGateway.runTransaction((db) =>
         CurriculumService.renumberCourse(courseId, db),
       );
@@ -622,12 +639,14 @@ export default class CurriculumService {
     return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
-  static async purgeAll() {
+  static async purgeAll(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+
     // Deleting a course cascades to its modules and sections, so work outward in
     // and let each later pass clear whatever survived because its parent is live.
-    const courses = await CurriculumGateway.purgeCourses();
-    const modules = await CurriculumGateway.purgeModules();
-    const sections = await CurriculumGateway.purgeSections();
+    const courses = await CurriculumGateway.purgeCourses(courseIds);
+    const modules = await CurriculumGateway.purgeModules(courseIds);
+    const sections = await CurriculumGateway.purgeSections(courseIds);
     return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 

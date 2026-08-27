@@ -371,8 +371,22 @@ export default class QuizService {
   }
 
   /** Author view, answers included. */
-  static getAllQuizzes() {
-    return QuizGateway.getAllQuizzes();
+  /**
+   * Author view: the quizzes inside the courses this person may edit.
+   *
+   * A quiz has no owner of its own — it belongs to the course whose section it
+   * sits in — so the access decision is made once over courses and the quiz
+   * queries are scoped to what comes back.
+   */
+  static async getQuizzesForAuthor(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+    return QuizGateway.getQuizzesForAuthor(courseIds, isGlobalAuthor);
+  }
+
+  /** The quizzes in this person's recycle bin. */
+  static async getDeletedQuizzes(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+    return QuizGateway.getDeletedQuizzes(courseIds, isGlobalAuthor);
   }
 
   static getQuizById(id: string, live = false) {
@@ -570,13 +584,15 @@ export default class QuizService {
     return QuizGateway.hardDeleteQuiz(id);
   }
 
-  static async restoreAllQuizzes() {
-    const { count } = await QuizGateway.restoreAllQuizzes();
+  static async restoreAllQuizzes(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+    const { count } = await QuizGateway.restoreAllQuizzes(courseIds, isGlobalAuthor);
     return count;
   }
 
-  static async purgeAllQuizzes() {
-    const { count } = await QuizGateway.purgeQuizzes();
+  static async purgeAllQuizzes(userId: number, isGlobalAuthor: boolean) {
+    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
+    const { count } = await QuizGateway.purgeQuizzes(courseIds, isGlobalAuthor);
     return count;
   }
 

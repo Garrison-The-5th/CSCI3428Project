@@ -82,6 +82,7 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+    env_file: .env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${DB_USERNAME:-learning_dev}:${DB_PASSWORD:-localdev_change_me}@postgres:5432/${DB_NAME:-learning_app}?schema=public

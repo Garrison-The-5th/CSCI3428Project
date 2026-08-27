@@ -11,16 +11,19 @@ import { clientAddress } from '@/config/client-address';
 import { logger, logSecurityEvent } from '@/config/logger';
 import { AuthenticatedRequest } from '@/controllers/auth-controller/auth-middleware';
 import { AUTHOR_ROLES } from '@/controllers/auth-controller/authorization-middleware';
+import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
 
 /**
- * Guards edits to a course's content.
+ * Guards access to a course's content, whether reading it in the editor or
+ * changing it.
  *
- * Two ways to pass: holding a global authoring role (admin / contributor in
- * Keycloak), or being named as a contributor on this particular course. Using
- * `requireAuthor` alone would let only the first group through, which is why a
- * per-course author was previously refused with a 403 before any query ran.
+ * Two ways to pass: you created the course, or you were named on it as an
+ * author. A Keycloak role is not one of them — `admin` says this person may
+ * write learning content, not that they may open somebody else's. What the role
+ * still buys is the courses that predate ownership being recorded and could not
+ * be attributed to anyone; see `CurriculumGateway.accessibleCourses`.
  *
  * Every mutation names something inside a course — a section, an element, a quiz —
  * so the caller supplies a resolver that maps the request back to a course id.
@@ -79,6 +82,39 @@ export const fromSectionInBody: CourseResolver = async (req) => {
   const { sectionId } = (req.body ?? {}) as { sectionId?: string };
   return sectionId ? CurriculumGateway.courseIdFromSection(sectionId) : null;
 };
+
+type CourseOrQuiz = { courseId?: unknown; quizId?: unknown };
+
+/**
+ * Resolves the course named by `courseId` or `quizId`, wherever the assignment
+ * routes put it — the query string when listing a roster, the body when handing
+ * work out.
+ *
+ * Assigning is not editing, but it does hand somebody else's course to a learner
+ * under your name, and the roster it produces is that course's readership. Both
+ * belong to whoever owns the course.
+ */
+const fromCourseOrQuiz =
+  (read: (req: AuthenticatedRequest) => CourseOrQuiz): CourseResolver =>
+  async (req) => {
+    const { courseId, quizId } = read(req);
+    if (typeof courseId === 'string' && courseId) return courseId;
+    if (typeof quizId === 'string' && quizId) return CurriculumGateway.courseIdFromQuiz(quizId);
+    return null;
+  };
+
+export const fromCourseOrQuizQuery = fromCourseOrQuiz((req) => (req.query ?? {}) as CourseOrQuiz);
+export const fromCourseOrQuizBody = fromCourseOrQuiz((req) => (req.body ?? {}) as CourseOrQuiz);
+
+/** An assignment back to the course or quiz it hands out. */
+export const fromAssignmentParam =
+  (name = 'id'): CourseResolver =>
+  async (req) => {
+    const assignment = await AssignmentGateway.findById(param(req, name));
+    if (!assignment) return null;
+    if (assignment.courseId) return assignment.courseId;
+    return assignment.quizId ? CurriculumGateway.courseIdFromQuiz(assignment.quizId) : null;
+  };
 
 /**
  * Marks the course's draft as ahead of what learners are served, once the
@@ -144,7 +180,7 @@ export function requireCourseEditor(
 
       req.courseId = courseId;
 
-      if (!isGlobalAuthor && !(await CurriculumGateway.isContributor(req.user.id, courseId))) {
+      if (!(await CurriculumGateway.canEditCourse(req.user.id, courseId, isGlobalAuthor))) {
         logSecurityEvent('access.denied', {
           userId: req.user.id,
           email: req.auth.email,
@@ -152,7 +188,7 @@ export function requireCourseEditor(
           method: req.method,
           path: req.path,
           resource: courseId,
-          reason: 'not a global author and not a contributor on this course',
+          reason: 'did not create this course and is not named on it',
         });
         return res.status(403).send({ errorMessage: 'You do not have edit access to that course' });
       }

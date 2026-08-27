@@ -11,7 +11,10 @@ import {
   authenticateAndAttachUser,
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
-import { requireAuthor } from '@/controllers/auth-controller/authorization-middleware';
+import {
+  AUTHOR_ROLES,
+  requireAuthor,
+} from '@/controllers/auth-controller/authorization-middleware';
 import {
   fromQuestionParam,
   fromQuizParam,
@@ -21,12 +24,22 @@ import {
 import { controller, del, get, post, put, use } from '@/controllers/decorators';
 import { fail } from '@/controllers/http-errors';
 import { rateLimit } from '@/controllers/middleware/rate-limit';
-import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import QuizService, { QuestionInput } from '@/services/quiz-service/quiz-service';
 
 // req.params values are typed `string | string[]` in Express 5, so normalize before use.
 function param(req: Request, name: string): string {
   return String(req.params[name]);
+}
+
+/**
+ * Whether the caller holds a global authoring role.
+ *
+ * It no longer means "may reach every quiz". It widens the scoped listings by
+ * exactly the quizzes that belong to no course — see
+ * `QuizGateway.quizzesInCourses`.
+ */
+function isGlobalAuthor(req: AuthenticatedRequest): boolean {
+  return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
 }
 
 @controller('/quizzes')
@@ -42,52 +55,58 @@ export default class QuizController {
     return res.send({ quizzes });
   }
 
-  /** Author view: drafts included, answers intact so they can be edited. */
+  /**
+   * Author view: drafts included, answers intact so they can be edited — and
+   * only the quizzes inside courses this person owns or was named on.
+   */
   @get('/manage')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async getQuizzesForAuthor(req: Request, res: Response) {
-    const quizzes = await QuizService.getAllQuizzes();
+  async getQuizzesForAuthor(req: AuthenticatedRequest, res: Response) {
+    const quizzes = await QuizService.getQuizzesForAuthor(req.user!.id, isGlobalAuthor(req));
     return res.send({ quizzes });
   }
 
   @get('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async getDeletedQuizzes(req: Request, res: Response) {
-    const quizzes = await QuizGateway.getDeletedQuizzes();
+  async getDeletedQuizzes(req: AuthenticatedRequest, res: Response) {
+    const quizzes = await QuizService.getDeletedQuizzes(req.user!.id, isGlobalAuthor(req));
     return res.send({ quizzes });
   }
 
-  /** Restores every deleted quiz in one go. */
+  /** Restores this person's deleted quizzes in one go. */
   @post('/deleted/restore-all')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async restoreAllQuizzes(req: Request, res: Response) {
+  async restoreAllQuizzes(req: AuthenticatedRequest, res: Response) {
     try {
-      const restored = await QuizService.restoreAllQuizzes();
+      const restored = await QuizService.restoreAllQuizzes(req.user!.id, isGlobalAuthor(req));
       return res.send({ message: 'Quizzes restored', restored });
     } catch (error) {
       return fail(res, error, 'Error restoring quizzes');
     }
   }
 
-  /** Permanently removes every deleted quiz. */
+  /** Permanently removes this person's deleted quizzes. */
   @del('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
-  async purgeAllQuizzes(req: Request, res: Response) {
+  async purgeAllQuizzes(req: AuthenticatedRequest, res: Response) {
     try {
-      const purged = await QuizService.purgeAllQuizzes();
+      const purged = await QuizService.purgeAllQuizzes(req.user!.id, isGlobalAuthor(req));
       return res.send({ message: 'Deleted quizzes permanently removed', purged });
     } catch (error) {
       return fail(res, error, 'Error emptying deleted quizzes');
     }
   }
 
-  /** Permanently removes one deleted quiz. */
+  /**
+   * Permanently removes one deleted quiz. Guarded by the course that owns it,
+   * with the draft marker off — the row is about to stop existing.
+   */
   @del('/deleted/:id')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromQuizParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
   async purgeQuiz(req: Request, res: Response) {
     try {
@@ -162,7 +181,7 @@ export default class QuizController {
   }
 
   @post('/:id/restore')
-  @use(requireAuthor())
+  @use(requireCourseEditor(fromQuizParam('id')))
   @use(authenticateAndAttachUser)
   async restoreQuiz(req: Request, res: Response) {
     try {

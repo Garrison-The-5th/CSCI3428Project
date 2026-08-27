@@ -32,6 +32,9 @@ model User {
   quizSessions      QuizSession[]
   notes             Note[]
   completions       CourseCompletion[]
+  /// Courses this person created. They own them: nobody else reaches them
+  /// unless they are named on `editableCourses` below.
+  authoredCourses   Course[]            @relation("CourseAuthor")
   /// Courses this person may edit. Empty means no Course Editor access.
   editableCourses   Course[]            @relation("CourseContributors")
   /// Assignments this person handed out. Their address is the one the learner
@@ -102,6 +105,20 @@ model Course {
   /// Bumped only when a section or quiz is added. Compared against a learner's
   /// completion date to tell them there is something new.
   contentUpdatedAt DateTime   @default(now())
+  /// Who made this, and so who owns it.
+  ///
+  /// Authoring rights used to follow from the Keycloak role alone, which made
+  /// every admin an author of everything: one person's draft sat on every other
+  /// admin's Create a Lesson page, ready to be edited or deleted. Ownership is
+  /// recorded here instead, and `contributors` below is how it is shared — so a
+  /// course is reachable by the person who made it and by whoever they named,
+  /// and by nobody else whatever role they hold.
+  ///
+  /// Null on courses that predate this column and could not be attributed to
+  /// anyone (see the backfill in the migration). Those stay visible to global
+  /// authors, because otherwise they would belong to nobody and be unreachable.
+  createdById      Int?
+  createdBy        User?      @relation("CourseAuthor", fields: [createdById], references: [id], onDelete: SetNull)
 
   modules      Module[]
   sections     Section[]
@@ -114,6 +131,7 @@ model Course {
   publications CoursePublication[]
 
   @@index([kind])
+  @@index([createdById])
 }
 
 /// One published version of a course, frozen at the moment it went live.
