@@ -1,30 +1,35 @@
 # Connect the app to Keycloak locally
 
 1. Install Docker.
-2. Run the Keycloak container:
+2. Start Keycloak:
 
 ```bash
-docker run -p 127.0.0.1:4000:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin quay.io/keycloak/keycloak:26.3.3 start-dev
+docker compose up -d keycloak
 ```
+
+   Use compose rather than a bare `docker run` — the `keycloak_data` volume it
+   mounts is what keeps the realm, its client and its signing key across a
+   container rebuild. A plain `docker run` (or `docker compose down -v`) throws
+   all of that away, and the realm has to be rebuilt and `PUBLICKEY` re-copied.
 
 3. Open the Keycloak Admin Console at `http://localhost:4000/`
 4. **Login** with username: `admin` and password: `admin`
 
 ### Create the Realm
 
-5. **Create a new realm** (the app is configured to use `myapp`):
+5. **Create a new realm** (the app is configured to use `learningapp`):
    - Click the dropdown in the top-left corner (currently shows "master")
    - Click **"Create Realm"**
-   - **Realm name**: `myapp`
+   - **Realm name**: `learningapp`
    - Click **"Create"**
 
 ### Create the Client
 
-6. **Create a new client** (the app is configured to use `myapp-client`):
+6. **Create a new client** (the app is configured to use `learning-client`):
    - In the left sidebar, click **"Clients"**
    - Click **"Create client"** button
    - **Client type**: `OpenID Connect`
-   - **Client ID**: `myapp-client`
+   - **Client ID**: `learning-client`
    - Click **"Next"**
 
 7. **Configure client authentication**:
@@ -63,7 +68,42 @@ docker run -p 127.0.0.1:4000:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOO
     - Click **"Save"**
     - Confirm by clicking **"Save password"** in the dialog
 
-> **Note**: The app is pre-configured to work with realm name `myapp` and client ID `myapp-client`. If you use these exact names, you won't need to modify any configuration files.
+### Point the Backend at the Realm
+
+11. **Copy the realm public key into the backend environment.** The backend
+    verifies every token against `PUBLICKEY`, so a key that does not match this
+    realm rejects all sign-ins with a 401:
+
+    ```bash
+    curl -s http://localhost:4000/realms/learningapp \
+      | python3 -c 'import sys,json;print("PUBLICKEY="+json.load(sys.stdin)["public_key"])' \
+      >> .env      # then delete any older PUBLICKEY line
+    ```
+
+    The same value is in the admin console under **Realm settings → Keys → RS256
+    → Public key**.
+
+12. **Recreate the backend** so it picks up the new value:
+
+    ```bash
+    docker compose up -d backend
+    ```
+
+    `docker compose restart backend` is not enough — compose substitutes `.env`
+    when it creates the container, not when it restarts one.
+
+13. **Check it end to end:**
+
+    ```bash
+    TOKEN=$(curl -s -d client_id=learning-client -d username=testuser \
+      -d password=test123 -d grant_type=password \
+      http://localhost:4000/realms/learningapp/protocol/openid-connect/token \
+      | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+    curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+      http://localhost:5002/table-members/    # expect 200
+    ```
+
+> **Note**: The app is pre-configured to work with realm name `learningapp` and client ID `learning-client`. If you use these exact names, you won't need to modify any configuration files.
 
 ### Using Different Realm/Client Names
 

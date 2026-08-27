@@ -56,6 +56,7 @@ See [Code Structure](docs/code_structure.md) for the full domain model and file 
 | [UX Design](docs/ux-design.md) | Navigation paths per audience, per-page rationale |
 | [Security Follow-Ups](docs/security-follow-ups.md) | Known gaps against the standards, and why |
 | [Keycloak setup](docs/keycloak.md) | Connecting the app to Keycloak locally |
+| [Outbound email](docs/email.md) | SMTP app-password setup, and reading the boot log |
 | [Google OAuth](docs/google_oauth.md) | Google sign-in through Keycloak |
 | [Role-Based Access Control](docs/CMS.md) | Roles and what each can do |
 
@@ -110,7 +111,8 @@ Access the app at `http://localhost:5173`.
 
 On a first run, configure the Keycloak realm ([docs/keycloak.md](docs/keycloak.md)),
 put the realm public key in `PUBLICKEY` in a root `.env`, and
-`docker compose restart backend`.
+`docker compose up -d backend` — compose substitutes `.env` when it creates a
+container, not when it restarts one.
 
 #### Option 2: App locally, PostgreSQL in Docker
 
