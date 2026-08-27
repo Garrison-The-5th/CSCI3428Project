@@ -82,7 +82,13 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
-    env_file: .env
+    # No `env_file:` here. `docker buildx bake` reads this file alongside
+    # docker-bake.hcl — both are in its default file list — and an env_file it
+    # cannot open is a hard load error, so a missing .env made `bake --print`
+    # exit non-zero and the staging deploy fail with "No image tags found".
+    # .env is gitignored, so CI never has one. Every variable the backend reads
+    # is therefore named below and substituted from .env, which compose does
+    # without being asked.
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${DB_USERNAME:-learning_dev}:${DB_PASSWORD:-localdev_change_me}@postgres:5432/${DB_NAME:-learning_app}?schema=public
@@ -96,12 +102,19 @@ services:
       # Optional: leave unset and assignment emails are logged instead of sent.
       EMAIL_USER: ${EMAIL_USER:-}
       EMAIL_APP_PASSWORD: ${EMAIL_APP_PASSWORD:-}
+      # Only needed to send through something other than Gmail, or on 587 when
+      # 465 is blocked. See docs/email.md.
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
       # How many proxy hops to believe for the caller's IP. Unset is correct
       # locally; production must set it or every visitor shares a rate-limit
       # bucket. See backend/src/config/client-address.ts.
       TRUST_PROXY: ${TRUST_PROXY:-}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      # A real value, not an empty one: index.ts falls back with `??`, which an
+      # empty string satisfies, and body-parser rejects `limit: ""` on startup.
+      JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-2mb}
     healthcheck:
       # `/table-members/` — note the exact path. This read `/table/members`,
       # which does not exist, so the check hit the 404 handler and the container
