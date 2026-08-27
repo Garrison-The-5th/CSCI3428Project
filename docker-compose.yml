@@ -143,7 +143,9 @@ services:
     container_name: learning-frontend
     restart: unless-stopped
     ports:
-      - '5173:5173'
+      # Host 5173 keeps the address everyone already uses; the container serves
+      # on 80, which is what the frontend Service in k8s-gitops targets.
+      - '5173:80'
     depends_on:
       backend:
         condition: service_started
