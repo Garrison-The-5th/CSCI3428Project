@@ -7,6 +7,7 @@
  */
 import { Request, Response } from 'express';
 
+import { originFromRequest } from '@/config/app-url';
 import {
   authenticateAndAttachUser,
   AuthenticatedRequest,
@@ -129,6 +130,9 @@ export default class AssignmentController {
       const { delivery, ...assignment } = await AssignmentService.assign(
         req.body,
         assignerFrom(req),
+        // Built from this request, so the link goes to whatever address the app
+        // is being used on rather than to whatever a config file last said.
+        originFromRequest(req as Request),
       );
       // The assignment is saved either way; the message says whether the person
       // has actually been told yet.
@@ -188,7 +192,7 @@ export default class AssignmentController {
     try {
       const id = param(req as Request, 'id');
       await AssignmentService.restore(id);
-      const delivery = await AssignmentService.resend(id);
+      const delivery = await AssignmentService.resend(id, originFromRequest(req as Request));
 
       return res.send({
         message: delivery.sent
@@ -207,7 +211,10 @@ export default class AssignmentController {
   @use(authenticateAndAttachUser)
   async resend(req: AuthenticatedRequest, res: Response) {
     try {
-      const delivery = await AssignmentService.resend(param(req as Request, 'id'));
+      const delivery = await AssignmentService.resend(
+        param(req as Request, 'id'),
+        originFromRequest(req as Request),
+      );
       return res.send({
         message: delivery.sent ? 'Email sent again' : (delivery.reason ?? 'Nothing was sent'),
         delivery,

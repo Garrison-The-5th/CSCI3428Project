@@ -41,7 +41,7 @@ export default class NotificationService {
    * list is always computed from their completion date rather than from the last
    * mail.
    */
-  static async announceNewContent(courseId: string) {
+  static async announceNewContent(courseId: string, baseUrl?: string | null) {
     try {
       const course = await CurriculumGateway.getCourseById(courseId);
       // Nothing to announce about a draft — nobody can have finished it.
@@ -63,6 +63,7 @@ export default class NotificationService {
           courseId,
           courseTitle: course.title,
           items,
+          baseUrl,
         });
 
         // Only start the quiet period once something actually went out, so a

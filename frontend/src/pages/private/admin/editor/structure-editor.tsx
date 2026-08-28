@@ -33,6 +33,7 @@ import QuizEditor from '@/components/common/quiz-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import Spinner from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
 import ModuleColorPicker from '@/pages/private/admin/editor/module-color-picker';
@@ -136,6 +137,16 @@ const StructureEditor = ({
   });
   const [drag, setDrag] = useState<Drag>(null);
   const [contentDragId, setContentDragId] = useState<string | null>(null);
+  /**
+   * The section an upload is in flight for, or null.
+   *
+   * Kept as the section id rather than a flag so a slow upload cannot leave a
+   * spinner sitting under a different section the author has clicked onto while
+   * they waited. A photo off a phone takes seconds on the deployed app — several
+   * megabytes up, then a HEIC re-encode on the server — and until it lands there
+   * is nothing on screen to say the Upload button did anything at all.
+   */
+  const [uploadingSectionId, setUploadingSectionId] = useState<string | null>(null);
   const [openQuizId, setOpenQuizId] = useState<string | null>(null);
   /** Collapsed rather than expanded, so reopening the editor looks unchanged. */
   const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
@@ -773,24 +784,46 @@ const StructureEditor = ({
                     type="file"
                     accept={UPLOAD_ACCEPT}
                     className="hidden"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file) {
-                        run(
-                          () => curriculumApi.uploadSectionImage(selectedSection.id, file),
+                      // Cleared before the await, so picking the same file again
+                      // after a failure still fires a change event.
+                      e.target.value = '';
+                      if (!file) return;
+
+                      const sectionId = selectedSection.id;
+                      setUploadingSectionId(sectionId);
+                      try {
+                        // `run` refreshes the course before it resolves, so the
+                        // placeholder is replaced by the real thing rather than
+                        // clearing a moment before it appears.
+                        await run(
+                          () => curriculumApi.uploadSectionImage(sectionId, file),
                           'File added',
                           'Failed to upload',
                         );
+                      } finally {
+                        setUploadingSectionId((current) =>
+                          current === sectionId ? null : current,
+                        );
                       }
-                      e.target.value = '';
                     }}
                   />
                   <Button
                     onClick={() => uploadRef.current?.click()}
+                    disabled={uploadingSectionId === selectedSection.id}
                     variant="outline"
                     className="bg-white text-dark-gray hover:bg-light-gray"
                   >
-                    <ArrowUpTrayIcon className="w-5 h-5" /> Upload
+                    {uploadingSectionId === selectedSection.id ? (
+                      <>
+                        <Spinner className="w-5 h-5" /> Uploading…
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpTrayIcon className="w-5 h-5" /> Upload
+                      </>
+                    )}
                   </Button>
 
                   <Button onClick={addElement} className={primaryBtn}>
@@ -801,7 +834,13 @@ const StructureEditor = ({
 
               {/* Existing content, draggable */}
               {sectionContent(selectedSection).length === 0 ? (
-                <p className="text-sm text-dark-gray">Nothing in this section yet.</p>
+                // Silent while an upload is in flight: the placeholder below is
+                // what is in the section, and the two would contradict.
+                <>
+                  {uploadingSectionId !== selectedSection.id && (
+                    <p className="text-sm text-dark-gray">Nothing in this section yet.</p>
+                  )}
+                </>
               ) : (
                 sectionContent(selectedSection).map((item) =>
                   item.kind === 'element' ? (
@@ -882,6 +921,24 @@ const StructureEditor = ({
                     </div>
                   ),
                 )
+              )}
+
+              {/*
+                Stands where the upload is about to appear — new content is added
+                to the end of the section, so this is the spot the image will
+                take. A placeholder in the list rather than a spinner on the
+                button alone, because that is where the author is looking for it.
+              */}
+              {uploadingSectionId === selectedSection.id && (
+                <div
+                  className="flex h-24 items-center justify-center gap-3 rounded-lg border
+                    border-dashed border-gray-300 bg-light-gray"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner className="h-6 w-6" />
+                  <span className="text-sm text-dark-gray">Uploading…</span>
+                </div>
               )}
             </CardContent>
           </>

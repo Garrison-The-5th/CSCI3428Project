@@ -6,6 +6,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
+import { logger } from '@/config/logger';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
@@ -74,6 +75,34 @@ describe('EmailService — assignment messages', () => {
     jest.restoreAllMocks();
     const output = logged.join('');
     expect(output).not.toContain('secret-token-value-should-not-appear');
+  });
+
+  /**
+   * The bug this covers: with no APP_BASE_URL — which is the state every
+   * deployment was actually in — every link went to http://localhost:5173, so
+   * mail that sent perfectly was unusable to whoever received it.
+   */
+  it('builds the link on the host the request came in on, not the dev server', async () => {
+    delete process.env.APP_BASE_URL;
+    // With no credentials the message is logged rather than sent, which is the
+    // only place a unit test can read the body it composed.
+    const info = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    await EmailService.sendAssignmentEmail({
+      to: 'ada@example.com',
+      type: 'LINK',
+      title: 'Fire safety',
+      kind: 'course',
+      token: 'a-very-long-token-value-here',
+      dueDate: null,
+      baseUrl: 'https://learning.ttgteams.com',
+    });
+
+    const body = String((info.mock.calls[0][0] as { body: string }).body);
+    info.mockRestore();
+
+    expect(body).toContain('https://learning.ttgteams.com/a/');
+    expect(body).not.toContain('localhost:5173');
   });
 
   it('reports nothing to send when a new-content message has no items', async () => {

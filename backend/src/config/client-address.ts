@@ -51,6 +51,17 @@ export function parseTrustProxy(raw: string | undefined): boolean | number | str
 /** Whether we are behind a proxy we have been told to believe. */
 let behindTrustedProxy = false;
 
+/**
+ * Whether the forwarding headers are worth reading.
+ *
+ * Asked by anything that has to take the caller's word for something the proxy
+ * rewrote — the caller's address here, the host the app was reached on in
+ * `config/app-url.ts`. Unproxied, those headers are caller-supplied text.
+ */
+export function isBehindTrustedProxy(): boolean {
+  return behindTrustedProxy;
+}
+
 export function configureTrustProxy(app: Application) {
   const setting = parseTrustProxy(process.env.TRUST_PROXY);
   app.set('trust proxy', setting);
