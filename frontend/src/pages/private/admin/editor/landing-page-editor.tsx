@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import Spinner from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import { saveLabel, useAutoSave } from '@/hooks/use-auto-save';
@@ -57,6 +58,17 @@ const dueIfAssignedToday = (days: string) => {
 
 const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
   const coverRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Whether a cover photo is on its way up.
+   *
+   * Worth a spinner because the wait is real and invisible: a photo off a phone
+   * is several megabytes, the server re-encodes HEIC before it answers, and on
+   * the deployed app that is seconds rather than the instant it takes locally.
+   * With nothing on screen the box simply sits there showing the old photo, so
+   * the upload reads as a click that did nothing and gets clicked again.
+   */
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   const [draft, setDraft] = useState({
     title: '',
@@ -121,7 +133,7 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
         {/* Cover photo */}
         <div className="flex flex-wrap items-center gap-4">
           <div
-            className="flex h-24 w-32 shrink-0 items-center justify-center overflow-hidden
+            className="relative flex h-24 w-32 shrink-0 items-center justify-center overflow-hidden
               rounded-lg border border-gray-300 bg-white"
           >
             {imageSrc(course.imageData, course.imageType) ? (
@@ -133,6 +145,18 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
             ) : (
               <span className="text-xs text-dark-gray">No photo</span>
             )}
+
+            {/* Over the photo itself, so the wait is where the result will be. */}
+            {uploadingCover && (
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-white/75"
+                role="status"
+                aria-live="polite"
+              >
+                <Spinner className="h-8 w-8" />
+                <span className="sr-only">Uploading cover photo</span>
+              </div>
+            )}
           </div>
           <div>
             <input
@@ -140,20 +164,41 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
               type="file"
               accept={IMAGE_ONLY_ACCEPT}
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                  run(
+                // Cleared before the await, so picking the same file again after
+                // a failure still fires a change event.
+                e.target.value = '';
+                if (!file) return;
+
+                setUploadingCover(true);
+                try {
+                  // `run` refreshes the course before it resolves, so the spinner
+                  // lifts on the new photo rather than on the old one.
+                  await run(
                     () => curriculumApi.uploadCourseImage(course.id, file),
                     'Cover photo updated',
                     'Failed to upload cover photo',
                   );
+                } finally {
+                  setUploadingCover(false);
                 }
-                e.target.value = '';
               }}
             />
-            <Button onClick={() => coverRef.current?.click()} className={primaryBtn}>
-              <ArrowUpTrayIcon className="w-5 h-5" /> Upload cover photo
+            <Button
+              onClick={() => coverRef.current?.click()}
+              disabled={uploadingCover}
+              className={primaryBtn}
+            >
+              {uploadingCover ? (
+                <>
+                  <Spinner className="w-5 h-5" /> Uploading…
+                </>
+              ) : (
+                <>
+                  <ArrowUpTrayIcon className="w-5 h-5" /> Upload cover photo
+                </>
+              )}
             </Button>
             <p className="mt-1 text-xs text-dark-gray">
               JPEG, PNG, GIF, WebP, SVG, BMP or HEIC, up to 10MB.

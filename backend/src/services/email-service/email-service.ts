@@ -7,6 +7,7 @@
  */
 import nodemailer from 'nodemailer';
 
+import { appBaseUrl, configuredBaseUrl } from '@/config/app-url';
 import { logger } from '@/config/logger';
 
 /** Gmail's implicit-TLS submission port, and the host an app password belongs to. */
@@ -67,6 +68,13 @@ type AssignmentEmailRequest = {
   dueDate: Date | null;
   /** A repeat of a message already sent, so the subject says so. */
   resend?: boolean;
+  /**
+   * The origin the request that triggered this arrived on, so the link lands on
+   * the host the app is actually being served from. See `config/app-url.ts`;
+   * `APP_BASE_URL` still overrides it, and omitting it is what a background job
+   * with no request in scope does.
+   */
+  baseUrl?: string | null;
 };
 
 /** One section or quiz that has appeared in a course since someone finished it. */
@@ -84,6 +92,8 @@ type NewContentEmailRequest = {
   courseId: string;
   courseTitle: string;
   items: NewContentItem[];
+  /** The origin to build the link on — see `AssignmentEmailRequest.baseUrl`. */
+  baseUrl?: string | null;
 };
 
 /**
@@ -150,16 +160,6 @@ export function describeSmtpFailure(error: unknown): string {
     default:
       return error instanceof Error && error.message ? error.message : 'unknown error';
   }
-}
-
-/**
- * Where the app lives, for building links that land on the right host. Falls
- * back to the dev frontend so a local run still produces a clickable URL —
- * which is why `reportConfiguration` complains about it being unset in
- * production, where that fallback silently mails everyone a dead link.
- */
-function appBaseUrl(): string {
-  return (process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/+$/, '');
 }
 
 /**
@@ -241,9 +241,10 @@ function composeAssignmentEmail({
   token,
   dueDate,
   resend,
+  baseUrl,
 }: AssignmentEmailRequest): { subject: string; body: string } {
   const due = dueDate ? `\n\nIt is due by ${dueDate.toLocaleDateString('en-GB')}.` : '';
-  const base = appBaseUrl();
+  const base = appBaseUrl(baseUrl);
   // Same message either way; the prefix stops a resend reading as a second
   // enrolment to someone who already has the first mail in their inbox.
   const prefix = resend ? 'Reminder: ' : '';
@@ -276,7 +277,12 @@ function composeAssignmentEmail({
  * for them, not that an edit happened. Items are grouped under their module
  * heading in the order the course reads.
  */
-function composeNewContentEmail({ courseId, courseTitle, items }: NewContentEmailRequest): {
+function composeNewContentEmail({
+  courseId,
+  courseTitle,
+  items,
+  baseUrl,
+}: NewContentEmailRequest): {
   subject: string;
   body: string;
 } {
@@ -304,7 +310,7 @@ function composeNewContentEmail({ courseId, courseTitle, items }: NewContentEmai
     body:
       `"${courseTitle}" has gained ${count} new item${count === 1 ? '' : 's'} since you ` +
       `finished it:\n\n${outline}\n\n` +
-      `Pick up where it leaves off:\n${appBaseUrl()}/learning/${courseId}`,
+      `Pick up where it leaves off:\n${appBaseUrl(baseUrl)}/learning/${courseId}`,
   };
 }
 
@@ -339,10 +345,10 @@ export default class EmailService {
       'email enabled',
     );
 
-    if (process.env.NODE_ENV === 'production' && !process.env.APP_BASE_URL?.trim()) {
-      logger.warn(
-        { fallback: appBaseUrl() },
-        'APP_BASE_URL is unset: every link in outgoing mail will point at the local dev host',
+    if (process.env.NODE_ENV === 'production' && !configuredBaseUrl()) {
+      logger.info(
+        'APP_BASE_URL is unset: links in outgoing mail will use the host each request ' +
+          'arrives on. Set it to pin them to one address.',
       );
     }
 

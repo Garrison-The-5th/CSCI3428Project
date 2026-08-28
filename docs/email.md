@@ -11,21 +11,36 @@ placeholder profile in the identity provider used to end up in both.
 
 ## Environment
 
-| Variable             | Required | Default          | Notes                                                   |
-| -------------------- | -------- | ---------------- | ------------------------------------------------------- |
-| `EMAIL_USER`         | yes      | —                | The mailbox, e.g. `noreply@ttgteams.com`                 |
-| `EMAIL_APP_PASSWORD` | yes      | —                | Google app password. Spaces and newlines are stripped    |
-| `SMTP_HOST`          | no       | `smtp.gmail.com` | An internal relay goes here                             |
-| `SMTP_PORT`          | no       | `465`            | 465 is implicit TLS; anything else is STARTTLS, required |
-| `APP_BASE_URL`       | in prod  | `http://localhost:5173` | Every link in every message is built from this    |
+| Variable             | Required | Default                | Notes                                                    |
+| -------------------- | -------- | ---------------------- | -------------------------------------------------------- |
+| `EMAIL_USER`         | yes      | —                      | The mailbox, e.g. `noreply@ttgteams.com`                 |
+| `EMAIL_APP_PASSWORD` | yes      | —                      | Google app password. Spaces and newlines are stripped    |
+| `SMTP_HOST`          | no       | `smtp.gmail.com`       | An internal relay goes here                              |
+| `SMTP_PORT`          | no       | `465`                  | 465 is implicit TLS; anything else is STARTTLS, required |
+| `APP_BASE_URL`       | no       | the request's own host | Pins every link in every message to one address          |
 
 With `EMAIL_USER` or `EMAIL_APP_PASSWORD` missing, nothing is sent: messages are
 logged with the assignment link masked, assigning still works, and the author is
 told plainly that email is not configured. That is the intended state for a
 local checkout and a bug in a deployment.
 
-`APP_BASE_URL` is the quiet one. Unset, it falls back to the dev host, and mail
-that sends perfectly carries links to `localhost:5173`.
+`APP_BASE_URL` used to be the quiet one: unset, it fell back to the dev host, so
+mail that sent perfectly carried links to `localhost:5173` — which is what every
+deployment was doing, because nothing sets it.
+
+Links are now built on the host the request that triggered the mail arrived on
+(`config/app-url.ts`). An author clicking Assign on `learning.ttgteams.com`
+reaches the API on that same host — deployed, the frontend and the API are one
+origin, with `/api` routed to the backend — so the link lands where the app
+actually is and cannot drift from it. Locally the two are separate ports and the
+request carries the API's, so a loopback host is discarded in favour of the Vite
+dev server.
+
+Set `APP_BASE_URL` when you want the address pinned rather than observed: it
+overrides the request, it is the only source a caller cannot influence with a
+`Host` header, and it is what a split deployment needs, where the address the
+author uses is not the address to send learners to. It also covers mail sent
+with no request in scope at all.
 
 ## Is it working? Read the boot log
 
@@ -39,12 +54,12 @@ smtp ready      relay=smtp.gmail.com:465
 That second line is a real authenticated SMTP session, opened and closed without
 sending anything. If it says something else:
 
-| Log line                                    | Meaning                                                     |
-| ------------------------------------------- | ----------------------------------------------------------- |
-| `email disabled: ... are unset`             | No credentials in the environment. Check the Secret          |
-| `smtp unavailable: ... rejected the app password` | Wrong or revoked app password                          |
-| `smtp unavailable: ... could not be reached`| Egress to the relay is blocked, or the host is wrong         |
-| `APP_BASE_URL is unset`                     | Mail will send with dead links                               |
+| Log line                                          | Meaning                                                           |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| `email disabled: ... are unset`                   | No credentials in the environment. Check the Secret               |
+| `smtp unavailable: ... rejected the app password` | Wrong or revoked app password                                     |
+| `smtp unavailable: ... could not be reached`      | Egress to the relay is blocked, or the host is wrong              |
+| `APP_BASE_URL is unset`                           | Links follow the host each request arrives on. Set it to pin them |
 
 To check credentials without restarting anything, from a running container:
 

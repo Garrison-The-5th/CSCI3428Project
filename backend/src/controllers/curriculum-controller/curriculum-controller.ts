@@ -7,6 +7,7 @@
  */
 import { Request, Response } from 'express';
 
+import { originFromRequest } from '@/config/app-url';
 import { mediaUpload } from '@/config/media-upload';
 import {
   authenticateAndAttachUser,
@@ -282,7 +283,10 @@ export default class CurriculumController {
       // New content is announced only once it can actually be reached, which is
       // now rather than when the author typed it.
       if (result.hasNewContent) {
-        void NotificationService.announceNewContent(param(req as Request, 'id'));
+        void NotificationService.announceNewContent(
+          param(req as Request, 'id'),
+          originFromRequest(req as Request),
+        );
       }
 
       return res.send({

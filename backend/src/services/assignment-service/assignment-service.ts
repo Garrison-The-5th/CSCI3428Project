@@ -167,6 +167,11 @@ export default class AssignmentService {
     },
     /** The signed-in author. The learner hears from them, not a shared mailbox. */
     assigner?: { id: number } | null,
+    /**
+     * The origin the author is using the app on, so the link in their learner's
+     * email points at the same place. See `config/app-url.ts`.
+     */
+    baseUrl?: string | null,
   ) {
     const email = normaliseEmail(data.email);
 
@@ -255,6 +260,7 @@ export default class AssignmentService {
       kind: courseId ? 'course' : 'quiz',
       token: assignment.token,
       dueDate: assignment.dueDate,
+      baseUrl,
     });
 
     if (delivery.sent) {
@@ -349,7 +355,7 @@ export default class AssignmentService {
    * rather than as an error, because the caller's other work (flipping the
    * switch) has already succeeded and must stand.
    */
-  static async resend(id: string) {
+  static async resend(id: string, baseUrl?: string | null) {
     const assignment = await AssignmentGateway.findById(id);
     if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);
 
@@ -377,6 +383,7 @@ export default class AssignmentService {
       token: assignment.token,
       dueDate: assignment.dueDate,
       resend: true,
+      baseUrl,
     });
 
     if (delivery.sent) {

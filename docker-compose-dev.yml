@@ -60,8 +60,11 @@ services:
       # excluded by backend/Dockerfile.dockerignore. Set these in the root .env,
       # which is the file compose substitutes from.
       PUBLICKEY: ${PUBLICKEY}
-      # Where links in outgoing email should point.
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # Where links in outgoing email should point. Left empty on purpose: the
+      # backend then builds them on the host each request arrives on, which is
+      # right both locally and for a stack reached over a real hostname. Set it
+      # to pin every link to one address instead. See docs/email.md.
+      APP_BASE_URL: ${APP_BASE_URL:-}
       # Optional: leave unset and assignment emails are logged instead of sent.
       EMAIL_USER: ${EMAIL_USER:-}
       EMAIL_APP_PASSWORD: ${EMAIL_APP_PASSWORD:-}
