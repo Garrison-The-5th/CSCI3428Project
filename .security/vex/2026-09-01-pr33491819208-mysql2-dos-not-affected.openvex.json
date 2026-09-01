@@ -1,0 +1,39 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-09-01-pr33491819208-mysql2-dos-not-affected.openvex.json",
+  "version": 1,
+  "timestamp": "2026-09-01T09:25:45.220Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "33491819208"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GHSA-rgwj-5xj2-c3m3",
+        "description": "MySQL2: Unbounded zlib inflate in compressed MySQL protocol handler allows decompression-bomb DoS"
+      },
+      "products": [{ "@id": "pkg:npm/mysql2@3.15.3" }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "mysql2 is present only as a devOptional transitive of the prisma CLI (backend/package-lock.json:7123 marks devOptional:true; parent at line 7925). Our Prisma datasource provider is postgresql (backend/prisma/schema.prisma:13), and no source file imports mysql2 (grep -rn 'mysql' backend/src backend/scripts returns 0 hits). The vulnerable code path is the compressed MySQL protocol handler in the driver, which requires establishing a MySQL connection to trigger — impossible in our setup, so the vulnerability is not on any execute path we ship or run.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2026-11-30",
+      "references": [
+        "https://github.com/advisories/GHSA-rgwj-5xj2-c3m3",
+        "https://github.com/sidorares/node-mysql2/commit/7c48343c95ecc80d30d6ebfa67875947b7d848d2",
+        "https://github.com/sidorares/node-mysql2/releases/tag/v3.23.1"
+      ]
+    }
+  ]
+}

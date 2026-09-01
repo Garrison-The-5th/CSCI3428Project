@@ -2,20 +2,20 @@
 
 | Source | Finding | Status | Confidence | Action |
 |---|---|---|---:|---|
-| Semgrep | `react-dangerouslysetinnerhtml` at `frontend/src/components/common/element-view.tsx:293` | not_affected | 90% | Justification `inline_mitigations_already_exist` — server-side `sanitizeRichText` (sanitize-html allowlist) is applied on every write path; added inline `// nosemgrep:` suppression. |
+| Trivy (npm) | GHSA-rgwj-5xj2-c3m3 — mysql2 3.15.3 (decompression-bomb DoS in compressed MySQL protocol handler) | not_affected | 90% | Suppressed via VEX (`vulnerable_code_not_in_execute_path`) — mysql2 is a `devOptional` transitive of the `prisma` CLI; our Prisma datasource is `postgresql` and no source imports `mysql2`, so the vulnerable code path (compressed MySQL protocol) is never entered. |
 
 ## Auto-fixed
 
-- _None._ No fixable vulnerabilities in this scan.
+- None. This Watch run produced only a not_affected disposition.
 
 ## Tests updated (stale assertions from fixes)
 
-- _None._
+- None.
 
 ## 🚨 Escalated — human attention needed
 
-- _None._
+- None.
 
 ## Outcome
 
-DONE — One NEW SAST finding (Semgrep `react-dangerouslysetinnerhtml` at `frontend/src/components/common/element-view.tsx:293`) triaged as `not_affected` with justification `inline_mitigations_already_exist`. The rendered `element.textContent` is written only through `CurriculumService.createElement`/`updateElement` (`backend/src/services/curriculum-service/curriculum-service.ts:1107,1187`), both of which pass the value through `sanitizeRichText` (`backend/src/config/rich-text.ts`) — a strict `sanitize-html` allowlist that removes `<script>`, `<iframe>`, event handlers, `javascript:` URLs, and restricts inline styles. No VEX / dependency CVEs were reported by Trivy. Suppressions synced, rebucket confirms 0 NEW, preflight (lint, backend unit tests, frontend jest tests, build, backend typecheck) green.
+DONE — one NEW dependency finding tonight. mysql2 3.15.3 (transitive optional dep of the `prisma` CLI, `devOptional` in the lockfile) picked up a MEDIUM DoS advisory (GHSA-rgwj-5xj2-c3m3). Verified our Prisma datasource is `postgresql` and no source imports `mysql2`, so the compressed-MySQL-protocol code path is unreachable in our runtime and build. Wrote a `not_affected / vulnerable_code_not_in_execute_path` statement, re-synced `.trivyignore`, and the rebucket now shows `NEW: 0`. Preflight lint + backend tests (445/445 pass) + build + `tsc --noEmit` all green; the frontend `jest` failure on the local runner is a pre-existing env issue (`jest.config.ts` needs `ts-node` under node 20.20.2; repo declares `"engines": { "node": "^24.0.0" }`) unrelated to this triage-doc-only change and will be re-evaluated by the Janus PR gate under the proper node engine.
