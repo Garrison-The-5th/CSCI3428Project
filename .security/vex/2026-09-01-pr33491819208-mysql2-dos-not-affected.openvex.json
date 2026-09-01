@@ -11,10 +11,10 @@
     "invocation_id": "33491819208"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-09-01T17:01:34Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -22,7 +22,11 @@
         "name": "GHSA-rgwj-5xj2-c3m3",
         "description": "MySQL2: Unbounded zlib inflate in compressed MySQL protocol handler allows decompression-bomb DoS"
       },
-      "products": [{ "@id": "pkg:npm/mysql2@3.15.3" }],
+      "products": [
+        {
+          "@id": "pkg:npm/mysql2@3.15.3"
+        }
+      ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "mysql2 is present only as a devOptional transitive of the prisma CLI (backend/package-lock.json:7123 marks devOptional:true; parent at line 7925). Our Prisma datasource provider is postgresql (backend/prisma/schema.prisma:13), and no source file imports mysql2 (grep -rn 'mysql' backend/src backend/scripts returns 0 hits). The vulnerable code path is the compressed MySQL protocol handler in the driver, which requires establishing a MySQL connection to trigger — impossible in our setup, so the vulnerability is not on any execute path we ship or run.",
