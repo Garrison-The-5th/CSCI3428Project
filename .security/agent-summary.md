@@ -2,15 +2,16 @@
 
 | Source | Finding | Status | Confidence | Action |
 |---|---|---|---:|---|
-| Trivy (npm) | GHSA-rgwj-5xj2-c3m3 — mysql2 3.15.3 (decompression-bomb DoS in compressed MySQL protocol handler) | not_affected | 90% | Suppressed via VEX (`vulnerable_code_not_in_execute_path`) — mysql2 is a `devOptional` transitive of the `prisma` CLI; our Prisma datasource is `postgresql` and no source imports `mysql2`, so the vulnerable code path (compressed MySQL protocol) is never entered. |
+| trivy-fs | CVE-2026-84371 sanitize-html@2.17.6 (MEDIUM, CVSS 5.4) — Stored XSS via SVG SMIL URI-list scheme-policy bypass | fixed | 92 | Bumped backend sanitize-html ^2.17.6 → ^2.17.7 (upstream patch commit apostrophecms/apostrophe@1135516). 45/45 backend/tests/unit/rich-text.test.ts pass. |
+| trivy-fs | GHSA-3f6p-5ww8-9rcr mysql2@3.15.3 (HIGH) — Auth plugin downgrade to mysql_clear_password leaks plaintext credentials | not_affected | 90 | vulnerable_code_not_in_execute_path: mysql2 is devOptional transitive of prisma CLI only; datasource provider is postgresql; no source imports mysql2. Same reachability profile as prior GHSA-rgwj-5xj2-c3m3 disposition. reevaluate_after=2026-12-01. |
 
 ## Auto-fixed
 
-- None. This Watch run produced only a not_affected disposition.
+- `backend/package.json` + `backend/package-lock.json`: sanitize-html ^2.17.6 → ^2.17.7. Closes CVE-2026-84371. Package is actively used by `backend/src/config/rich-text.ts` (called from curriculum-service to sanitize author-written lesson HTML), so the fix path is preferred over an FP call.
 
 ## Tests updated (stale assertions from fixes)
 
-- None.
+- None. sanitize-html 2.17.7 is a patch release; existing 45 rich-text unit tests all still assert correct sanitization behavior and passed unchanged.
 
 ## 🚨 Escalated — human attention needed
 
@@ -18,4 +19,4 @@
 
 ## Outcome
 
-DONE — one NEW dependency finding tonight. mysql2 3.15.3 (transitive optional dep of the `prisma` CLI, `devOptional` in the lockfile) picked up a MEDIUM DoS advisory (GHSA-rgwj-5xj2-c3m3). Verified our Prisma datasource is `postgresql` and no source imports `mysql2`, so the compressed-MySQL-protocol code path is unreachable in our runtime and build. Wrote a `not_affected / vulnerable_code_not_in_execute_path` statement, re-synced `.trivyignore`, and the rebucket now shows `NEW: 0`. Preflight lint + backend tests (445/445 pass) + build + `tsc --noEmit` all green; the frontend `jest` failure on the local runner is a pre-existing env issue (`jest.config.ts` needs `ts-node` under node 20.20.2; repo declares `"engines": { "node": "^24.0.0" }`) unrelated to this triage-doc-only change and will be re-evaluated by the Janus PR gate under the proper node engine.
+DONE — 2 statements written (1 fixed + 1 not_affected), 1 dependency auto-fix applied, .trivyignore + agent-summary re-synced from triage docs, schemas validate, post-fix bucket rebucket reports 0 NEW / 0 REGRESSION / 0 REEVALUATE. Pre-flight lint, backend jest (445/445), backend `tsc --noEmit`, and full `npm run build` are green; the frontend jest config-load failure surfaced by `npm test` is a pre-existing baseline environment issue (frontend/package.json lacks `ts-node`, needed by jest to parse jest.config.ts) and is unrelated to a backend-only dependency bump — flagging here for visibility rather than treating as blocking, per PATH 1 guidance.

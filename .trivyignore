@@ -2,5 +2,7 @@
 # Derived from .security/vex/*.openvex.json (status not_affected | affected).
 # To change a suppression, edit the VEX triage doc and re-run sync-suppressions.
 
+# not_affected: vulnerable_code_not_in_execute_path [vex/2026-09-02-pr33613642029-watch-nightly-cves.openvex.json]
+GHSA-3f6p-5ww8-9rcr
 # not_affected: vulnerable_code_not_in_execute_path [vex/2026-09-01-pr33491819208-mysql2-dos-not-affected.openvex.json]
 GHSA-rgwj-5xj2-c3m3
