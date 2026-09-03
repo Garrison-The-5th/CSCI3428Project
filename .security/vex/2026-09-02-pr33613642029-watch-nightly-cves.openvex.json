@@ -1,0 +1,66 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-09-02-pr33613642029-watch-nightly-cves.openvex.json",
+  "version": 1,
+  "timestamp": "2026-09-02T09:26:08.344Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "33613642029"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84371",
+        "description": "sanitize-html (ApostropheCMS fork): Stored XSS via SVG SMIL URI-list scheme-policy bypass"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/sanitize-html@2.17.6"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "2.17.7",
+      "action_reference": "bot-sec/security@security(triage): 1 statements, 1 auto-fixes [watch run=33613642029]",
+      "impact_statement": "sanitize-html is used to clean author-written rich text before storage (backend/src/config/rich-text.ts:8,51; called from backend/src/services/curriculum-service/curriculum-service.ts:1126,1206), so the vulnerable path is reachable. Bumped backend sanitize-html 2.17.6 -> 2.17.7 (upstream patch commit apostrophecms/apostrophe@1135516), a patch-level release. Verified: 45/45 backend/tests/unit/rich-text.test.ts jest cases pass on the new version.",
+      "confidence": 92,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-84371",
+        "https://github.com/apostrophecms/apostrophe/commit/1135516a1a4a8f9638641c460488a43d8af20081",
+        "https://github.com/apostrophecms/apostrophe/blob/main/packages/sanitize-html/CHANGELOG.md"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-3f6p-5ww8-9rcr",
+        "description": "MySQL2: Auth plugin downgrade to mysql_clear_password can leak plaintext credentials to a hostile server"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/mysql2@3.15.3"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "mysql2 is pulled in only as a devOptional transitive of the prisma CLI (backend/package-lock.json:7123 marks devOptional:true; parent prisma@7.9.1 at line 7925). Our Prisma datasource provider is postgresql (backend/prisma/schema.prisma:13), and no source file imports mysql2 (grep -rn 'mysql' backend/src backend/scripts returns 0 hits). The vulnerable code path is the mysql2 client's auth handshake, which requires opening a mysql connection — never executed in our build or runtime, so we cannot be tricked into sending mysql_clear_password. Same reachability profile as [[2026-09-01-pr33491819208-mysql2-dos-not-affected.openvex.json]] for GHSA-rgwj-5xj2-c3m3.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2026-12-01",
+      "references": [
+        "https://github.com/advisories/GHSA-3f6p-5ww8-9rcr",
+        "https://github.com/sidorares/node-mysql2/commit/884bec56288d827939d0dd3f1f4ae476fbc8dbeb",
+        "https://github.com/sidorares/node-mysql2/issues/1617"
+      ]
+    }
+  ]
+}

@@ -2,15 +2,16 @@
 
 | Source | Finding | Status | Confidence | Action |
 |---|---|---|---:|---|
-| Trivy (npm) | GHSA-rgwj-5xj2-c3m3 — mysql2 3.15.3 (decompression-bomb DoS in compressed MySQL protocol handler) | not_affected | 90% | Suppressed via VEX (`vulnerable_code_not_in_execute_path`) — mysql2 is a `devOptional` transitive of the `prisma` CLI; our Prisma datasource is `postgresql` and no source imports `mysql2`, so the vulnerable code path (compressed MySQL protocol) is never entered. |
+| Trivy (deps) | CVE-2026-82417 · qs@6.15.3 (transitive; body-parser/express/superagent) | fixed | 95 | Bumped to qs@6.16.0 via `npm update qs` in backend/ |
+| Trivy (deps) | CVE-2026-82562 · qs@6.15.3 (transitive; body-parser/express/superagent) | fixed | 95 | Same 6.16.0 bump covers both advisories |
 
 ## Auto-fixed
 
-- None. This Watch run produced only a not_affected disposition.
+- Transitive dep bump: `qs` 6.15.3 → 6.16.0 in `backend/package-lock.json`. All three parent ranges (`^6.15.2`, `^6.14.0`, `^6.14.1`) accept 6.16.0, so npm hoisted a single `node_modules/qs` entry with no other lockfile churn. Closes both new `qs` DoS advisories in one action.
 
 ## Tests updated (stale assertions from fixes)
 
-- None.
+- None — the qs bump is a runtime-behavior-neutral patch; all 445 backend unit tests passed unchanged.
 
 ## 🚨 Escalated — human attention needed
 
@@ -18,4 +19,4 @@
 
 ## Outcome
 
-DONE — one NEW dependency finding tonight. mysql2 3.15.3 (transitive optional dep of the `prisma` CLI, `devOptional` in the lockfile) picked up a MEDIUM DoS advisory (GHSA-rgwj-5xj2-c3m3). Verified our Prisma datasource is `postgresql` and no source imports `mysql2`, so the compressed-MySQL-protocol code path is unreachable in our runtime and build. Wrote a `not_affected / vulnerable_code_not_in_execute_path` statement, re-synced `.trivyignore`, and the rebucket now shows `NEW: 0`. Preflight lint + backend tests (445/445 pass) + build + `tsc --noEmit` all green; the frontend `jest` failure on the local runner is a pre-existing env issue (`jest.config.ts` needs `ts-node` under node 20.20.2; repo declares `"engines": { "node": "^24.0.0" }`) unrelated to this triage-doc-only change and will be re-evaluated by the Janus PR gate under the proper node engine.
+DONE — 2 NEW findings triaged (both fixed via one transitive dep bump); 2 PERSISTENT `mysql2` not_affected statements re-validated automatically (no action needed, `reevaluate_after` still future); 0 REEVALUATE / RESOLVED / REGRESSION on the source scan. Pre-flight green: lint, 445/445 backend unit tests, backend + frontend build, backend `tsc --noEmit`. (Post-fix rebucket flags 2 self-consistency "regressions" because `trivy-fs.json` is frozen from the pre-fix scan; those disappear on the next Watch run once trivy re-reads the updated lockfile.)
