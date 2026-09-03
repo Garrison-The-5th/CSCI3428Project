@@ -2,16 +2,16 @@
 
 | Source | Finding | Status | Confidence | Action |
 |---|---|---|---:|---|
-| trivy-fs | CVE-2026-84371 sanitize-html@2.17.6 (MEDIUM, CVSS 5.4) — Stored XSS via SVG SMIL URI-list scheme-policy bypass | fixed | 92 | Bumped backend sanitize-html ^2.17.6 → ^2.17.7 (upstream patch commit apostrophecms/apostrophe@1135516). 45/45 backend/tests/unit/rich-text.test.ts pass. |
-| trivy-fs | GHSA-3f6p-5ww8-9rcr mysql2@3.15.3 (HIGH) — Auth plugin downgrade to mysql_clear_password leaks plaintext credentials | not_affected | 90 | vulnerable_code_not_in_execute_path: mysql2 is devOptional transitive of prisma CLI only; datasource provider is postgresql; no source imports mysql2. Same reachability profile as prior GHSA-rgwj-5xj2-c3m3 disposition. reevaluate_after=2026-12-01. |
+| Trivy (deps) | CVE-2026-82417 · qs@6.15.3 (transitive; body-parser/express/superagent) | fixed | 95 | Bumped to qs@6.16.0 via `npm update qs` in backend/ |
+| Trivy (deps) | CVE-2026-82562 · qs@6.15.3 (transitive; body-parser/express/superagent) | fixed | 95 | Same 6.16.0 bump covers both advisories |
 
 ## Auto-fixed
 
-- `backend/package.json` + `backend/package-lock.json`: sanitize-html ^2.17.6 → ^2.17.7. Closes CVE-2026-84371. Package is actively used by `backend/src/config/rich-text.ts` (called from curriculum-service to sanitize author-written lesson HTML), so the fix path is preferred over an FP call.
+- Transitive dep bump: `qs` 6.15.3 → 6.16.0 in `backend/package-lock.json`. All three parent ranges (`^6.15.2`, `^6.14.0`, `^6.14.1`) accept 6.16.0, so npm hoisted a single `node_modules/qs` entry with no other lockfile churn. Closes both new `qs` DoS advisories in one action.
 
 ## Tests updated (stale assertions from fixes)
 
-- None. sanitize-html 2.17.7 is a patch release; existing 45 rich-text unit tests all still assert correct sanitization behavior and passed unchanged.
+- None — the qs bump is a runtime-behavior-neutral patch; all 445 backend unit tests passed unchanged.
 
 ## 🚨 Escalated — human attention needed
 
@@ -19,4 +19,4 @@
 
 ## Outcome
 
-DONE — 2 statements written (1 fixed + 1 not_affected), 1 dependency auto-fix applied, .trivyignore + agent-summary re-synced from triage docs, schemas validate, post-fix bucket rebucket reports 0 NEW / 0 REGRESSION / 0 REEVALUATE. Pre-flight lint, backend jest (445/445), backend `tsc --noEmit`, and full `npm run build` are green; the frontend jest config-load failure surfaced by `npm test` is a pre-existing baseline environment issue (frontend/package.json lacks `ts-node`, needed by jest to parse jest.config.ts) and is unrelated to a backend-only dependency bump — flagging here for visibility rather than treating as blocking, per PATH 1 guidance.
+DONE — 2 NEW findings triaged (both fixed via one transitive dep bump); 2 PERSISTENT `mysql2` not_affected statements re-validated automatically (no action needed, `reevaluate_after` still future); 0 REEVALUATE / RESOLVED / REGRESSION on the source scan. Pre-flight green: lint, 445/445 backend unit tests, backend + frontend build, backend `tsc --noEmit`. (Post-fix rebucket flags 2 self-consistency "regressions" because `trivy-fs.json` is frozen from the pre-fix scan; those disappear on the next Watch run once trivy re-reads the updated lockfile.)
