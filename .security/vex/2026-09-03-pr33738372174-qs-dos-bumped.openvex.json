@@ -11,10 +11,10 @@
     "invocation_id": "33738372174"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-09-03T15:52:52Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -22,7 +22,11 @@
         "name": "CVE-2026-82417",
         "description": "qs: qs.stringify throws a TypeError when serializing certain crafted inputs"
       },
-      "products": [{ "@id": "pkg:npm/qs@6.15.3" }],
+      "products": [
+        {
+          "@id": "pkg:npm/qs@6.15.3"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "6.16.0",
       "action_reference": "backend/package-lock.json bump via `npm update qs` (transitive of body-parser/express/superagent)",
@@ -41,7 +45,11 @@
         "name": "CVE-2026-82562",
         "description": "qs: Denial of Service via array limit bypass in query string parsing"
       },
-      "products": [{ "@id": "pkg:npm/qs@6.15.3" }],
+      "products": [
+        {
+          "@id": "pkg:npm/qs@6.15.3"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "6.16.0",
       "action_reference": "backend/package-lock.json bump via `npm update qs` (transitive of body-parser/express/superagent)",
