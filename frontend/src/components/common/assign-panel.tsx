@@ -175,8 +175,9 @@ const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPan
               value={daysRemaining}
               onChange={(e) => setDaysRemaining(e.target.value)}
               placeholder="Use default"
-              title="How long this person gets, counted from today. Leave blank to use the
-                deadline set on the course or quiz itself."
+              title="How long this person gets, counted from today and falling due at 11:59 PM.
+                Covers the quizzes inside a course too. Leave blank to use the deadline set on
+                the course or quiz itself."
               className={`${inputClass} max-w-32`}
             />
           </label>

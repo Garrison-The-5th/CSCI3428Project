@@ -213,7 +213,14 @@ class HttpHelper {
     }
   }
 
-  public static async delete(endpoint: string) {
+  /**
+   * `body` is optional because most deletes name their target in the path.
+   *
+   * A few say what to remove rather than which row — giving up one editing claim
+   * out of several, say — and a query string would put the same information
+   * somewhere less obvious for no gain.
+   */
+  public static async delete(endpoint: string, body?: unknown) {
     try {
       const jwtToken = await this.checkToken();
       const response = await fetch(`${API_URL}${endpoint}`, {
@@ -222,6 +229,7 @@ class HttpHelper {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${jwtToken}`,
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
 
       if (!response.ok) {

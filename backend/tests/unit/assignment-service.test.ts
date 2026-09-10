@@ -6,6 +6,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
+import { dueDateFromDays } from '@/config/validation';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
@@ -169,6 +170,103 @@ describe('assign — refuses to send a link to a dead end', () => {
     await AssignmentService.assign({ email: 'ada@example.com', courseId: 'course-1' });
 
     expect(mockGateway.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'PLATFORM' }));
+  });
+});
+
+/**
+ * How long a learner gets, and so what date is stamped on their assignment.
+ *
+ * The deadline belongs to the assignment rather than to the course, which is
+ * what lets two people handed the same course a month apart get the same run at
+ * it. Where the length comes from is the interesting part: a quiz standing on
+ * its own carries one, and a quiz inside a course does not — it is due with the
+ * course around it.
+ */
+describe('assign — where the deadline comes from', () => {
+  const course = {
+    id: 'course-1',
+    title: 'Fire safety',
+    kind: 'LESSON',
+    published: true,
+    publishedVersion: 2,
+    daysRemaining: 5,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAuth.getOrCreateUser.mockResolvedValue({ id: 1, email: 'ada@example.com' } as never);
+    mockGateway.findDuplicate.mockResolvedValue(null as never);
+    // Hands back what it was asked to store, so the assertions can read the
+    // date the service actually worked out.
+    mockGateway.create.mockImplementation((data) => ({ id: 'a1', ...data }) as never);
+    mockQuiz.findOneTimeQuiz.mockResolvedValue(null as never);
+    mockEmail.sendAssignmentEmail.mockResolvedValue({ sent: true } as never);
+    mockCurriculum.getCourseById.mockResolvedValue(course as never);
+  });
+
+  /** Whatever hour the test runs at, the deadline lands at 11:59 PM. */
+  it('stamps a date at 11:59 PM rather than a moment', async () => {
+    const assignment = await AssignmentService.assign({
+      email: 'ada@example.com',
+      courseId: 'course-1',
+    });
+
+    const due = assignment.dueDate!;
+    expect([due.getHours(), due.getMinutes(), due.getSeconds()]).toEqual([23, 59, 0]);
+  });
+
+  it('takes an exam inside a course from that course, not from the quiz', async () => {
+    mockQuiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Assessment',
+      type: 'EXAM',
+      published: true,
+      sectionId: 'section-1',
+      // Left over from before a quiz in a course stopped owning a deadline. It
+      // must not be what the learner is held to.
+      daysRemaining: 30,
+    } as never);
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+    } as never);
+
+    const assignment = await AssignmentService.assign({
+      email: 'ada@example.com',
+      quizId: 'quiz-1',
+    });
+
+    // The course's five days, not the quiz's thirty.
+    expect(assignment.dueDate).toEqual(dueDateFromDays(5));
+  });
+
+  it('takes a quiz standing on its own from the quiz', async () => {
+    mockQuiz.getQuizById.mockResolvedValue({
+      id: 'quiz-2',
+      title: 'Solo',
+      type: 'EXAM',
+      published: true,
+      sectionId: null,
+      daysRemaining: 3,
+    } as never);
+
+    const assignment = await AssignmentService.assign({
+      email: 'ada@example.com',
+      quizId: 'quiz-2',
+    });
+
+    expect(assignment.dueDate).toEqual(dueDateFromDays(3));
+  });
+
+  /** One person's deadline can still be set by hand when they need longer. */
+  it('lets an explicit length on the request override the course', async () => {
+    const assignment = await AssignmentService.assign({
+      email: 'ada@example.com',
+      courseId: 'course-1',
+      daysRemaining: 10,
+    });
+
+    expect(assignment.dueDate).toEqual(dueDateFromDays(10));
   });
 });
 

@@ -232,15 +232,75 @@ export function parseDaysRemaining(value: unknown, label = 'days remaining') {
   return boundedInteger(value, { min: 1, max: MAX_DAYS_REMAINING, label });
 }
 
+/** The hour and minute every deadline lands on: 11:59 PM on its due day. */
+export const DUE_HOUR = 23;
+export const DUE_MINUTE = 59;
+
 /**
- * The deadline that follows from a length: today plus that many days.
+ * The deadline that follows from a length: today's date plus that many days.
  *
- * Kept here rather than at the two call sites so an assignment made from the
- * Access pane and one made from the admin dashboard land on the same date, and
- * so the editor can show the author what the date would be using the very same
+ * A deadline is a date on a calendar, so the clock time it was handed over at
+ * decides nothing — everybody given three days today is due on the same day,
+ * whether it was assigned at nine in the morning or at five in the evening. That
+ * day ends at 11:59 PM, so "three days" is three whole days rather than three
+ * days minus however long into today it happened to be.
+ *
+ * Kept here rather than at the call sites so an assignment made from the Access
+ * pane and one made from the admin dashboard land on the same date, and so the
+ * editor can show the author what the date would be using the very same
  * arithmetic.
  */
 export function dueDateFromDays(days: number | null | undefined, from = new Date()): Date | null {
   if (days === null || days === undefined) return null;
-  return new Date(from.getTime() + days * 86_400_000);
+
+  const due = new Date(from);
+  // setDate rather than adding milliseconds, so the end of a month and a
+  // daylight-saving change both carry properly.
+  due.setDate(due.getDate() + days);
+  due.setHours(DUE_HOUR, DUE_MINUTE, 0, 0);
+  return due;
+}
+
+/**
+ * The same day, moved to the moment it actually falls due.
+ *
+ * Deadlines set before this rule existed — a date typed into the admin form,
+ * one stamped by an older assignment — sit at midnight or at whatever time of
+ * day they were made, which would close a learner out most of a day early. Every
+ * deadline is read through here so all of them mean 11:59 PM on their own day.
+ */
+export function endOfDueDay(due: Date | null | undefined): Date | null {
+  if (due === null || due === undefined) return null;
+
+  const settled = new Date(due);
+  settled.setHours(DUE_HOUR, DUE_MINUTE, 0, 0);
+  return settled;
+}
+
+/** Whether a deadline has passed, judged at 11:59 PM on the day it names. */
+export function isPastDue(due: Date | null | undefined, now = new Date()): boolean {
+  const settled = endOfDueDay(due);
+  return settled !== null && settled.getTime() < now.getTime();
+}
+
+/**
+ * Whether the way in is actually shut.
+ *
+ * Being past the deadline and being locked out by it are two different facts,
+ * and only the author decides the second. A course with `lockAfterDue` off still
+ * reports itself overdue everywhere it did before — the learner sees the date,
+ * the red text, the "days overdue" — and can still open it and finish.
+ *
+ * Every reader of a lock goes through here rather than through `isPastDue`, so
+ * the toggle cannot be honoured in one place and forgotten in another.
+ */
+export function isLockedOut(
+  due: Date | null | undefined,
+  lockAfterDue: boolean | null | undefined,
+  now = new Date(),
+): boolean {
+  // Null on a course that predates the column, and on anything reached without a
+  // course behind it. Locking is what a deadline meant then, so that is the
+  // answer when nobody has said otherwise.
+  return (lockAfterDue ?? true) && isPastDue(due, now);
 }

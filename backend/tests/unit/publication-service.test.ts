@@ -680,6 +680,72 @@ describe('deleteVersion', () => {
     expect(await PublicationService.deleteVersion('p1')).toEqual({ version: 3 });
     expect(publication.deleteById).toHaveBeenCalledWith('p1');
   });
+
+  /**
+   * Somebody deliberately said "keep this for good". Honouring that on a single
+   * click of a delete button is the whole worth of the promise.
+   */
+  it('refuses a version that is kept permanently', async () => {
+    publication.getById.mockResolvedValue({
+      version: 3,
+      supersededAt: new Date('2026-02-01'),
+      archivedAt: new Date('2026-02-02'),
+    } as never);
+
+    await expect(PublicationService.deleteVersion('p1')).rejects.toThrow(/kept permanently/);
+    expect(publication.deleteById).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Keeping a version, and letting it go again.
+ *
+ * The fourteen-day archive is a default for the versions nobody will open again.
+ * This is the exception for the few that matter, and the exception has to be
+ * exempt from the sweep rather than merely long-lived.
+ */
+describe('setVersionArchived', () => {
+  it('keeps a replaced version for good', async () => {
+    publication.getById.mockResolvedValue({
+      version: 2,
+      supersededAt: new Date('2026-02-01'),
+    } as never);
+
+    expect(await PublicationService.setVersionArchived('p1', true, 7)).toEqual({
+      version: 2,
+      archived: true,
+    });
+    expect(publication.setArchived).toHaveBeenCalledWith('p1', 7, true);
+  });
+
+  /**
+   * The live version is already kept for as long as it is live, so marking it
+   * would promise something the next publish quietly breaks.
+   */
+  it('refuses the version learners are reading', async () => {
+    publication.getById.mockResolvedValue({ version: 3, supersededAt: null } as never);
+
+    await expect(PublicationService.setVersionArchived('p1', true, 7)).rejects.toThrow(
+      /already kept/,
+    );
+    expect(publication.setArchived).not.toHaveBeenCalled();
+  });
+
+  /** Letting one go is not a delete: it drops back into the ordinary history. */
+  it('releases a kept version back to version history', async () => {
+    publication.getById.mockResolvedValue({
+      version: 2,
+      supersededAt: new Date('2026-02-01'),
+      archivedAt: new Date('2026-02-02'),
+    } as never);
+
+    expect(await PublicationService.setVersionArchived('p1', false, 7)).toEqual({
+      version: 2,
+      archived: false,
+    });
+    expect(publication.setArchived).toHaveBeenCalledWith('p1', 7, false);
+    expect(publication.deleteById).not.toHaveBeenCalled();
+  });
 });
 
 describe('findPublishedQuiz', () => {
@@ -841,5 +907,165 @@ describe('version reads', () => {
     } as never);
 
     await expect(PublicationService.hasUnpublishedChanges('c1')).resolves.toBe(true);
+  });
+});
+
+/**
+ * Reading an old version against the one learners are on now.
+ *
+ * The two trees are merged rather than shown side by side, because what an
+ * author wants from an old version is one course with the differences marked on
+ * it — this was here, this has gone, this arrived since — not two courses to
+ * compare by eye. Everything unmarked is what they already know.
+ */
+describe('getVersionDiff', () => {
+  /** A tree in the shape a stored snapshot has, trimmed to what the diff reads. */
+  function tree(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'c1',
+      title: 'Fire safety',
+      modules: [{ id: 'mod1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
+      sections: [
+        {
+          id: 'sec1',
+          moduleId: 'mod1',
+          elements: [{ id: 'el1' }],
+          quizzes: [{ id: 'quiz1', questions: [{ id: 'qq1' }] }],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    curriculum.getCourseById.mockResolvedValue({
+      id: 'c1',
+      published: true,
+      publishedVersion: 5,
+    } as never);
+  });
+
+  /** Everything in both versions is left plain, which is what makes marks read. */
+  it('marks nothing when the two versions match', async () => {
+    publication.getById.mockResolvedValue({
+      courseId: 'c1',
+      version: 4,
+      snapshot: tree(),
+    } as never);
+    publication.getLive.mockResolvedValue({ snapshot: tree() } as never);
+
+    const diff = await PublicationService.getVersionDiff('p1');
+
+    expect(diff.status.modules.mod1).toBe('same');
+    expect(diff.status.sections.sec1).toBe('same');
+    expect(diff.status.elements.el1).toBe('same');
+    expect(diff.status.quizzes.quiz1).toBe('same');
+    expect(diff.status.questions.qq1).toBe('same');
+    expect(diff.identical).toBe(true);
+  });
+
+  /** In the live version and not in this one: it arrived after this version. */
+  it('marks what the live version has gained as added', async () => {
+    publication.getById.mockResolvedValue({
+      courseId: 'c1',
+      version: 4,
+      snapshot: tree(),
+    } as never);
+    publication.getLive.mockResolvedValue({
+      snapshot: tree({
+        modules: [
+          { id: 'mod1', courseId: 'c1', number: 1, title: 'Intro', color: null },
+          { id: 'mod2', courseId: 'c1', number: 2, title: 'Later', color: null },
+        ],
+      }),
+    } as never);
+
+    const diff = await PublicationService.getVersionDiff('p1');
+
+    expect(diff.status.modules.mod2).toBe('added');
+    expect(diff.status.modules.mod1).toBe('same');
+    // Both versions' modules are drawn, or the added one would be marked and
+    // then not appear anywhere.
+    expect(diff.course.modules.map((module) => module.id)).toEqual(['mod1', 'mod2']);
+    expect(diff.identical).toBe(false);
+  });
+
+  /** In this version and not in the live one: it has gone since. */
+  it('marks what the live version has lost as removed', async () => {
+    publication.getById.mockResolvedValue({
+      courseId: 'c1',
+      version: 4,
+      snapshot: tree(),
+    } as never);
+    publication.getLive.mockResolvedValue({
+      snapshot: tree({
+        sections: [{ id: 'sec1', moduleId: 'mod1', elements: [], quizzes: [] }],
+      }),
+    } as never);
+
+    const diff = await PublicationService.getVersionDiff('p1');
+
+    expect(diff.status.elements.el1).toBe('removed');
+    expect(diff.status.quizzes.quiz1).toBe('removed');
+    expect(diff.status.questions.qq1).toBe('removed');
+    // A section both versions have keeps everything either side put in it.
+    expect(diff.course.sections[0].elements.map((element) => element.id)).toEqual(['el1']);
+  });
+
+  /**
+   * Questions are diffed too. A version differing only by a reworded exam is
+   * still a different course to sit, and a diff that stopped at the quiz would
+   * call the two identical.
+   */
+  it('marks a question the live version added', async () => {
+    publication.getById.mockResolvedValue({
+      courseId: 'c1',
+      version: 4,
+      snapshot: tree(),
+    } as never);
+    publication.getLive.mockResolvedValue({
+      snapshot: tree({
+        sections: [
+          {
+            id: 'sec1',
+            moduleId: 'mod1',
+            elements: [{ id: 'el1' }],
+            quizzes: [{ id: 'quiz1', questions: [{ id: 'qq1' }, { id: 'qq2' }] }],
+          },
+        ],
+      }),
+    } as never);
+
+    const diff = await PublicationService.getVersionDiff('p1');
+
+    expect(diff.status.questions.qq2).toBe('added');
+    expect(diff.status.questions.qq1).toBe('same');
+  });
+
+  /**
+   * With nothing live there is nothing to compare against. Everything reads as
+   * removed, which is true — `identical` is false so the page can say it more
+   * gracefully than a wall of red.
+   */
+  it('handles a course with no live version', async () => {
+    curriculum.getCourseById.mockResolvedValue({
+      id: 'c1',
+      published: false,
+      publishedVersion: 0,
+    } as never);
+    publication.getById.mockResolvedValue({
+      courseId: 'c1',
+      version: 1,
+      snapshot: tree(),
+    } as never);
+
+    const diff = await PublicationService.getVersionDiff('p1');
+
+    expect(diff.liveVersion).toBe(0);
+    expect(diff.identical).toBe(false);
+    expect(diff.status.modules.mod1).toBe('removed');
+    // The tree still draws, so the version is readable rather than blank.
+    expect(diff.course.modules).toHaveLength(1);
   });
 });

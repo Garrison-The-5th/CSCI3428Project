@@ -181,6 +181,7 @@ export default class CurriculumGateway {
       publishedVersion: number;
       draftUpdatedAt: Date;
       sequential: boolean;
+      lockAfterDue: boolean;
       imageData: string | null;
       imageType: string | null;
       instructors: { set: Array<{ id: string }> };

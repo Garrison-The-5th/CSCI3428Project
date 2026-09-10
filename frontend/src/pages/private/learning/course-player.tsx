@@ -489,6 +489,40 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     );
   }
 
+  /**
+   * A course past its deadline shows nothing here.
+   *
+   * The landing page closes every way in, but a bookmark or a pasted URL is not
+   * a way in it controls — so the player refuses on its own account rather than
+   * trusting that nobody arrived by the back door. `locked` is the server's
+   * answer; an author previewing their own course has no deadline to be past.
+   */
+  if (!preview && course.locked === true) {
+    const dueOn = course.dueDate ? new Date(course.dueDate).toLocaleDateString() : null;
+
+    return (
+      <div className="page-container flex flex-col">
+        <Button
+          onClick={() => navigate(`/learning/${course.id}`)}
+          variant="ghost"
+          className="w-fit px-0"
+        >
+          ← Back to {course.title}
+        </Button>
+        <Card className="bg-light-gray">
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <LockClosedIcon className="w-10 h-10 text-dark-gray/50" aria-hidden="true" />
+            <p className="font-semibold text-dark-gray">This course has closed.</p>
+            <p className="max-w-prose text-dark-gray">
+              {dueOn ? `The deadline passed on ${dueOn}.` : 'The deadline has passed.'} Ask whoever
+              assigned it to you if you still need to work through it.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const itemIcon = (element: SectionElement) =>
     element.type === 'YOUTUBE' ? (
       <PlayCircleIcon className="w-4 h-4 shrink-0" />

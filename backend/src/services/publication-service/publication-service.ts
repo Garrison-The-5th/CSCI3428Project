@@ -10,6 +10,7 @@ import { NotFoundError } from '@/controllers/http-errors';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
+import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
 
 import { CourseKind, Prisma, QuizType } from '../../../generated/prisma';
 
@@ -91,6 +92,13 @@ export interface CourseSnapshot {
   daysRemaining?: number | null;
   published: boolean;
   sequential: boolean;
+  /**
+   * Whether the deadline shuts the course or only reports that it passed.
+   *
+   * Absent on snapshots taken before this was a choice, and `isLockedOut` reads
+   * a missing answer as "lock" — which is what a deadline meant then.
+   */
+  lockAfterDue?: boolean;
   publishedAt: Date | string | null;
   kind: CourseKind;
   imageData: string | null;
@@ -207,6 +215,16 @@ const VOLATILE_KEYS = new Set([
   'publishedAt',
   'publishedVersion',
   'published',
+  // Who last touched a draft row, and when. Not content by any reading, and
+  // actively harmful here: a publish clears every mark, so the next snapshot
+  // would differ from the one just stored on the marks alone and the editor
+  // would report unpublished changes the moment it finished publishing.
+  'lastEditedById',
+  'lastEditedAt',
+  'lastEditedBy',
+  // Fixed by the first publish, so it moves exactly once and says nothing about
+  // what a learner reads.
+  'typeLocked',
 ]);
 
 /**
@@ -252,6 +270,72 @@ function idsOf(snapshot: CourseSnapshot | null) {
       ),
     ),
   };
+}
+
+/**
+ * How one piece of a course differs between two versions.
+ *
+ * `added` is in the live version and not in the one being read; `removed` is the
+ * other way round; `same` is in both. Deliberately not "changed": telling an
+ * edited paragraph from an untouched one means diffing the prose, and the thing
+ * an author actually wants from an old version is what was there and what was
+ * not.
+ */
+export type DiffStatus = 'added' | 'removed' | 'same';
+
+export interface VersionDiff {
+  /** The tree to draw: both versions merged, live order first. */
+  course: CourseSnapshot;
+  /** Per-id verdicts, keyed the way the editor walks the tree. */
+  status: {
+    modules: Record<string, DiffStatus>;
+    sections: Record<string, DiffStatus>;
+    elements: Record<string, DiffStatus>;
+    quizzes: Record<string, DiffStatus>;
+    questions: Record<string, DiffStatus>;
+  };
+  /** Which version is being read, and which it is being read against. */
+  version: number;
+  liveVersion: number | null;
+  /** Nothing to compare against — the course has no live version. */
+  identical: boolean;
+}
+
+/** Every question id in a snapshot, which `idsOf` does not reach. */
+function questionIdsOf(snapshot: CourseSnapshot | null): Set<string> {
+  return new Set(
+    (snapshot?.sections ?? []).flatMap((section) =>
+      (section.quizzes ?? []).flatMap((quiz) =>
+        (quiz.questions ?? []).map((question) => question.id),
+      ),
+    ),
+  );
+}
+
+/**
+ * Merges two lists of the same kind of thing into one, live order first.
+ *
+ * The live version sets the order because that is the shape the author knows —
+ * it is what their editor shows them right now. Anything only the old version
+ * had is appended rather than interleaved: there is no honest place to put a
+ * section that was deleted three versions ago, and guessing one by position
+ * would move everything below it.
+ */
+function mergeById<T extends { id: string }>(live: T[], archived: T[]): T[] {
+  const seen = new Set(live.map((item) => item.id));
+  return [...live, ...archived.filter((item) => !seen.has(item.id))];
+}
+
+/** `same` when both sides have it, `added` when only the live one does. */
+function verdict(id: string, live: Set<string>, archived: Set<string>): DiffStatus {
+  if (live.has(id) && archived.has(id)) return 'same';
+  return live.has(id) ? 'added' : 'removed';
+}
+
+function verdicts(live: Set<string>, archived: Set<string>): Record<string, DiffStatus> {
+  const out: Record<string, DiffStatus> = {};
+  for (const id of new Set([...live, ...archived])) out[id] = verdict(id, live, archived);
+  return out;
 }
 
 export default class PublicationService {
@@ -503,6 +587,22 @@ export default class PublicationService {
     // for ever while being served to everyone.
     await QuizGateway.publishQuizzesInCourse(courseId);
 
+    // And what each of them *is* stops being the author's to change.
+    //
+    // Publishing is the moment a quiz becomes something a learner can be given,
+    // and its kind decides how they can be given it. An exam shared with someone
+    // who has an account sits on their Quizzes tab; switching it to a one-time
+    // link afterwards leaves it sitting there — listed and reachable, which is
+    // the one thing a one-time link must never be. There is no edit that fixes
+    // that after the fact, so the choice is fixed before it can happen.
+    await QuizGateway.lockQuizTypesInCourse(courseId);
+
+    // The "edited by" marks go with it. They mean "changed, and learners cannot
+    // see it yet"; a publish is the moment that stops being true of anything in
+    // the course, so leaving them up would label every element with a change
+    // that has already shipped.
+    await EditAttributionService.clearForCourse(courseId);
+
     // "Something changed" is stamped here rather than when the author typed it:
     // the dashboard's new-content notice has to mean content a learner can
     // actually open, and until this moment none of it could be.
@@ -629,6 +729,89 @@ export default class PublicationService {
   }
 
   /**
+   * One version read against the one learners are on now.
+   *
+   * The two trees are merged rather than shown side by side, because what an
+   * author wants from an old version is not two courses to read but one course
+   * with the differences marked on it: this is what was here, this has gone,
+   * this arrived since. Everything unmarked is what they already know, and looks
+   * exactly as it does in the editor.
+   *
+   * The live version is the base. It is the shape the author has in their head,
+   * and anchoring on the old one would reorder a course they know well to match
+   * a version they are only glancing at.
+   *
+   * A course with no live version compares against nothing, and every item comes
+   * back `removed` — which is true, and is what `identical` is there to let the
+   * page say more gracefully than a wall of red.
+   */
+  static async getVersionDiff(versionId: string): Promise<VersionDiff> {
+    const publication = await PublicationGateway.getById(versionId);
+    if (!publication) throw new NotFoundError(`Version with ID ${versionId} not found`);
+
+    // A version row always holds a tree; the null here is only the normaliser's
+    // "nothing given", which cannot happen from a stored snapshot.
+    const archived =
+      normaliseSnapshot(publication.snapshot as unknown as CourseSnapshot) ??
+      (publication.snapshot as unknown as CourseSnapshot);
+
+    const course = await CurriculumGateway.getCourseById(publication.courseId);
+    const live = course?.publishedVersion
+      ? await PublicationService.getLiveSnapshot(publication.courseId)
+      : null;
+
+    /** The tree whose ordering and course-level fields the merged view takes. */
+    const base: CourseSnapshot = live ?? archived;
+    const liveIds = idsOf(live);
+    const archivedIds = idsOf(archived);
+    const liveQuestions = questionIdsOf(live);
+    const archivedQuestions = questionIdsOf(archived);
+
+    // Sections carry their own elements and quizzes, so the merge runs a level
+    // at a time: sections first, then the contents of each section that both
+    // versions have. A section only one side has keeps its own contents, which
+    // are all `added` or all `removed` along with it.
+    const sections: SnapshotSection[] = mergeById(
+      live?.sections ?? [],
+      archived.sections ?? [],
+    ).map((section) => {
+      const fromLive = live?.sections.find((entry) => entry.id === section.id);
+      const fromArchived = archived.sections?.find((entry) => entry.id === section.id);
+
+      return {
+        ...section,
+        elements: mergeById(fromLive?.elements ?? [], fromArchived?.elements ?? []),
+        quizzes: mergeById(fromLive?.quizzes ?? [], fromArchived?.quizzes ?? []).map((quiz) => {
+          const liveQuiz = fromLive?.quizzes.find((entry) => entry.id === quiz.id);
+          const archivedQuiz = fromArchived?.quizzes.find((entry) => entry.id === quiz.id);
+          return {
+            ...quiz,
+            questions: mergeById(liveQuiz?.questions ?? [], archivedQuiz?.questions ?? []),
+          };
+        }),
+      };
+    });
+
+    return {
+      course: {
+        ...base,
+        modules: mergeById(live?.modules ?? [], archived.modules ?? []),
+        sections,
+      },
+      status: {
+        modules: verdicts(liveIds.modules, archivedIds.modules),
+        sections: verdicts(liveIds.sections, archivedIds.sections),
+        elements: verdicts(liveIds.elements, archivedIds.elements),
+        quizzes: verdicts(liveIds.quizzes, archivedIds.quizzes),
+        questions: verdicts(liveQuestions, archivedQuestions),
+      },
+      version: publication.version,
+      liveVersion: course?.publishedVersion ?? null,
+      identical: live !== null && fingerprint(live) === fingerprint(archived),
+    };
+  }
+
+  /**
    * Puts an archived version back in front of learners.
    *
    * Rolls forward rather than backwards: the old snapshot is republished under a
@@ -710,6 +893,37 @@ export default class PublicationService {
   }
 
   /**
+   * Keeps one version for good, or lets it go back to the ordinary history.
+   *
+   * The fourteen-day archive is a default, not a policy: it is right for the
+   * dozens of versions nobody will ever open again, and wrong for the handful
+   * that matter — the one that was audited, the one signed off before a change
+   * of process. Keeping a version exempts it from the sweep entirely.
+   *
+   * The live version is refused. Not because keeping it would break anything,
+   * but because it is meaningless: the live version is already kept for as long
+   * as it is live, and marking it would leave an author believing they had
+   * protected something the next publish will supersede anyway. Keep it after it
+   * has been replaced, when the promise is a real one.
+   *
+   * Releasing a version does not delete it — that is `deleteVersion` — it drops
+   * back into the ordinary history with a fresh fourteen days.
+   */
+  static async setVersionArchived(versionId: string, archived: boolean, userId: number | null) {
+    const publication = await PublicationGateway.getById(versionId);
+    if (!publication) throw new NotFoundError(`Version with ID ${versionId} not found`);
+
+    if (archived && publication.supersededAt === null) {
+      throw new Error(
+        'that version is the one learners are reading, so it is already kept — archive it once it has been replaced',
+      );
+    }
+
+    await PublicationGateway.setArchived(versionId, userId, archived);
+    return { version: publication.version, archived };
+  }
+
+  /**
    * Removes one archived version for good.
    *
    * The live version is refused: it is what every learner is currently reading,
@@ -722,6 +936,15 @@ export default class PublicationService {
 
     if (publication.supersededAt === null) {
       throw new Error('that version is the one learners are reading, so it cannot be deleted');
+    }
+
+    // Somebody deliberately said "keep this for good". Deleting it on a single
+    // click would make that promise worth nothing, so it has to be released
+    // first — which is a decision in its own right and reads as one.
+    if (publication.archivedAt) {
+      throw new Error(
+        'that version is kept permanently — move it back to version history first if you really want it gone',
+      );
     }
 
     await PublicationGateway.deleteById(versionId);

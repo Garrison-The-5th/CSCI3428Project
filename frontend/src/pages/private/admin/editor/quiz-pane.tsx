@@ -15,7 +15,7 @@
  * The quiz editor itself is untouched: this only decides which quizzes are on
  * screen and where a new one lands.
  */
-import { PlusIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
 import QuizEditor from '@/components/common/quiz-editor';
@@ -158,7 +158,6 @@ const QuizPane = ({
         onRefresh={onRefresh}
         onNotify={onNotify}
         onDelete={onDelete}
-        run={run}
       />
     );
   }
@@ -234,15 +233,25 @@ const QuizPane = ({
             ) : (
               selectedSection.quizzes.map((quiz) => (
                 <Card key={quiz.id} className="gap-4 border border-gray-300 bg-white shadow-sm">
+                  {/* Deleting the quiz sits on the card that holds it rather
+                      than among the settings inside: it is something done to the
+                      quiz, not one of its properties. */}
+                  <CardHeader className="flex-row items-center justify-between gap-3 p-4 pb-0">
+                    <CardTitle className="min-w-0 truncate text-base text-dark-gray">
+                      {quiz.title}
+                    </CardTitle>
+                    <Button
+                      onClick={() => onDelete({ kind: 'quiz', id: quiz.id, label: quiz.title })}
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 hover:text-danger-hover"
+                      title="Delete quiz"
+                    >
+                      <TrashIcon className="w-5 h-5" />
+                    </Button>
+                  </CardHeader>
                   <CardContent className="p-4">
-                    <QuizEditor
-                      quiz={quiz}
-                      onChanged={onRefresh}
-                      onNotify={onNotify}
-                      onDeleteQuiz={() =>
-                        onDelete({ kind: 'quiz', id: quiz.id, label: quiz.title })
-                      }
-                    />
+                    <QuizEditor quiz={quiz} onChanged={onRefresh} onNotify={onNotify} />
                   </CardContent>
                 </Card>
               ))

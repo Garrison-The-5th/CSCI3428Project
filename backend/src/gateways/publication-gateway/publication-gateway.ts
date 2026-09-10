@@ -75,12 +75,32 @@ export default class PublicationGateway {
         version: true,
         publishedAt: true,
         supersededAt: true,
+        archivedAt: true,
         newModuleIds: true,
         newSectionIds: true,
         newElementIds: true,
         newQuizIds: true,
         publishedBy: { select: { id: true, email: true, name: true } },
+        archivedBy: { select: { id: true, email: true, name: true } },
       },
+    });
+  }
+
+  /**
+   * Marks a version to be kept for good, or lets it go again.
+   *
+   * Un-keeping restamps `supersededAt` rather than leaving the original date, so
+   * the fourteen days run from the moment the author changed their mind. Without
+   * that, releasing a version replaced three weeks ago would put it straight
+   * past the cutoff and have the next sweep delete it — a click labelled "move
+   * back to version history" would silently be a delete.
+   */
+  static setArchived(id: string, archivedById: number | null, archived: boolean) {
+    return prisma.coursePublication.update({
+      where: { id },
+      data: archived
+        ? { archivedAt: new Date(), archivedById }
+        : { archivedAt: null, archivedById: null, supersededAt: new Date() },
     });
   }
 
@@ -140,7 +160,11 @@ export default class PublicationGateway {
    */
   static purgeSupersededBefore(cutoff: Date) {
     return prisma.coursePublication.deleteMany({
-      where: { supersededAt: { not: null, lt: cutoff } },
+      // `archivedAt: null` is what keeps a deliberately kept version out of the
+      // sweep. It is the whole point of keeping one: the fourteen-day rule is a
+      // default for the versions nobody will look at again, not a ceiling on how
+      // long any version may be held.
+      where: { supersededAt: { not: null, lt: cutoff }, archivedAt: null },
     });
   }
 }

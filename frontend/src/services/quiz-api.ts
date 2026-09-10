@@ -49,30 +49,28 @@ export const QUIZ_TYPE_HINTS: Record<QuizType, string> = {
   LEARNING_CHECK:
     'Sits inside a section. No timer, no stored mark — the learner sees a tick or a cross per ' +
     'question, and cannot move on until they have attempted it.',
-  EXAM: 'Scored and reported. Can stand alone or sit inside a section, and can be timed.',
+  EXAM: 'Scored and reported.',
   ONE_TIME:
     'Sent as a link. One attempt only, then it disappears — and it never shows on the Quizzes ' +
-    'tab, even for somebody signed in with that address.',
+    'tab, only asscessable with the link.',
 };
 
 /**
  * What each kind is allowed to have, so the editor can grey out the rest.
  *
- * Only the two controls that are actually disabled anywhere. Four more used to
- * be answered here — where a kind may live, whether it may be shared, whether
- * its results may be hidden — and nothing read any of them, so they were
+ * One control, because one is all that is actually disabled anywhere. Several
+ * more used to be answered here — where a kind may live, whether it may be
+ * shared, whether it owns a deadline — and nothing read them, so they were
  * documentation of intent dressed up as logic: a caller could consult one, get a
- * confident answer, and be wrong, because the real rule lives on the server in
- * `enforceTypeRules` and had drifted. Where a quiz may sit is decided there,
- * because it depends on the kind of course owning the section and this has only
- * the quiz.
+ * confident answer, and be wrong, because the real rule lives on the server and
+ * had drifted. Where a quiz may sit is decided there, because it depends on the
+ * kind of course owning the section and this has only the quiz. A deadline is
+ * decided by the course, because a quiz never has one of its own.
  */
 export function quizCapabilities(type: QuizType) {
   return {
     /** A learning check is deliberately unhurried. */
     canBeTimed: type !== 'LEARNING_CHECK',
-    /** A learning check's mark is never kept, so there is no due date to chase. */
-    canHaveDueDate: type !== 'LEARNING_CHECK',
   };
 }
 
@@ -98,7 +96,29 @@ export interface Quiz {
    * one-time link never is. Optional because older payloads predate it.
    */
   allowMultipleAttempts?: boolean;
+  /**
+   * Whether `type` may still be changed.
+   *
+   * Set by the first publish and never cleared. What a quiz is decides how a
+   * learner can be given it, and an exam already sitting on somebody's Quizzes
+   * tab does not stop sitting there because it was later relabelled a one-time
+   * link — so the choice is fixed before that can happen.
+   */
+  typeLocked?: boolean;
+  /**
+   * When this learner's copy falls due, at 11:59 PM on the day it lands.
+   *
+   * A quiz inside a course carries the course's date: it is due with the course
+   * around it, whatever is written on its own row.
+   */
   dueDate: string | null;
+  /**
+   * Past that deadline, so it can no longer be taken.
+   *
+   * The server's answer. Absent on the author-facing payloads — a deadline is
+   * something a learner has, not something a quiz is.
+   */
+  locked?: boolean;
   /**
    * How long a learner gets once this is handed to them, in days.
    *
@@ -292,4 +312,11 @@ export const quizApi = {
     HttpHelper.put(`quizzes/questions/${questionId}`, question),
 
   deleteQuestion: (questionId: string) => HttpHelper.delete(`quizzes/questions/${questionId}`),
+
+  /**
+   * Puts the questions in the order given. The list must name every question in
+   * the quiz — the server refuses a partial one rather than guessing at the rest.
+   */
+  reorderQuestions: (quizId: string, questionIds: string[]) =>
+    HttpHelper.put(`quizzes/${quizId}/question-order`, { questionIds }),
 };

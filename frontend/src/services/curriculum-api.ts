@@ -131,7 +131,20 @@ export interface Course {
   whatYouWillLearn: string[];
   prerequisites: string[];
   required: boolean;
+  /**
+   * When this learner's copy falls due, at 11:59 PM on the day it lands.
+   *
+   * Per person, not per course: it comes from their assignment, so the same
+   * course handed over in January and in June carries two different dates here.
+   */
   dueDate: string | null;
+  /**
+   * Past that deadline, so the course is closed and the ways into it are shut.
+   *
+   * The server's answer, not the browser's. Absent on the author-facing payloads
+   * — a deadline is something a learner has, not something a course is.
+   */
+  locked?: boolean;
   /**
    * How long a learner gets once this is handed to them, in days.
    *
@@ -143,6 +156,14 @@ export interface Course {
   published: boolean;
   /** When on, each section unlocks only once the previous one is finished. */
   sequential: boolean;
+  /**
+   * Whether the deadline shuts the course, or only reports that it passed.
+   *
+   * On, and past 11:59 PM on the due day nothing here opens. Off, and the course
+   * still says it is overdue everywhere it did before, and the learner may carry
+   * on and finish. Absent on older payloads, which all locked.
+   */
+  lockAfterDue?: boolean;
   publishedAt: string | null;
   /** Which version learners are served. 0 means never published. */
   publishedVersion?: number;
@@ -263,18 +284,98 @@ export interface NewIds {
   newQuizIds: string[];
 }
 
-/** One row in the course editor's version history. */
+/** Somebody's name as it appears against a version or an edit. */
+export interface EditorRef {
+  id: number;
+  email: string;
+  name: string | null;
+}
+
+/** One version card in the course editor's Archive tab. */
 export interface CourseVersion {
   id: string;
   version: number;
   publishedAt: string;
   /** Null on the live version, which is never archived away. */
   supersededAt: string | null;
+  /**
+   * Set when somebody kept this version for good.
+   *
+   * Two different meanings of "archived" meet here, so the words are worth
+   * pinning down. `supersededAt` is the ordinary one — replaced, and kept for
+   * fourteen days. This is the deliberate one: kept for good, exempt from the
+   * sweep, and shown in its own section above the rest.
+   */
+  archivedAt: string | null;
   newModuleIds: string[];
   newSectionIds: string[];
   newElementIds: string[];
   newQuizIds: string[];
-  publishedBy: { id: number; email: string; name: string | null } | null;
+  publishedBy: EditorRef | null;
+  archivedBy: EditorRef | null;
+}
+
+/** Whether one item is in the live version, the one being read, or both. */
+export type DiffStatus = 'added' | 'removed' | 'same';
+
+/**
+ * One archived version read against the version learners are on now.
+ *
+ * `course` is the two trees merged — everything either version has, in the live
+ * version's order — and `status` says which is which. Anything marked `same`
+ * draws exactly as it does in the editor, which is what makes the marked items
+ * stand out at all.
+ */
+export interface VersionDiff {
+  course: Course;
+  status: {
+    modules: Record<string, DiffStatus>;
+    sections: Record<string, DiffStatus>;
+    elements: Record<string, DiffStatus>;
+    quizzes: Record<string, DiffStatus>;
+    questions: Record<string, DiffStatus>;
+  };
+  version: number;
+  liveVersion: number | null;
+  /** Nothing differs, so there is no diff worth colouring. */
+  identical: boolean;
+}
+
+/** One unpublished change: whose it is, when they made it, and whether it is yours. */
+export interface EditMark {
+  by: string;
+  at: string;
+  /**
+   * Your own change.
+   *
+   * The server decides it — two colleagues called Sam would both be told the
+   * change was theirs if the page compared names, and the page has no business
+   * knowing anybody's id to tell them apart.
+   */
+  mine: boolean;
+}
+
+/** Unpublished changes across a course, keyed by id within each kind. */
+export interface EditMarks {
+  modules: Record<string, EditMark>;
+  sections: Record<string, EditMark>;
+  elements: Record<string, EditMark>;
+  quizzes: Record<string, EditMark>;
+  questions: Record<string, EditMark>;
+}
+
+/** What one editing claim covers. */
+export type EditScope = 'MODULE' | 'QUESTION';
+
+/** One thing somebody currently has open. */
+export interface EditLease {
+  scope: EditScope;
+  targetId: string;
+  userId: number;
+  /** First name where there is one, else the address. What the lock says. */
+  holder: string;
+  /** Held by the person asking — so it is not a lock, it is their own claim. */
+  mine: boolean;
 }
 
 export interface PublicationState {
@@ -323,7 +424,15 @@ export interface CourseProgress {
   courseId: string;
   title: string;
   required: boolean;
+  /** This learner's own deadline, at 11:59 PM on the day it falls. */
   dueDate: string | null;
+  /**
+   * Past that deadline, so the course is closed to them.
+   *
+   * Decided by the server. The browser's clock is neither the one the deadline
+   * was set against nor one the learner cannot change.
+   */
+  locked?: boolean;
   totalSections: number;
   completedSections: number;
   percentComplete: number;
@@ -335,13 +444,37 @@ export interface CourseProgress {
   newSectionCount?: number;
 }
 
+/**
+ * A quiz chased on its own.
+ *
+ * Only quizzes handed over individually appear here. One that belongs to a
+ * course is part of that course and is chased through it, so it has no course
+ * title to carry.
+ */
 export interface OutstandingQuiz {
   quizId: string;
   title: string;
-  courseTitle: string | null;
   questionCount: number;
-  /** The quiz's own due date, or the course's when it has none. */
   dueDate: string | null;
+}
+
+/**
+ * One line on Upcoming due dates: a course, or a quiz assigned on its own.
+ *
+ * The two rank against one clock, so the list answers "what is due next" rather
+ * than "which course is due next". A quiz inside a course is not here — it falls
+ * due with the course, and both would be the same deadline printed twice.
+ */
+export interface Deadline {
+  kind: 'course' | 'quiz';
+  id: string;
+  title: string;
+  dueDate: string;
+  overdue: boolean;
+  percentComplete: number;
+  completedSections: number;
+  totalSections: number;
+  remainingMinutes: number;
 }
 
 /** What a learner has already done — drives ticks and sequential unlocking. */
@@ -360,7 +493,8 @@ export interface Dashboard {
   updatedCourses: CourseProgress[];
   outstandingCourses: CourseProgress[];
   outstandingQuizzes: OutstandingQuiz[];
-  upcomingDeadlines: CourseProgress[];
+  /** Courses and standalone quizzes together, soonest first. */
+  upcomingDeadlines: Deadline[];
   totals: {
     coursesOutstanding: number;
     quizzesOutstanding: number;
@@ -466,6 +600,7 @@ export const curriculumApi = {
       daysRemaining?: number | null;
       published?: boolean;
       sequential?: boolean;
+      lockAfterDue?: boolean;
       instructorIds?: string[];
     },
   ) => HttpHelper.put(`curriculum/courses/${courseId}`, data),
@@ -505,6 +640,57 @@ export const curriculumApi = {
   /** Permanently removes one archived version. The live one cannot be deleted. */
   deleteVersion: (versionId: string): Promise<{ message: string; version: number }> =>
     HttpHelper.delete(`curriculum/versions/${versionId}`),
+
+  /** One version read against the one learners are on now, for its version card. */
+  getVersionDiff: (versionId: string): Promise<VersionDiff> =>
+    HttpHelper.get(`curriculum/versions/${versionId}/diff`),
+
+  /**
+   * Keeps a version for good, or lets it go back to the ordinary history.
+   *
+   * Releasing is not deleting: the version returns to the fourteen-day list with
+   * its countdown starting again from that moment.
+   */
+  setVersionArchived: (
+    versionId: string,
+    archived: boolean,
+  ): Promise<{ message: string; version: number; archived: boolean }> =>
+    HttpHelper.post(`curriculum/versions/${versionId}/archive`, { archived }),
+
+  // ---- Working alongside somebody else ----
+
+  /** What has changed since the last publish, and who changed it. */
+  getEditMarks: async (courseId: string): Promise<EditMarks> => {
+    const response = await HttpHelper.get(`curriculum/courses/${courseId}/edit-marks`);
+    return response.marks;
+  },
+
+  /** What is currently open in this course, and by whom. */
+  getEditLeases: async (courseId: string): Promise<EditLease[]> => {
+    const response = await HttpHelper.get(`curriculum/courses/${courseId}/edit-leases`);
+    return response.leases ?? [];
+  },
+
+  /**
+   * Takes or renews a claim on one module or question.
+   *
+   * The same call for both, so the editor sends one thing on opening something
+   * and every few seconds after. `granted` is false when somebody else got there
+   * first, and `holder` is then the name to put on the lock.
+   */
+  claimEditLease: (
+    courseId: string,
+    scope: EditScope,
+    targetId: string,
+  ): Promise<{ granted: boolean; holder: string | null }> =>
+    HttpHelper.post(`curriculum/courses/${courseId}/edit-leases`, { scope, targetId }),
+
+  /** Gives up one claim, or — with no target — everything held in the course. */
+  releaseEditLease: (
+    courseId: string,
+    target?: { scope: EditScope; targetId: string },
+  ): Promise<unknown> =>
+    HttpHelper.delete(`curriculum/courses/${courseId}/edit-leases`, target ?? {}),
 
   /**
    * Type-ahead over people already in the system.

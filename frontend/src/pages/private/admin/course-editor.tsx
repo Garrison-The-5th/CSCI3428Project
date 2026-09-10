@@ -13,9 +13,8 @@
  * Reachable only by picking a lesson card.
  */
 import {
+  ArchiveBoxIcon,
   ArrowLeftIcon,
-  ArrowUturnLeftIcon,
-  ClockIcon,
   CloudArrowUpIcon,
   EyeIcon,
   QuestionMarkCircleIcon,
@@ -32,14 +31,18 @@ import ToastNotification from '@/components/common/toast-notification';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import CourseAccess from '@/pages/private/admin/editor/course-access';
-import LandingPageEditor from '@/pages/private/admin/editor/landing-page-editor';
-import QuizPane from '@/pages/private/admin/editor/quiz-pane';
-import StructureEditor from '@/pages/private/admin/editor/structure-editor';
-import CourseLanding from '@/pages/private/learning/course-landing';
-import CoursePlayer from '@/pages/private/learning/course-player';
+import { EditLocksProvider } from '@/contexts/edit-locks-context';
+import {
+  ArchivePane,
+  CourseAccess,
+  LandingPageEditor,
+  type PendingVersion,
+  QuizPane,
+  StructureEditor,
+} from '@/pages/private/admin/editor/panes';
+import { CourseLanding, CoursePlayer } from '@/pages/private/learning/learner-previews';
 import { Course, curriculumApi, PublicationState } from '@/services/curriculum-api';
-import { quizApi } from '@/services/quiz-api';
+import { Quiz, quizApi, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 import { logger } from '@/utils/logger';
 
@@ -50,19 +53,6 @@ type PendingDelete = {
   kind: 'course' | 'module' | 'section' | 'quiz' | 'element';
   id: string;
   label: string;
-} | null;
-
-/**
- * An archived version waiting on a yes.
- *
- * Both actions ask first, for opposite reasons: restoring changes what every
- * learner on the course is reading, and deleting throws away the only copy of a
- * tree that is no longer reachable any other way.
- */
-type PendingVersion = {
-  action: 'restore' | 'delete';
-  id: string;
-  version: number;
 } | null;
 
 /**
@@ -84,18 +74,27 @@ function panesFor(
     // Named for what it governs. A quiz set is not "a course" to the person
     // building one, and the sidebar is the only place that word appears.
     { key: 'access', label: mode === 'quiz' ? 'Quiz access' : 'Course access', Icon: UsersIcon },
-    { key: 'versions', label: 'Version history', Icon: ClockIcon },
+    // Named Archive rather than Version history: the tab holds both, and the
+    // kept versions are the half somebody chose to put there.
+    { key: 'versions', label: 'Archive', Icon: ArchiveBoxIcon },
     { key: 'preview-landing', label: 'Landing page preview', Icon: EyeIcon },
     { key: 'preview-content', label: 'Course content preview', Icon: EyeIcon },
   ];
 }
 
 /**
- * How long a replaced version stays readable. Mirrors ARCHIVE_DAYS in
- * backend/src/services/publicationService — the server does the deleting; this
- * only has to say when.
+ * The quizzes this publish would fix the kind of.
+ *
+ * `typeLocked` is set by the first publish and never cleared, so an unlocked
+ * quiz is one that has never been out — which includes a quiz added last week to
+ * a course published last year. The server locks every unlocked quiz in the
+ * course when it publishes, so this is the same set it is about to settle.
  */
-const ARCHIVE_DAYS = 14;
+function quizzesTypeLockedByPublish(course: Course): Quiz[] {
+  return course.sections.flatMap((section) =>
+    section.quizzes.filter((quiz) => quiz.typeLocked !== true),
+  );
+}
 
 /** Sits above a preview so it is never mistaken for the live page. */
 const PreviewBanner = ({ note }: { note: string }) => (
@@ -145,6 +144,8 @@ const CourseEditor = ({
   const [pendingVersion, setPendingVersion] = useState<PendingVersion>(null);
   /** Set while a restore or delete is in flight, so both buttons on every row stop. */
   const [versionBusy, setVersionBusy] = useState(false);
+  /** Open while the author is being asked to check the quiz kinds this publish fixes. */
+  const [confirmingTypeLock, setConfirmingTypeLock] = useState(false);
 
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
@@ -197,6 +198,7 @@ const CourseEditor = ({
    */
   const publish = async () => {
     if (!course || publishing) return;
+    setConfirmingTypeLock(false);
     try {
       setPublishing(true);
       const response = await curriculumApi.publishCourse(course.id);
@@ -208,6 +210,24 @@ const CourseEditor = ({
     } finally {
       setPublishing(false);
     }
+  };
+
+  /**
+   * What the publish button does first: check, then publish.
+   *
+   * A quiz's kind is fixed by the publish that first sends it out and can never
+   * be changed afterwards, so the author is shown which quizzes are about to be
+   * settled and what they were set to. Only quizzes that have never been out are
+   * listed — publishing an update to a course whose quizzes are all locked
+   * already asks nothing, because nothing is being decided.
+   */
+  const requestPublish = () => {
+    if (!course || publishing) return;
+    if (quizzesTypeLockedByPublish(course).length > 0) {
+      setConfirmingTypeLock(true);
+      return;
+    }
+    publish();
   };
 
   /**
@@ -335,6 +355,8 @@ const CourseEditor = ({
    */
   const isQuizSet = course.kind === 'QUIZ_SET';
   const quizCount = course.sections.reduce((sum, section) => sum + section.quizzes.length, 0);
+  /** The quizzes the confirmation lists, read at render so it is never stale. */
+  const pendingTypeLock = quizzesTypeLockedByPublish(course);
   const hasChanges = publication?.hasUnpublishedChanges ?? false;
   const unpublished = publication?.unpublished;
   const unpublishedCount =
@@ -344,391 +366,322 @@ const CourseEditor = ({
     (unpublished?.newQuizIds.length ?? 0);
 
   return (
-    <div className="page-container flex flex-col">
-      <Button
-        onClick={goBack}
-        variant="ghost"
-        className="mb-4 w-fit gap-2 px-0 text-dark-gray hover:text-green-hover"
-      >
-        <ArrowLeftIcon className="w-5 h-5" /> {backLabel}
-      </Button>
+    /*
+      Everything inside this editor can be locked by somebody else working in the
+      same course, so the provider wraps the whole of it: the structure pane
+      locks modules, the quiz editor locks questions, and neither has to be told
+      about the other.
+    */
+    <EditLocksProvider courseId={course.id}>
+      <div className="page-container flex flex-col">
+        <Button
+          onClick={goBack}
+          variant="ghost"
+          className="mb-4 w-fit gap-2 px-0 text-dark-gray hover:text-green-hover"
+        >
+          <ArrowLeftIcon className="w-5 h-5" /> {backLabel}
+        </Button>
 
-      <header className="responsive-page-header flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="page-title break-words font-bold text-dark-gray">{course.title}</h1>
-            <Badge
-              className={
-                course.published ? 'bg-navy px-2 text-white' : 'bg-gray-400 px-2 text-white'
-              }
-            >
-              {course.published ? 'Published' : 'Draft'}
-            </Badge>
+        <header className="responsive-page-header flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="page-title break-words font-bold text-dark-gray">{course.title}</h1>
+              <Badge
+                className={
+                  course.published ? 'bg-navy px-2 text-white' : 'bg-gray-400 px-2 text-white'
+                }
+              >
+                {course.published ? 'Published' : 'Draft'}
+              </Badge>
+            </div>
+            <p className="page-subtitle mt-1 text-sm text-dark-gray">
+              {isQuizSet ? (
+                <>
+                  {quizCount} quiz{quizCount === 1 ? '' : 'zes'} · {totalMinutes} min
+                </>
+              ) : (
+                <>
+                  {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
+                  {course.sections.length} sections · {totalMinutes} min
+                </>
+              )}{' '}
+              · changes save automatically
+            </p>
           </div>
-          <p className="page-subtitle mt-1 text-sm text-dark-gray">
-            {isQuizSet ? (
-              <>
-                {quizCount} quiz{quizCount === 1 ? '' : 'zes'} · {totalMinutes} min
-              </>
-            ) : (
-              <>
-                {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
-                {course.sections.length} sections · {totalMinutes} min
-              </>
-            )}{' '}
-            · changes save automatically
-          </p>
-        </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-3">
-          {/* Publishing a first version and publishing an update are the same
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
+            {/* Publishing a first version and publishing an update are the same
               action, but they read very differently to an author, so the button
               says which one it is about to do. */}
-          {!course.published || (course.publishedVersion ?? 0) < 1 ? (
-            <Button
-              onClick={publish}
-              disabled={publishing}
-              className="gap-2 bg-navy text-white hover:bg-navy-hover"
-            >
-              <CloudArrowUpIcon className="w-5 h-5" />
-              {publishing ? 'Publishing...' : 'Publish'}
-            </Button>
-          ) : (
-            <>
+            {!course.published || (course.publishedVersion ?? 0) < 1 ? (
               <Button
-                onClick={publish}
-                disabled={publishing || !hasChanges}
-                className={hasChanges ? 'gap-2 bg-navy text-white hover:bg-navy-hover' : 'gap-2'}
-                variant={hasChanges ? 'default' : 'outline'}
-                title={
-                  hasChanges
-                    ? 'Release everything edited since the last publish'
-                    : 'Nothing has changed since the last publish'
-                }
+                onClick={requestPublish}
+                disabled={publishing}
+                className="gap-2 bg-navy text-white hover:bg-navy-hover"
               >
                 <CloudArrowUpIcon className="w-5 h-5" />
-                {publishing ? 'Publishing...' : 'Publish updated course'}
+                {publishing ? 'Publishing...' : 'Publish'}
               </Button>
-              <Button
-                onClick={() =>
-                  run(
-                    () => curriculumApi.updateCourse(course.id, { published: false }),
-                    'Unpublished — learners can no longer reach it',
-                    'Failed to unpublish',
-                  )
-                }
-                variant="outline"
-                className="bg-white text-dark-gray hover:bg-light-gray"
-              >
-                Unpublish
-              </Button>
-            </>
-          )}
+            ) : (
+              <>
+                <Button
+                  onClick={requestPublish}
+                  disabled={publishing || !hasChanges}
+                  className={hasChanges ? 'gap-2 bg-navy text-white hover:bg-navy-hover' : 'gap-2'}
+                  variant={hasChanges ? 'default' : 'outline'}
+                  title={
+                    hasChanges
+                      ? 'Release everything edited since the last publish'
+                      : 'Nothing has changed since the last publish'
+                  }
+                >
+                  <CloudArrowUpIcon className="w-5 h-5" />
+                  {publishing ? 'Publishing...' : 'Publish updated course'}
+                </Button>
+                <Button
+                  onClick={() =>
+                    run(
+                      () => curriculumApi.updateCourse(course.id, { published: false }),
+                      'Unpublished — learners can no longer reach it',
+                      'Failed to unpublish',
+                    )
+                  }
+                  variant="outline"
+                  className="bg-white text-dark-gray hover:bg-light-gray"
+                >
+                  Unpublish
+                </Button>
+              </>
+            )}
 
-          <Button
-            onClick={() => setPendingDelete({ kind: 'course', id: course.id, label: course.title })}
-            variant="ghost"
-            size="icon"
-            className="hover:text-danger-hover"
-            title="Delete lesson"
-          >
-            <TrashIcon className="w-6 h-6" />
-          </Button>
-        </div>
-      </header>
+            <Button
+              onClick={() =>
+                setPendingDelete({ kind: 'course', id: course.id, label: course.title })
+              }
+              variant="ghost"
+              size="icon"
+              className="hover:text-danger-hover"
+              title="Delete lesson"
+            >
+              <TrashIcon className="w-6 h-6" />
+            </Button>
+          </div>
+        </header>
 
-      {/* What learners are actually being served right now. Worth stating
+        {/* What learners are actually being served right now. Worth stating
           plainly: with versioned publishing, the editor and the live course are
           routinely different, and an author needs to know which they are looking
           at. */}
-      {course.published && (course.publishedVersion ?? 0) >= 1 && (
-        <div
-          className={`mt-4 flex flex-wrap items-center gap-3 rounded-lg border-2 px-4 py-3
-          ${hasChanges ? 'border-new/40 bg-new-soft' : 'border-navy/30 bg-navy/5'}`}
-        >
-          <span className="text-sm font-semibold text-dark-gray">
-            {hasChanges
-              ? `Learners are seeing version ${course.publishedVersion}. ` +
-                'You have unpublished changes.'
-              : `Learners are seeing version ${course.publishedVersion} — up to date.`}
-          </span>
-          {hasChanges && unpublishedCount > 0 && (
-            <span className="text-sm text-dark-gray">
-              {unpublishedCount} new item{unpublishedCount === 1 ? '' : 's'} waiting
+        {course.published && (course.publishedVersion ?? 0) >= 1 && (
+          <div
+            className={`mt-4 flex flex-wrap items-center gap-3 rounded-lg border-2 px-4 py-3
+            ${hasChanges ? 'border-new/40 bg-new-soft' : 'border-navy/30 bg-navy/5'}`}
+          >
+            <span className="text-sm font-semibold text-dark-gray">
+              {hasChanges
+                ? `Learners are seeing version ${course.publishedVersion}. ` +
+                  'You have unpublished changes.'
+                : `Learners are seeing version ${course.publishedVersion} — up to date.`}
             </span>
-          )}
-        </div>
-      )}
+            {hasChanges && unpublishedCount > 0 && (
+              <span className="text-sm text-dark-gray">
+                {unpublishedCount} new item{unpublishedCount === 1 ? '' : 's'} waiting
+              </span>
+            )}
+          </div>
+        )}
 
-      <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-navy" />
+        <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-navy" />
 
-      <div className="grid gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
-        {/* ---- Module sidebar ---- */}
-        <nav className="h-fit md:sticky md:top-20">
-          <ul className="flex flex-col gap-1">
-            {panesFor(mode).map(({ key, label, Icon }) => (
-              <li key={key}>
-                <button
-                  onClick={() => setPane(key)}
-                  aria-current={pane === key ? 'page' : undefined}
-                  className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-sm
-                  font-medium transition-colors
-                  ${pane === key ? 'bg-navy text-white' : 'text-dark-gray hover:bg-light-gray'}`}
-                >
-                  <Icon className="w-5 h-5 shrink-0" />
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className="grid gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
+          {/* ---- Module sidebar ---- */}
+          <nav className="h-fit md:sticky md:top-20">
+            <ul className="flex flex-col gap-1">
+              {panesFor(mode).map(({ key, label, Icon }) => (
+                <li key={key}>
+                  <button
+                    onClick={() => setPane(key)}
+                    aria-current={pane === key ? 'page' : undefined}
+                    className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left
+                    text-sm font-medium transition-colors
+                    ${pane === key ? 'bg-navy text-white' : 'text-dark-gray hover:bg-light-gray'}`}
+                  >
+                    <Icon className="w-5 h-5 shrink-0" />
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
-        {/* ---- Module content ---- */}
-        <div className="min-w-0">
-          {pane === 'landing' && (
-            <LandingPageEditor
-              course={course}
-              onRefresh={fetchCourse}
-              onNotify={notify}
-              run={run}
-            />
-          )}
+          {/* ---- Module content ---- */}
+          <div className="min-w-0">
+            {pane === 'landing' && (
+              <LandingPageEditor
+                course={course}
+                onRefresh={fetchCourse}
+                onNotify={notify}
+                run={run}
+              />
+            )}
 
-          {pane === 'modules' && mode === 'quiz' && (
-            <QuizPane
-              course={course}
-              selectedSectionId={selectedSectionId}
-              onSelectSection={setSelectedSectionId}
-              onRefresh={fetchCourse}
-              onNotify={notify}
-              onDelete={setPendingDelete}
-              run={run}
-            />
-          )}
+            {pane === 'modules' && mode === 'quiz' && (
+              <QuizPane
+                course={course}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={setSelectedSectionId}
+                onRefresh={fetchCourse}
+                onNotify={notify}
+                onDelete={setPendingDelete}
+                run={run}
+              />
+            )}
 
-          {pane === 'modules' && mode === 'lesson' && (
-            <StructureEditor
-              course={course}
-              selectedSectionId={selectedSectionId}
-              onSelectSection={setSelectedSectionId}
-              onRefresh={fetchCourse}
-              onNotify={notify}
-              onDelete={setPendingDelete}
-              run={run}
-              setCourse={setCourse}
-              unpublished={publication?.unpublished}
-            />
-          )}
+            {pane === 'modules' && mode === 'lesson' && (
+              <StructureEditor
+                course={course}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={setSelectedSectionId}
+                onRefresh={fetchCourse}
+                onNotify={notify}
+                onDelete={setPendingDelete}
+                run={run}
+                setCourse={setCourse}
+                unpublished={publication?.unpublished}
+              />
+            )}
 
-          {/*
+            {/*
             Anyone who can open this editor either made the lesson or was named on
             it, and either way may share it: there is no wider admin who can reach
             it over their head, so there is nobody left to defer to.
           */}
-          {pane === 'access' && (
-            <CourseAccess course={course} canManageAuthors mode={mode} onNotify={notify} />
-          )}
+            {pane === 'access' && (
+              <CourseAccess course={course} canManageAuthors mode={mode} onNotify={notify} />
+            )}
 
-          {pane === 'versions' && (
-            <Card className="bg-light-gray shadow-sm">
-              <CardContent className="flex flex-col gap-4 p-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-dark-gray">Version history</h2>
-                  <p className="text-sm text-dark-gray">
-                    Each publish freezes the course as it stood. The version learners are reading is
-                    kept indefinitely; replaced versions are archived for {ARCHIVE_DAYS} days and
-                    then cleared automatically — the countdown on each one says how long is left.
-                    Restore puts an archived version back in front of learners as a new version, so
-                    nothing is lost and a restore can itself be undone.
-                  </p>
-                </div>
+            {pane === 'versions' && (
+              <Card className="bg-light-gray shadow-sm">
+                <CardContent className="p-4">
+                  <ArchivePane
+                    versions={publication?.versions ?? []}
+                    busy={versionBusy}
+                    onAsk={setPendingVersion}
+                    onNotify={notify}
+                    onRefresh={fetchPublication}
+                  />
+                </CardContent>
+              </Card>
+            )}
 
-                {(publication?.versions.length ?? 0) === 0 ? (
-                  <p className="py-8 text-center text-dark-gray">
-                    Never published. The first publish becomes version 1.
-                  </p>
-                ) : (
-                  <ul className="flex flex-col gap-2">
-                    {publication!.versions.map((entry) => {
-                      const added =
-                        entry.newModuleIds.length +
-                        entry.newSectionIds.length +
-                        entry.newElementIds.length +
-                        entry.newQuizIds.length;
-                      const live = entry.supersededAt === null;
-                      const clearsAt = live
-                        ? null
-                        : new Date(
-                            new Date(entry.supersededAt!).getTime() + ARCHIVE_DAYS * 86_400_000,
-                          );
-                      // Rounded up, so the last full day still reads "1 day left"
-                      // rather than "0" while the version is plainly still here.
-                      const daysLeft = clearsAt
-                        ? Math.max(0, Math.ceil((clearsAt.getTime() - Date.now()) / 86_400_000))
-                        : null;
-
-                      return (
-                        <li
-                          key={entry.id}
-                          className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3
-                            ${live ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}`}
-                        >
-                          <span className="min-w-40 flex-1">
-                            <span className="flex flex-wrap items-center gap-2">
-                              <span className="font-semibold text-dark-gray">
-                                Version {entry.version}
-                              </span>
-                              {live ? (
-                                <Badge className="bg-navy px-2 text-white">Live</Badge>
-                              ) : (
-                                <Badge className="bg-gray-400 px-2 text-white">Archived</Badge>
-                              )}
-                              {daysLeft !== null && (
-                                <Badge
-                                  className={`px-2 text-white ${
-                                    daysLeft <= 3 ? 'bg-danger' : 'bg-gray-400'
-                                  }`}
-                                  title={`Deleted automatically on ${clearsAt!.toLocaleDateString()}`}
-                                >
-                                  {daysLeft === 0
-                                    ? 'Clears today'
-                                    : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
-                                </Badge>
-                              )}
-                            </span>
-                            <span className="block text-xs text-dark-gray">
-                              Published {new Date(entry.publishedAt).toLocaleString()}
-                              {entry.publishedBy &&
-                                ` by ${entry.publishedBy.name ?? entry.publishedBy.email}`}
-                              {added > 0 && ` · ${added} new item${added === 1 ? '' : 's'}`}
-                              {clearsAt && ` · clears ${clearsAt.toLocaleDateString()}`}
-                            </span>
-                          </span>
-
-                          {/* Only an archived version offers these. The live one
-                              has nothing to restore to and must not be deleted —
-                              it is what every learner is currently reading. */}
-                          {!live && (
-                            <span className="flex shrink-0 items-center gap-2">
-                              <Button
-                                onClick={() =>
-                                  setPendingVersion({
-                                    action: 'restore',
-                                    id: entry.id,
-                                    version: entry.version,
-                                  })
-                                }
-                                disabled={versionBusy}
-                                variant="outline"
-                                className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
-                                title="Publish this version again for learners"
-                              >
-                                <ArrowUturnLeftIcon className="w-4 h-4" />
-                                Restore
-                              </Button>
-                              <Button
-                                onClick={() =>
-                                  setPendingVersion({
-                                    action: 'delete',
-                                    id: entry.id,
-                                    version: entry.version,
-                                  })
-                                }
-                                disabled={versionBusy}
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 hover:text-danger-hover"
-                                title="Delete this archived version now"
-                              >
-                                <TrashIcon className="w-4 h-4" />
-                              </Button>
-                            </span>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Previews render the real learner pages, so they cannot drift from
+            {/* Previews render the real learner pages, so they cannot drift from
               what is actually shipped. */}
-          {pane === 'preview-landing' && (
-            <>
-              <PreviewBanner note="The Course content button is disabled here." />
-              <CourseLanding previewCourse={course} preview />
-            </>
-          )}
-
-          {pane === 'preview-content' && (
-            <>
-              <PreviewBanner note="Notes work but are not saved, and progress is not recorded." />
-              <CoursePlayer previewCourse={course} preview />
-            </>
-          )}
-        </div>
-      </div>
-
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title={`Delete ${pendingDelete?.kind ?? 'item'}`}
-        message={
-          <>
-            Delete <span className="font-semibold">{pendingDelete?.label}</span>?
-            {pendingDelete?.kind === 'course' && ' Its modules and content go with it.'}
-            {pendingDelete?.kind === 'module' &&
-              ' Every section inside it goes too, and the modules after it move up.'}
-            {pendingDelete?.kind !== 'element' && (
+            {pane === 'preview-landing' && (
               <>
-                <br />
-                You can restore it from the Admin Dashboard.
+                <PreviewBanner note="The Course content button is disabled here." />
+                <CourseLanding previewCourse={course} preview />
               </>
             )}
-          </>
-        }
-        onConfirm={confirmDelete}
-        onCancel={() => setPendingDelete(null)}
-      />
 
-      <ConfirmDialog
-        open={pendingVersion !== null}
-        title={
-          pendingVersion?.action === 'restore'
-            ? `Restore version ${pendingVersion.version}`
-            : `Delete version ${pendingVersion?.version ?? ''}`
-        }
-        message={
-          pendingVersion?.action === 'restore' ? (
-            <>
-              Publish version <span className="font-semibold">{pendingVersion.version}</span> again?
-              Learners will start reading it immediately.
-              <br />
-              It goes out under a new version number, so the one it replaces is archived rather than
-              lost and you can come back to it. Your unpublished edits are left alone.
-            </>
-          ) : (
-            <>
-              Permanently delete version{' '}
-              <span className="font-semibold">{pendingVersion?.version}</span>?
-              <br />
-              This is the only copy — it cannot be restored afterwards.
-            </>
-          )
-        }
-        confirmLabel={pendingVersion?.action === 'restore' ? 'Restore' : 'Delete'}
-        onConfirm={confirmVersionAction}
-        onCancel={() => setPendingVersion(null)}
-      />
+            {pane === 'preview-content' && (
+              <>
+                <PreviewBanner note="Notes work but are not saved, and progress is not recorded." />
+                <CoursePlayer previewCourse={course} preview />
+              </>
+            )}
+          </div>
+        </div>
 
-      <ToastNotification
-        show={toast.show}
-        message={toast.message}
-        type={toast.type}
-        onClose={() => setToast((prev) => ({ ...prev, show: false }))}
-      />
-    </div>
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title={`Delete ${pendingDelete?.kind ?? 'item'}`}
+          message={
+            <>
+              Delete <span className="font-semibold">{pendingDelete?.label}</span>?
+              {pendingDelete?.kind === 'course' && ' Its modules and content go with it.'}
+              {pendingDelete?.kind === 'module' &&
+                ' Every section inside it goes too, and the modules after it move up.'}
+              {pendingDelete?.kind !== 'element' && (
+                <>
+                  <br />
+                  You can restore it from the Admin Dashboard.
+                </>
+              )}
+            </>
+          }
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+
+        <ConfirmDialog
+          open={pendingVersion !== null}
+          title={
+            pendingVersion?.action === 'restore'
+              ? `Restore version ${pendingVersion.version}`
+              : `Delete version ${pendingVersion?.version ?? ''}`
+          }
+          message={
+            pendingVersion?.action === 'restore' ? (
+              <>
+                Publish version <span className="font-semibold">{pendingVersion.version}</span>{' '}
+                again? Learners will start reading it immediately.
+                <br />
+                It goes out under a new version number, so the one it replaces is archived rather
+                than lost and you can come back to it. Your unpublished edits are left alone.
+              </>
+            ) : (
+              <>
+                Permanently delete version{' '}
+                <span className="font-semibold">{pendingVersion?.version}</span>?
+                <br />
+                This is the only copy — it cannot be restored afterwards.
+              </>
+            )
+          }
+          confirmLabel={pendingVersion?.action === 'restore' ? 'Restore' : 'Delete'}
+          onConfirm={confirmVersionAction}
+          onCancel={() => setPendingVersion(null)}
+        />
+
+        {/* Asked once per quiz, on the publish that first sends it out. The kind
+            is what decides how a learner can be given the quiz, and publishing
+            fixes it for good, so it is read back here while it can still be
+            changed. */}
+        <ConfirmDialog
+          open={confirmingTypeLock}
+          title="Check the quiz type"
+          message={
+            <>
+              <p>
+                Publishing locks the type of{' '}
+                {pendingTypeLock.length === 1 ? 'this quiz' : 'these quizzes'}. It cannot be changed
+                afterwards.
+              </p>
+              <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto text-sm">
+                {pendingTypeLock.map((quiz) => (
+                  <li key={quiz.id} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-semibold">{quiz.title}</span>
+                    <span>— {QUIZ_TYPE_LABELS[quiz.type]}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          }
+          confirmLabel="Publish"
+          cancelLabel="Go back"
+          tone="ask"
+          onConfirm={publish}
+          onCancel={() => setConfirmingTypeLock(false)}
+        />
+
+        <ToastNotification
+          show={toast.show}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast((prev) => ({ ...prev, show: false }))}
+        />
+      </div>
+    </EditLocksProvider>
   );
 };
 

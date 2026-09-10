@@ -14,6 +14,9 @@ import { AUTHOR_ROLES } from '@/controllers/auth-controller/authorization-middle
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
+import EditAttributionService, {
+  EditedKind,
+} from '@/services/edit-attribution-service/edit-attribution-service';
 
 /**
  * Guards access to a course's content, whether reading it in the editor or
@@ -139,6 +142,37 @@ function markDraftEditedOnSuccess(req: AuthenticatedRequest, res: Response, cour
   });
 }
 
+/**
+ * Records who made the change, on the row the route names.
+ *
+ * Hung off the response beside the draft marker, and for the same reason: the
+ * rule is "every edit is attributed", and a rule applied by hand at thirty call
+ * sites is a rule that will be missed at one. What the route's `:id` refers to
+ * is the one thing the middleware cannot work out for itself, so the route says
+ * so — see `attributes` on the options below.
+ *
+ * A creation names nothing yet, so its handler stamps the new row itself. This
+ * covers the far commoner case: editing something that already exists.
+ */
+function attributeEditOnSuccess(
+  req: AuthenticatedRequest,
+  res: Response,
+  kind: EditedKind,
+  name: string,
+) {
+  if (req.method === 'GET' || req.method === 'HEAD') return;
+
+  const id = req.params?.[name];
+  if (typeof id !== 'string' || !id) return;
+
+  const userId = req.user?.id ?? null;
+
+  res.on('finish', () => {
+    if (res.statusCode < 200 || res.statusCode >= 300) return;
+    void EditAttributionService.stamp(kind, id, userId);
+  });
+}
+
 export interface CourseEditorOptions {
   /**
    * Whether a successful write should mark the course's draft as ahead of what
@@ -152,11 +186,19 @@ export interface CourseEditorOptions {
    * clear it.
    */
   marksDraftEdited?: boolean;
+  /**
+   * What the route's id parameter points at, so a successful write can be
+   * credited to whoever made it.
+   *
+   * Left out where there is nothing to credit — a read, a publish, or a route
+   * whose id names something that carries no editor mark.
+   */
+  attributes?: { kind: EditedKind; param?: string };
 }
 
 export function requireCourseEditor(
   resolve: CourseResolver,
-  { marksDraftEdited = true }: CourseEditorOptions = {},
+  { marksDraftEdited = true, attributes }: CourseEditorOptions = {},
 ) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.auth || !req.user) {
@@ -205,6 +247,9 @@ export function requireCourseEditor(
       });
 
       if (marksDraftEdited) markDraftEditedOnSuccess(req, res, courseId);
+      if (attributes) {
+        attributeEditOnSuccess(req, res, attributes.kind, attributes.param ?? 'id');
+      }
       return next();
     } catch (error) {
       logger.error({ err: error }, 'course access check failed');

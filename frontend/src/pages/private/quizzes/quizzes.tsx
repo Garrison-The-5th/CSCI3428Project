@@ -201,6 +201,11 @@ const Quizzes = () => {
                     </CardTitle>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {done && <Badge className="w-fit bg-navy px-2 text-white">Completed</Badge>}
+                      {/* Not done and past its deadline: it can no longer be
+                          opened, and saying so on the card saves a click. */}
+                      {!done && quiz.locked && (
+                        <Badge className="w-fit bg-danger px-2 text-white">Closed</Badge>
+                      )}
                     </div>
                   </CardHeader>
                 </div>

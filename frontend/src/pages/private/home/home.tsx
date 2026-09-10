@@ -49,12 +49,26 @@ function daysUntil(iso: string): number {
   return Math.round((due.getTime() - today.getTime()) / 86_400_000);
 }
 
-function dueLabel(iso: string): { text: string; overdue: boolean } {
+/**
+ * How a deadline reads, and whether it has actually run out.
+ *
+ * A deadline falls at 11:59 PM on its own day, so "due today" is a warning
+ * rather than a failure — there is still the rest of the day in it. Overdue is
+ * therefore a separate answer from the wording, and where the server has
+ * already decided it (`overdue` on a Deadline) that decision wins: the
+ * browser's clock is not the one the deadline was set against.
+ */
+function dueLabel(iso: string, overdue?: boolean): { text: string; overdue: boolean } {
   const days = daysUntil(iso);
-  if (days < 0) return { text: `${Math.abs(days)} days overdue`, overdue: true };
-  if (days === 0) return { text: 'Due today', overdue: true };
-  if (days === 1) return { text: 'Due tomorrow', overdue: false };
-  return { text: `Due in ${days} days`, overdue: false };
+  const past = overdue ?? days < 0;
+
+  if (days < 0) {
+    const late = Math.abs(days);
+    return { text: `${late} day${late === 1 ? '' : 's'} overdue`, overdue: true };
+  }
+  if (days === 0) return { text: past ? 'Closed today' : 'Due today, 11:59 PM', overdue: past };
+  if (days === 1) return { text: 'Due tomorrow', overdue: past };
+  return { text: `Due in ${days} days`, overdue: past };
 }
 
 const HomePage = () => {
@@ -203,8 +217,15 @@ const HomePage = () => {
                           <ClockIcon className="w-3.5 h-3.5 shrink-0" />
                           {formatMinutes(course.remainingMinutes)} left
                         </p>
-                        {course.required && (
-                          <Badge className="bg-navy px-2 text-xs text-white">Required</Badge>
+                        {/* Past its deadline the course is closed, so say so
+                            here rather than let them click through and find the
+                            way in greyed out. */}
+                        {course.locked ? (
+                          <Badge className="bg-danger px-2 text-xs text-white">Closed</Badge>
+                        ) : (
+                          course.required && (
+                            <Badge className="bg-navy px-2 text-xs text-white">Required</Badge>
+                          )
                         )}
                       </Link>
                     </li>
@@ -233,9 +254,6 @@ const HomePage = () => {
                       >
                         <span className="min-w-0">
                           <span className="block font-semibold text-dark-gray">{quiz.title}</span>
-                          {quiz.courseTitle && (
-                            <span className="block text-sm text-dark-gray">{quiz.courseTitle}</span>
-                          )}
                           {quiz.dueDate && (
                             <span
                               className={`block text-sm font-medium ${
@@ -268,15 +286,19 @@ const HomePage = () => {
               <p className="py-8 text-center text-dark-gray">Nothing due.</p>
             ) : (
               <ul className="flex flex-col gap-3">
-                {deadlines.map((course) => {
-                  const due = dueLabel(course.dueDate!);
+                {/* Courses and standalone quizzes in one ranked list — the
+                    question is what falls due next, not which course does. A
+                    quiz that lives inside a course is absent: it is due with the
+                    course, and listing both would print one deadline twice. */}
+                {deadlines.map((item) => {
+                  const due = dueLabel(item.dueDate, item.overdue);
 
                   return (
                     <li
-                      key={course.courseId}
+                      key={`${item.kind}-${item.id}`}
                       className="rounded-lg border border-gray-300 bg-white px-4 py-3"
                     >
-                      <p className="font-semibold text-dark-gray">{course.title}</p>
+                      <p className="font-semibold text-dark-gray">{item.title}</p>
                       <p
                         className={`mt-1 flex items-center gap-1 text-sm font-medium ${
                           due.overdue ? 'text-danger' : 'text-dark-gray'
@@ -286,12 +308,17 @@ const HomePage = () => {
                         {due.text}
                       </p>
                       <p className="mt-1 text-sm text-dark-gray">
-                        {new Date(course.dueDate!).toLocaleDateString()} ·{' '}
-                        {formatMinutes(course.remainingMinutes)} left
+                        {new Date(item.dueDate).toLocaleDateString()}
+                        {item.kind === 'course' &&
+                          ` · ${formatMinutes(item.remainingMinutes)} left`}
                       </p>
+                      {/* A quiz is one sitting, so there is no part-way through
+                          it to report — only which of the two it is. */}
                       <p className="mt-1 text-sm text-dark-gray">
-                        {course.percentComplete}% complete ({course.completedSections}/
-                        {course.totalSections} sections)
+                        {item.kind === 'course'
+                          ? `${item.percentComplete}% complete (${item.completedSections}/` +
+                            `${item.totalSections} sections)`
+                          : 'Quiz'}
                       </p>
                     </li>
                   );

@@ -8,10 +8,11 @@
 /**
  * AdminQuizzes — where quizzes are written.
  *
- * Grid view: one card per course that holds quizzes, of either kind. A quiz set
- * is a course with a quiz per section and no elements; a lesson is the ordinary
- * kind, and appears here so the quizzes inside it can be edited without going
- * the long way round through Create a Lesson.
+ * Grid view: one card per quiz. What the author calls a quiz is a QUIZ_SET
+ * underneath — a course with a quiz per section and no elements — and the words
+ * "quiz set" are deliberately absent from everything they read here. The
+ * distinction is ours, not theirs: they named a quiz, and the questions inside
+ * it are its questions.
  *
  * Detail view: the same shell as Create a Lesson. Every sidebar tab is there;
  * the one showing the course structure over there shows the quiz builder here.
@@ -38,18 +39,19 @@ type Toast = { show: boolean; message: string; type: 'success' | 'error' };
 /**
  * Which cards to show.
  *
- * The two that sorted lessons from quiz sets are gone, because this page no
+ * The two that sorted lessons from quizzes are gone, because this page no
  * longer holds both. A quiz written inside a lesson belongs to that lesson — it
  * follows on from the content either side of it — and is edited there, on the
  * lesson's own Quiz pane. Listing it here as well made the same quiz appear in
  * two places and invited it to be treated as a thing of its own, which it is
  * not. What a course is shows on the tab it was created on, and nowhere else.
  */
-type Filter = 'all' | 'drafts';
+type Filter = 'all' | 'drafts' | 'published';
 
 const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
-  { key: 'all', label: 'Everything', hint: 'Every quiz set' },
+  { key: 'all', label: 'Everything', hint: 'Every quiz' },
   { key: 'drafts', label: 'Drafts', hint: 'Not published, so no learner can reach them yet' },
+  { key: 'published', label: 'Published', hint: 'Live, and reachable by whoever holds them' },
 ];
 
 const inputClass = 'bg-white text-dark-gray';
@@ -105,7 +107,7 @@ const AdminQuizzes = () => {
   /**
    * How long the whole thing takes.
    *
-   * A quiz set carries its estimate per section, because that is where the
+   * A quiz carries its estimate per section, because that is where the
    * author types it. A lesson's own minutes cover its reading as well as its
    * quizzes, so for a lesson this counts only the quizzes' own time limits —
    * otherwise the figure on a quiz card would describe the lesson, not the
@@ -122,7 +124,7 @@ const AdminQuizzes = () => {
 
   const createQuizSet = async () => {
     const title = newTitle.trim();
-    if (!title) return notify('Give the quiz set a name', 'error');
+    if (!title) return notify('Give the quiz a name', 'error');
 
     try {
       setCreating(true);
@@ -133,7 +135,7 @@ const AdminQuizzes = () => {
       // Straight into it, because naming something is only ever the first step.
       if (created?.course?.id) setOpenCourseId(created.course.id);
     } catch (err) {
-      logger.error('Failed to create quiz set:', err);
+      logger.error('Failed to create quiz:', err);
       notify(err instanceof Error && err.message ? err.message : 'Failed to create', 'error');
     } finally {
       setCreating(false);
@@ -143,17 +145,19 @@ const AdminQuizzes = () => {
   /**
    * The cards, filtered and searched.
    *
-   * Quiz sets, and only quiz sets — a lesson's quizzes are edited on that
+   * Quizzes proper, and only those — a lesson's quizzes are edited on that
    * lesson's own Quiz pane, where the content they were written against is. An
-   * empty set is still kept, or one just created would vanish before it could be
-   * filled.
+   * empty one is still kept, or a quiz just created would vanish before it could
+   * be filled.
    */
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return courses
       .filter((course) => course.kind === 'QUIZ_SET')
-      .filter((course) => (filter === 'drafts' ? !course.published : true))
+      .filter((course) =>
+        filter === 'drafts' ? !course.published : filter === 'published' ? course.published : true,
+      )
       .filter((course) => {
         if (!query) return true;
         return [
@@ -211,30 +215,11 @@ const AdminQuizzes = () => {
       <header className="responsive-page-header">
         <h1 className="page-title font-bold text-dark-gray mb-2">Create a Quiz</h1>
         <p className="page-subtitle text-dark-gray font-medium">
-          Name a quiz set to start one of its own, or open a lesson to build the quizzes inside it.
+          Name a quiz to start a new one, or pick one below to edit it.
         </p>
       </header>
 
       <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-navy" />
-
-      {/* New quiz set. Only a name — what kind each quiz is gets decided per
-          quiz inside, where the question is actually being asked. */}
-      <div
-        className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border-2 border-dashed
-          border-navy/30 p-4"
-      >
-        <Input
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && createQuizSet()}
-          placeholder="Name a new quiz set..."
-          aria-label="New quiz set name"
-          className={`${inputClass} min-w-60 flex-1`}
-        />
-        <Button onClick={createQuizSet} disabled={creating} className={primaryBtn}>
-          <PlusIcon className="w-5 h-5 stroke-2" /> {creating ? 'Creating...' : 'Add quiz set'}
-        </Button>
-      </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative min-w-60 flex-1 sm:max-w-md">
@@ -301,6 +286,27 @@ const AdminQuizzes = () => {
         </div>
       </div>
 
+      {/* New quiz. Only a name — what kind each question set is gets decided
+          per quiz inside, where the question is actually being asked. Solid
+          border rather than dashed: this is a permanent part of the page, not a
+          placeholder waiting to be filled. */}
+      <div
+        className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border-2 border-solid
+          border-navy/30 p-4"
+      >
+        <Input
+          value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && createQuizSet()}
+          placeholder="Name a new quiz..."
+          aria-label="New quiz name"
+          className={`${inputClass} min-w-60 flex-1`}
+        />
+        <Button onClick={createQuizSet} disabled={creating} className={primaryBtn}>
+          <PlusIcon className="w-5 h-5 stroke-2" /> {creating ? 'Creating...' : 'Add quiz'}
+        </Button>
+      </div>
+
       {visible.length === 0 ? (
         <Card className="bg-light-gray">
           <CardContent className="py-16 text-center">
@@ -308,7 +314,7 @@ const AdminQuizzes = () => {
               {search.trim()
                 ? `Nothing matches “${search}”.`
                 : filter === 'all'
-                  ? 'No quizzes yet. Name a quiz set above to start one.'
+                  ? 'No quizzes yet. Name one above to start.'
                   : `Nothing under “${activeFilter.label}”.`}
             </p>
           </CardContent>
@@ -332,7 +338,7 @@ const AdminQuizzes = () => {
                   {cover ? (
                     <img src={cover} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <span className="text-sm text-dark-gray">{isSet ? 'Quiz set' : 'Lesson'}</span>
+                    <span className="text-sm text-dark-gray">{isSet ? 'Quiz' : 'Lesson'}</span>
                   )}
                 </div>
 
@@ -350,7 +356,7 @@ const AdminQuizzes = () => {
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-dark-gray">
-                    {isSet ? 'Quiz set' : 'Inside a lesson'}
+                    {isSet ? 'Quiz' : 'Inside a lesson'}
                   </p>
                 </CardHeader>
 

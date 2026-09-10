@@ -228,6 +228,59 @@ export default class AssignmentGateway {
     });
   }
 
+  /**
+   * When this person's copy of a quiz falls due, or null if it never does.
+   *
+   * A quiz reaches somebody one of two ways, and both are deadlines: handed over
+   * on its own, or sitting inside a course that was handed over. The course
+   * counts because a quiz inside one is due with it — so an exam in a lesson
+   * closes when the lesson does, without anybody having assigned the exam.
+   *
+   * The latest of whatever applies wins. Where the same work arrived twice, the
+   * later grant is the one that means anything; taking the earlier one would
+   * close somebody out of a course that had just been re-assigned to them.
+   *
+   * A null due date on a live assignment is no deadline at all and beats every
+   * date, which is why this cannot be written as an `orderBy` and a `take: 1`.
+   */
+  static async quizDeadlineFor(userId: number, quizId: string): Promise<Date | null> {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) return null;
+
+    const owner = await prisma.quiz.findUnique({
+      where: { id: quizId },
+      select: { section: { select: { courseId: true } } },
+    });
+    const courseId = owner?.section?.courseId ?? null;
+
+    const now = new Date();
+    const assignments = await prisma.assignment.findMany({
+      where: {
+        email: user.email,
+        revokedAt: null,
+        // Two independent OR groups — still live, and reaches this quiz — so
+        // they are spelled out under AND rather than as two `OR` keys, one of
+        // which would silently overwrite the other.
+        AND: [
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+          { OR: courseId ? [{ quizId }, { courseId }] : [{ quizId }] },
+        ],
+      },
+      select: { dueDate: true },
+    });
+
+    if (assignments.length === 0) return null;
+    if (assignments.some((assignment) => assignment.dueDate === null)) return null;
+
+    return assignments.reduce<Date | null>(
+      (latest, assignment) =>
+        latest === null || assignment.dueDate!.getTime() > latest.getTime()
+          ? assignment.dueDate!
+          : latest,
+      null,
+    );
+  }
+
   /** Existing assignment for the same person and the same item, if there is one. */
   static findDuplicate(email: string, courseId: string | null, quizId: string | null) {
     return prisma.assignment.findFirst({

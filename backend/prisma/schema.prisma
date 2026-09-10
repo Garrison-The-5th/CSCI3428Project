@@ -42,6 +42,18 @@ model User {
   assignmentsMade   Assignment[]        @relation("AssignmentAssigner")
   /// Course versions this person put live, for the archive list.
   publishedVersions CoursePublication[] @relation("PublishedVersions")
+  /// Versions this person marked to be kept for good.
+  archivedVersions  CoursePublication[] @relation("ArchivedVersions")
+  /// What this person currently has open for editing, so two authors in one
+  /// course do not overwrite each other. At most a handful of rows at a time.
+  editLeases        EditLease[]
+  /// Draft edits credited to this person. Cleared when the course is published,
+  /// because at that point there is no unpublished change left to attribute.
+  editedModules     Module[]            @relation("ModuleEditor")
+  editedSections    Section[]           @relation("SectionEditor")
+  editedElements    Element[]           @relation("ElementEditor")
+  editedQuizzes     Quiz[]              @relation("QuizEditor")
+  editedQuestions   Question[]          @relation("QuestionEditor")
 }
 
 /// What kind of thing a Course is.
@@ -86,6 +98,21 @@ model Course {
   published        Boolean    @default(false) // hidden from learners until published
   /// When on, a section stays locked until every earlier section is finished.
   sequential       Boolean    @default(false)
+  /// Whether the deadline shuts the course, or only reports that it passed.
+  ///
+  /// On, and once the due date has gone the learner cannot open anything: the
+  /// way in is closed and the quizzes inside refuse to start. That is right for
+  /// a compliance course, where sitting it late is the same as not sitting it.
+  ///
+  /// Off, and the deadline is a date rather than a gate — the course still says
+  /// it is overdue, everywhere it said so before, but the learner may carry on
+  /// and finish. That is right for most learning, where a week late is worth far
+  /// more than never.
+  ///
+  /// On by default, because that is what a deadline meant here before this was
+  /// a choice, and quietly opening every existing course would be a change
+  /// nobody asked for.
+  lockAfterDue     Boolean    @default(true)
   publishedAt      DateTime? // stamped the first time it is published
   /// Which CoursePublication learners are currently served. 0 means the course
   /// has never been published, so there is nothing for a learner to read.
@@ -129,6 +156,8 @@ model Course {
   notes        Note[]
   assignments  Assignment[]
   publications CoursePublication[]
+  /// Who currently has a module or a question in this course open.
+  editLeases   EditLease[]
 
   @@index([kind])
   @@index([createdById])
@@ -161,6 +190,21 @@ model CoursePublication {
   /// Set when a newer version replaced this one. Null on the live version, which
   /// is never purged however old it gets.
   supersededAt  DateTime?
+  /// Set when someone deliberately kept this version for good.
+  ///
+  /// The ordinary archive is a grace period: a replaced version is readable for
+  /// fourteen days and then cleared, which is right for the dozens of versions
+  /// nobody will ever look at again. This is the escape hatch for the few that
+  /// matter — the one that was audited, the one signed off — and a row with this
+  /// set is never touched by the purge however long ago it was replaced.
+  ///
+  /// Clearing it does not delete the version: it drops back into the ordinary
+  /// history, and the fourteen days start from that moment rather than from the
+  /// publish it was replaced by, so keeping something and then changing your
+  /// mind never destroys it on the spot.
+  archivedAt    DateTime?
+  archivedById  Int?
+  archivedBy    User?     @relation("ArchivedVersions", fields: [archivedById], references: [id], onDelete: SetNull)
 
   /// What this version added compared with the one before it, so a learner who
   /// had already finished can be shown exactly what is new. Worked out once at
@@ -173,6 +217,7 @@ model CoursePublication {
   @@unique([courseId, version])
   @@index([courseId, publishedAt])
   @@index([supersededAt])
+  @@index([archivedById])
 }
 
 /// Someone credited on a course. Courses can list more than one.
@@ -297,20 +342,30 @@ model Note {
 /// the section its inner one, so module 2's third section is "2.3". `number` is the
 /// module's 1-based place in the course, which the author sets directly.
 model Module {
-  id        String    @id @default(uuid())
-  courseId  String
-  course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  number    Int
-  title     String
+  id             String    @id @default(uuid())
+  courseId       String
+  course         Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  number         Int
+  title          String
   /// Hex tint the author picked, e.g. "#c7d9f0". Used at low opacity behind the
   /// module's sections so a long course reads as groups at a glance. Null means
   /// no tint, which is the default.
-  color     String?
-  deletedAt DateTime? // soft delete: recoverable from the admin dashboard
-  sections  Section[]
+  color          String?
+  deletedAt      DateTime? // soft delete: recoverable from the admin dashboard
+  /// Who last changed this while it was still a draft, and when.
+  ///
+  /// Cleared for the whole course at publish time, because the question these
+  /// answer is "what has changed that learners cannot see yet, and who did it" —
+  /// once it is published there is no such change left to attribute, and leaving
+  /// the marks up would tag every course forever.
+  lastEditedById Int?
+  lastEditedAt   DateTime?
+  lastEditedBy   User?     @relation("ModuleEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  sections       Section[]
 
   @@unique([courseId, number])
   @@index([courseId, number])
+  @@index([lastEditedById])
 }
 
 /// A part of a course, living inside a module.
@@ -341,6 +396,10 @@ model Section {
   /// name exactly what is new to them, rather than only that something is.
   createdAt        DateTime          @default(now())
   deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
+  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  lastEditedById   Int?
+  lastEditedAt     DateTime?
+  lastEditedBy     User?             @relation("SectionEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   elements         Element[]
   quizzes          Quiz[]
   views            SectionProgress[]
@@ -348,6 +407,7 @@ model Section {
   @@unique([courseId, number])
   @@index([courseId, sortKey])
   @@index([moduleId, position])
+  @@index([lastEditedById])
 }
 
 model Element {
@@ -365,9 +425,14 @@ model Element {
   /// Runtime of a YOUTUBE element, entered by the author. Summed for the
   /// "hours of video" figure on the course page.
   durationMinutes Int?
+  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  lastEditedById  Int?
+  lastEditedAt    DateTime?
+  lastEditedBy    User?             @relation("ElementEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   views           ElementProgress[]
 
   @@index([sectionId])
+  @@index([lastEditedById])
 }
 
 enum ElementType {
@@ -471,20 +536,20 @@ enum QuizType {
 // alone. A ONE_TIME quiz always stands alone, because it is only ever reached
 // through its link.
 model Quiz {
-  id               String        @id @default(uuid())
-  title            String
-  description      String?
-  type             QuizType      @default(EXAM)
-  sectionId        String?
-  section          Section?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  id                    String        @id @default(uuid())
+  title                 String
+  description           String?
+  type                  QuizType      @default(EXAM)
+  sectionId             String?
+  section               Section?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   /// Position within the section, sharing one sequence with Element.order so a
   /// quiz can sit between two pieces of content.
-  order            Int           @default(0)
-  published        Boolean       @default(false) // hidden from learners until published
+  order                 Int           @default(0)
+  published             Boolean       @default(false) // hidden from learners until published
   /// Show the score screen — the ring and the percentage — after submitting.
   /// Off means the learner is moved straight on without being told how they did.
-  showResults      Boolean       @default(true)
-  showAnswers      Boolean       @default(false) // admin toggle: reveal correct answers after an attempt
+  showResults           Boolean       @default(true)
+  showAnswers           Boolean       @default(false) // admin toggle: reveal correct answers after an attempt
   /// Whether an EXAM may be sat more than once.
   ///
   /// Off by default, which is what an exam means unless the author says
@@ -494,24 +559,39 @@ model Quiz {
   /// Meaningless on the other two kinds and ignored there. A LEARNING_CHECK is
   /// always retakeable — it keeps no mark, so there is nothing to protect — and
   /// a ONE_TIME quiz never is, which is the whole of what it is for.
-  allowMultipleAttempts Boolean  @default(false)
-  dueDate          DateTime? // falls back to the course due date when not set
+  allowMultipleAttempts Boolean       @default(false)
+  dueDate               DateTime? // falls back to the course due date when not set
   /// Days the learner gets once this quiz is handed to them. Same idea as
   /// Course.daysRemaining, and read the same way when an assignment is made.
-  daysRemaining    Int?
+  daysRemaining         Int?
   /// Minutes a learner gets once they start. Null means untimed, and is forced
   /// for a LEARNING_CHECK.
-  timeLimitMinutes Int?
+  timeLimitMinutes      Int?
+  /// Whether `type` may still be changed.
+  ///
+  /// Set the first time the quiz is published and never cleared. What a quiz is
+  /// decides who can reach it and how, and changing that under a learner who
+  /// already holds it is not an edit but a different quiz: an exam shared with
+  /// somebody who has an account sits on their Quizzes tab, and switching it to
+  /// a one-time link afterwards leaves it sitting there — listed, reachable, and
+  /// the one thing a one-time link must never be. Publishing is the moment the
+  /// choice stops being the author's alone, so it is the moment it is fixed.
+  typeLocked            Boolean       @default(false)
   /// When the quiz was added, for the same reason as Section.createdAt.
-  createdAt        DateTime      @default(now())
-  deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
-  questions        Question[]
-  attempts         QuizAttempt[]
-  sessions         QuizSession[]
-  assignments      Assignment[]
+  createdAt             DateTime      @default(now())
+  deletedAt             DateTime? // soft delete: recoverable from the admin dashboard
+  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  lastEditedById        Int?
+  lastEditedAt          DateTime?
+  lastEditedBy          User?         @relation("QuizEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  questions             Question[]
+  attempts              QuizAttempt[]
+  sessions              QuizSession[]
+  assignments           Assignment[]
 
   @@index([sectionId])
   @@index([type])
+  @@index([lastEditedById])
 }
 
 /// One learner's run at a timed quiz.
@@ -536,16 +616,21 @@ model QuizSession {
 }
 
 model Question {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   quizId            String
-  quiz              Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quiz              Quiz      @relation(fields: [quizId], references: [id], onDelete: Cascade)
   order             Int // position within the quiz
   prompt            String
   hint              String? // shown in a popup when the learner asks for a hint
   hintSectionNumber String? // optional section number the hint points back to, e.g. "1.2"
+  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  lastEditedById    Int?
+  lastEditedAt      DateTime?
+  lastEditedBy      User?     @relation("QuestionEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   options           Option[]
 
   @@index([quizId])
+  @@index([lastEditedById])
 }
 
 model Option {
@@ -557,4 +642,45 @@ model Option {
   isCorrect  Boolean  @default(false)
 
   @@index([questionId])
+}
+
+/// What one editing claim covers.
+enum EditScope {
+  /// A whole module, and everything inside it. Claimed while an author has that
+  /// module open in the structure editor.
+  MODULE
+  /// One question in a quiz. Finer than a module on purpose — two people writing
+  /// different questions in the same quiz is ordinary and should not block.
+  QUESTION
+}
+
+/// Who currently has a piece of a course open, so two authors cannot silently
+/// overwrite each other.
+///
+/// A claim rather than a lock in the database sense: it is advisory, held in a
+/// row, and renewed by the editor that owns it every few seconds. That matters
+/// because a browser can leave without saying so — a closed tab, a dead laptop,
+/// a lost connection — and a lock nobody can release strands the content for
+/// everyone else. A claim that has not been renewed inside `EDIT_LEASE_TTL_MS`
+/// is simply ignored, and the next author to ask takes it over.
+///
+/// One row per target, which is what makes taking a claim a single upsert and
+/// makes "who holds this" a single read. The holder is free to renew their own;
+/// anybody else is refused until it lapses.
+model EditLease {
+  id        String    @id @default(uuid())
+  courseId  String
+  course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  scope     EditScope
+  /// The module or question this covers.
+  targetId  String
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  claimedAt DateTime  @default(now())
+  /// Bumped by every heartbeat. A lease is live for as long as this is recent.
+  renewedAt DateTime  @default(now())
+
+  @@unique([scope, targetId])
+  @@index([courseId, renewedAt])
+  @@index([userId])
 }

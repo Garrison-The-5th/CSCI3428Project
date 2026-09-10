@@ -9,7 +9,7 @@
  * Confirmation dialog for destructive actions, so a stray click cannot delete a
  * section or quiz. Clicking the backdrop or Cancel dismisses it.
  */
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,6 +19,17 @@ interface ConfirmDialogProps {
   title: string;
   message: React.ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
+  /**
+   * What kind of answer is being asked for.
+   *
+   * `danger` is the original job and stays the default: red mark, red button,
+   * something about to be destroyed. `ask` is for a decision that is merely
+   * final — publishing, which fixes a quiz's kind for good — where a red button
+   * would read as a warning against carrying on rather than a request to check
+   * first.
+   */
+  tone?: 'danger' | 'ask';
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -28,10 +39,15 @@ const ConfirmDialog = ({
   title,
   message,
   confirmLabel = 'Delete',
+  cancelLabel = 'Cancel',
+  tone = 'danger',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) => {
   if (!open) return null;
+
+  const danger = tone === 'danger';
+  const Icon = danger ? ExclamationTriangleIcon : QuestionMarkCircleIcon;
 
   return (
     <div
@@ -49,10 +65,10 @@ const ConfirmDialog = ({
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
             <div
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full
-                bg-danger/10 text-danger"
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full
+                ${danger ? 'bg-danger/10 text-danger' : 'bg-navy/10 text-navy'}`}
             >
-              <ExclamationTriangleIcon className="h-6 w-6" />
+              <Icon className="h-6 w-6" />
             </div>
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-dark-gray">{title}</h2>
@@ -67,13 +83,17 @@ const ConfirmDialog = ({
               variant="outline"
               className="bg-white text-dark-gray hover:bg-light-gray"
             >
-              Cancel
+              {cancelLabel}
             </Button>
             <Button
               type="button"
               onClick={onConfirm}
-              variant="destructive"
-              className="bg-danger text-white hover:bg-danger-hover"
+              variant={danger ? 'destructive' : 'default'}
+              className={
+                danger
+                  ? 'bg-danger text-white hover:bg-danger-hover'
+                  : 'bg-navy text-white hover:bg-navy-hover'
+              }
             >
               {confirmLabel}
             </Button>

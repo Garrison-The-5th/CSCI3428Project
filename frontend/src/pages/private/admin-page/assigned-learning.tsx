@@ -8,18 +8,19 @@
 /**
  * Assigned learning — who has been given what, and how far they have got.
  *
- * Grid view : one card per course that has been handed to at least one person,
- *             with the headline numbers (assigned, finished, overdue).
+ * Grid view : one card per course this person owns or is named on, with the
+ *             headline numbers (assigned, finished, overdue). Courses nobody
+ *             holds yet are listed too — a count of zero is the useful answer,
+ *             not an empty one.
  * Course view: the same course's roster, one row per person, sortable by how far
- *             behind they are. Managing the assignments themselves — resending,
- *             moving a due date, taking one away — happens in the panel
- *             underneath, which is the same component the course editor uses, so
- *             the two can never offer different controls.
+ *             behind they are.
+ *
+ * Reporting only. Work is handed out from the course's own Access pane, in front
+ * of the course being sent — see the note where the panel used to be.
  */
 import { ArrowLeftIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import AssignPanel from '@/components/common/assign-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -235,17 +236,17 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
           </CardContent>
         </Card>
 
-        {/* The same panel the course editor uses, so there is one place that
-            defines what can be done to an assignment. */}
-        <AssignPanel
-          courseId={openCourse.courseId}
-          label={openCourse.title}
-          onNotify={onNotify}
-          onChanged={() => {
-            fetchRoster(openCourse.courseId);
-            fetchCourses();
-          }}
-        />
+        {/*
+          No AssignPanel here on purpose.
+
+          Work is handed out from the course's own Access pane, where whoever is
+          sending it has the course in front of them — what is in it, whether it
+          is published, what deadline it carries. This page is the other half of
+          that: it reports who holds what and how far they have got. Offering to
+          assign from a summary screen meant a course could be sent by somebody
+          reading a progress figure, which is the wrong moment and the wrong
+          information to be deciding on.
+        */}
       </div>
     );
   }
@@ -260,20 +261,20 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
       <Input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search assigned courses..."
+        placeholder="Search your courses..."
         className="max-w-md bg-white text-dark-gray"
       />
 
       {courses.length === 0 ? (
         <Card className="bg-light-gray">
           <CardContent className="py-16 text-center">
-            <p>Nothing has been assigned yet. Hand a course to someone to see it here.</p>
+            <p>You have not created a course yet, and none has been shared with you.</p>
           </CardContent>
         </Card>
       ) : visibleCourses.length === 0 ? (
         <Card className="bg-light-gray">
           <CardContent className="py-16 text-center">
-            <p>No assigned course matches &ldquo;{search}&rdquo;.</p>
+            <p>No course matches &ldquo;{search}&rdquo;.</p>
           </CardContent>
         </Card>
       ) : (
@@ -316,7 +317,9 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
                   </div>
 
                   <p className="mt-2 text-sm text-dark-gray">
-                    {course.completedCount} of {course.assignedCount} finished
+                    {course.assignedCount === 0
+                      ? 'Not handed to anyone yet'
+                      : `${course.completedCount} of ${course.assignedCount} finished`}
                   </p>
                   <span className="mt-1 block h-2 overflow-hidden rounded-full bg-gray-300">
                     <span

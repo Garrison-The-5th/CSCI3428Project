@@ -24,6 +24,7 @@ import {
 import { controller, del, get, post, put, use } from '@/controllers/decorators';
 import { fail } from '@/controllers/http-errors';
 import { rateLimit } from '@/controllers/middleware/rate-limit';
+import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
 import QuizService, { QuestionInput } from '@/services/quiz-service/quiz-service';
 
 // req.params values are typed `string | string[]` in Express 5, so normalize before use.
@@ -149,6 +150,13 @@ export default class QuizController {
           sectionId?: string | null;
         },
       );
+      // Stamped here rather than by the middleware: a new row has no id until
+      // it exists, and the route names the section it went into.
+      await EditAttributionService.stamp(
+        'QUIZ',
+        quiz.id,
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'Quiz created successfully', quiz });
     } catch (error) {
       return fail(res, error, 'Error creating quiz');
@@ -156,7 +164,7 @@ export default class QuizController {
   }
 
   @put('/:id')
-  @use(requireCourseEditor(fromQuizParam('id')))
+  @use(requireCourseEditor(fromQuizParam('id'), { attributes: { kind: 'QUIZ' } }))
   @use(authenticateAndAttachUser)
   async updateQuiz(req: Request, res: Response) {
     try {
@@ -256,14 +264,45 @@ export default class QuizController {
         req.body as QuestionInput,
         afterOrder,
       );
+      await EditAttributionService.stamp(
+        'QUESTION',
+        question.id,
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'Question added successfully', question });
     } catch (error) {
       return fail(res, error, 'Error adding question');
     }
   }
 
+  /**
+   * Reorders a quiz's questions. Body: { questionIds: [...] } in the new order.
+   *
+   * Attributed to the quiz rather than to any one question: moving question
+   * three above question one changes the quiz, and marking a single question as
+   * edited would put the tag on whichever one happened to be dragged.
+   */
+  @put('/:quizId/question-order')
+  @use(
+    requireCourseEditor(fromQuizParam('quizId'), { attributes: { kind: 'QUIZ', param: 'quizId' } }),
+  )
+  @use(authenticateAndAttachUser)
+  async reorderQuestions(req: Request, res: Response) {
+    try {
+      const { questionIds } = req.body as { questionIds?: unknown };
+      if (!Array.isArray(questionIds) || questionIds.some((id) => typeof id !== 'string')) {
+        return res.status(400).send({ errorMessage: 'questionIds must be a list of question ids' });
+      }
+
+      const quiz = await QuizService.reorderQuestions(param(req, 'quizId'), questionIds);
+      return res.send({ message: 'Questions reordered', quiz });
+    } catch (error) {
+      return fail(res, error, 'Error reordering questions');
+    }
+  }
+
   @put('/questions/:id')
-  @use(requireCourseEditor(fromQuestionParam('id')))
+  @use(requireCourseEditor(fromQuestionParam('id'), { attributes: { kind: 'QUESTION' } }))
   @use(authenticateAndAttachUser)
   async updateQuestion(req: Request, res: Response) {
     try {

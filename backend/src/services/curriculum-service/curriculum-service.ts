@@ -12,6 +12,7 @@ import { sanitizeRichText } from '@/config/rich-text';
 import {
   cleanStringList,
   type FieldName,
+  isLockedOut,
   optionalText,
   parseDaysRemaining,
   requiredText,
@@ -22,7 +23,10 @@ import { NotFoundError } from '@/controllers/http-errors';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
-import EnrolmentService from '@/services/enrolment-service/enrolment-service';
+import EnrolmentService, {
+  dueFor,
+  Enrolment,
+} from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
 
@@ -131,6 +135,53 @@ function validateMinutes(estimatedMinutes: unknown): number {
   return Math.round(minutes);
 }
 
+/**
+ * A course as this particular learner sees it: their deadline, not the course's.
+ *
+ * The date printed on a course is the same for everybody, which is exactly what
+ * a deadline must not be — the same course handed over in January and in June
+ * cannot fall due on one date. The real one is stamped on their assignment, so
+ * it is swapped in here, once, on the way out to them. Anything they hold with
+ * no deadline, and anything reached without an assignment at all, keeps the
+ * course's own date.
+ *
+ * The quizzes inside come along with it: a quiz in a course is due with the
+ * course, so nothing inside can fall due on a date of its own.
+ */
+function withLearnerDueDate<
+  T extends { id: string; dueDate: Date | string | null; lockAfterDue?: boolean },
+>(course: T, enrolment: Enrolment): T & { dueDate: Date | null; locked: boolean } {
+  const due = dueFor(
+    enrolment.dueByCourseId,
+    course.id,
+    course.dueDate ? new Date(course.dueDate) : null,
+  );
+
+  const settled = {
+    ...course,
+    dueDate: due,
+    // Answered here rather than in the browser. A lock the client works out
+    // from its own clock is a lock the learner can move, and the clock it
+    // would use is not the one the deadline was set against.
+    //
+    // Past the deadline is not the same as shut: a course whose author turned
+    // `lockAfterDue` off still reports itself overdue and still opens.
+    locked: isLockedOut(due, course.lockAfterDue),
+  };
+
+  if (due === null || !('sections' in course)) return settled;
+
+  return {
+    ...settled,
+    sections: (course.sections as Array<{ quizzes?: Array<{ dueDate: unknown }> }>).map(
+      (section) => ({
+        ...section,
+        quizzes: (section.quizzes ?? []).map((quiz) => ({ ...quiz, dueDate: due })),
+      }),
+    ),
+  };
+}
+
 export default class CurriculumService {
   /**
    * Learner view: the published courses this person has actually been enrolled
@@ -154,7 +205,7 @@ export default class CurriculumService {
     // published, so there is nothing for this person to open.
     return published
       .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null)
-      .map(redactCourse);
+      .map((snapshot) => withLearnerDueDate(redactCourse(snapshot), enrolment));
   }
 
   /**
@@ -167,7 +218,7 @@ export default class CurriculumService {
     if (!enrolment.courseIds.has(courseId)) return null;
 
     const snapshot = await PublicationService.getLiveSnapshot(courseId);
-    return snapshot ? redactCourse(snapshot) : null;
+    return snapshot ? withLearnerDueDate(redactCourse(snapshot), enrolment) : null;
   }
 
   /**
@@ -304,6 +355,7 @@ export default class CurriculumService {
       prerequisites?: string[];
       required?: boolean;
       dueDate?: string | null;
+      lockAfterDue?: boolean;
       daysRemaining?: number | string | null;
       published?: boolean;
       sequential?: boolean;
@@ -372,6 +424,7 @@ export default class CurriculumService {
       ...(prerequisites !== undefined ? { prerequisites } : {}),
       ...(data.required !== undefined ? { required: data.required === true } : {}),
       ...(dueDate !== undefined ? { dueDate } : {}),
+      ...(data.lockAfterDue !== undefined ? { lockAfterDue: data.lockAfterDue === true } : {}),
       ...(daysRemaining !== undefined ? { daysRemaining } : {}),
       // Only ever false here — publishing goes through PublicationService.
       ...(data.published !== undefined ? { published: false } : {}),
