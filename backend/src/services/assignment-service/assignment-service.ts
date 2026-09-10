@@ -8,7 +8,13 @@
 import { randomBytes } from 'crypto';
 
 import { logSecurityEvent } from '@/config/logger';
-import { dueDateFromDays, normaliseEmail, parseDaysRemaining } from '@/config/validation';
+import {
+  dueDateFromDays,
+  endOfDueDay,
+  isLockedOut,
+  normaliseEmail,
+  parseDaysRemaining,
+} from '@/config/validation';
 import { NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
@@ -214,7 +220,11 @@ export default class AssignmentService {
       const quiz = await QuizGateway.getQuizById(quizId!);
       if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
       title = quiz.title;
-      defaultDays = quiz.daysRemaining ?? null;
+      // A quiz that sits in a course gets the course's length, not one of its
+      // own: it is due with the course around it, and an exam inside a lesson
+      // that fell due a week before the lesson did would be nobody's idea of one
+      // deadline.
+      defaultDays = await AssignmentService.daysFor(quiz);
 
       // A learning check is part of the section around it. Handing one out on its
       // own would strip it of the thing it is checking, so it is not assignable.
@@ -273,6 +283,22 @@ export default class AssignmentService {
   }
 
   /**
+   * How long a quiz gives the person it is handed to.
+   *
+   * Its own length when it stands alone. When it sits in a course, the course's
+   * — see the note at the call site.
+   */
+  static async daysFor(quiz: { sectionId: string | null; daysRemaining: number | null }) {
+    if (!quiz.sectionId) return quiz.daysRemaining ?? null;
+
+    const section = await CurriculumGateway.getSectionById(quiz.sectionId);
+    if (!section) return quiz.daysRemaining ?? null;
+
+    const course = await CurriculumGateway.getCourseById(section.courseId);
+    return course?.daysRemaining ?? null;
+  }
+
+  /**
    * When this person's work is due.
    *
    * A deadline is set as a length now — "they get fourteen days" — rather than
@@ -292,7 +318,9 @@ export default class AssignmentService {
     data: { dueDate?: string | null; daysRemaining?: number | string | null },
     defaultDays: number | null,
   ): Date | null {
-    const explicit = parseDate(data.dueDate, 'dueDate');
+    // Settled to 11:59 PM for the same reason `setDueDate` does it: a date
+    // picker sends a bare day, and midnight on it is a day short.
+    const explicit = endOfDueDay(parseDate(data.dueDate, 'dueDate'));
     if (explicit) return explicit;
 
     const days = parseDaysRemaining(data.daysRemaining, 'daysRemaining') ?? defaultDays;
@@ -393,11 +421,18 @@ export default class AssignmentService {
     return delivery;
   }
 
-  /** Moves one person's deadline without touching anyone else's. */
+  /**
+   * Moves one person's deadline without touching anyone else's.
+   *
+   * A date picker sends a bare day, which parses as midnight — and a deadline at
+   * midnight closes somebody out on the morning of the day they were told they
+   * had. It is settled to 11:59 PM here, so a date typed in by hand means what
+   * every other deadline in the system means.
+   */
   static async setDueDate(id: string, dueDate: string | null) {
     const assignment = await AssignmentGateway.findById(id);
     if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);
-    return AssignmentGateway.setDueDate(id, parseDate(dueDate, 'dueDate'));
+    return AssignmentGateway.setDueDate(id, endOfDueDay(parseDate(dueDate, 'dueDate')));
   }
 
   static parseType(value: unknown): AssignmentType {
@@ -573,20 +608,39 @@ export default class AssignmentService {
     // The published snapshot, exactly as a signed-in learner gets. A link holder
     // must not be a way around versioned publishing — nothing unpublished is
     // reachable through one either.
-    const course = assignment.courseId
+    const snapshot = assignment.courseId
       ? await PublicationService.getLiveSnapshot(assignment.courseId)
       : null;
     const directQuiz = assignment.quizId
       ? await QuizGateway.getQuizById(assignment.quizId, true)
       : null;
 
+    // The deadline belongs to the link, not to the course behind it: the same
+    // course sent to two people on two days falls due on two dates. Stamping it
+    // on here means every reader downstream — the dashboard, the landing page,
+    // the lock — sees this holder's date without knowing a link was involved.
+    const due =
+      endOfDueDay(assignment.dueDate) ??
+      endOfDueDay(snapshot?.dueDate ? new Date(snapshot.dueDate) : null);
+    const course = snapshot
+      ? // `locked` is answered here for the same reason a signed-in learner's is
+        // answered on the server: a lock the browser works out from its own
+        // clock is one the holder of the link can move.
+        { ...snapshot, dueDate: due, locked: isLockedOut(due, snapshot.lockAfterDue) }
+      : null;
+
     const courses = course ? [course] : [];
     // A course link carries the quizzes inside that course; a quiz link carries
     // just that quiz.
     const quizzes = course
-      ? course.sections.flatMap((section) => section.quizzes)
+      ? // A quiz inside the course is due with the course around it, so the
+        // link's date reaches those too rather than leaving each quiz to
+        // whatever date its own row happens to carry.
+        course.sections.flatMap((section) =>
+          section.quizzes.map((quiz) => ({ ...quiz, dueDate: due })),
+        )
       : directQuiz
-        ? [directQuiz]
+        ? [{ ...directQuiz, dueDate: due ?? endOfDueDay(directQuiz.dueDate) }]
         : [];
 
     return { user, assignment, assignments: [assignment], courses, quizzes };
@@ -641,6 +695,7 @@ export default class AssignmentService {
           title: course.title,
           required: course.required,
           dueDate: course.dueDate ? new Date(course.dueDate) : null,
+          lockAfterDue: course.lockAfterDue,
           contentUpdatedAt: row?.contentUpdatedAt ?? new Date(0),
           sections: course.sections.map((section) => ({
             id: section.id,
@@ -901,9 +956,18 @@ export default class AssignmentService {
   }
 
   /**
-   * Every course that has been handed to someone, with how many people hold it
-   * and how many have finished. Drives the Assigned learning cards on the admin
-   * dashboard, which need the totals without any of the course content.
+   * Every course this person owns or is named on, with how many people hold it
+   * and how many have finished.
+   *
+   * All of their courses, not only the ones that have been handed to somebody.
+   * A card whose count is zero is the useful case, not the empty one: it is how
+   * an author sees that a finished course has reached nobody yet, and listing
+   * only courses with assignments meant the page could not answer the one
+   * question worth asking of it. It is also the way into a course's roster, and
+   * a course with no roster still needs a way in to acquire one.
+   *
+   * Scoped by the same rule as the course itself: someone else's programme is
+   * not summarised on your dashboard.
    */
   static async listAssignedCourses(userId: number, isGlobalAuthor: boolean) {
     const [assigned, reachable] = await Promise.all([
@@ -911,19 +975,19 @@ export default class AssignmentService {
       CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor),
     ]);
 
-    // A dashboard card carries a course's title, cover and roster totals, so it
-    // is scoped by the same rule as the course itself: someone else's programme
-    // is not summarised on your dashboard.
-    const mine = new Set(reachable);
+    const countById = new Map(assigned.map(({ courseId, count }) => [courseId, count]));
 
     const cards = await Promise.all(
-      assigned
-        .filter(({ courseId }) => mine.has(courseId))
+      reachable
+        .map((courseId) => ({ courseId, count: countById.get(courseId) ?? 0 }))
         .map(async ({ courseId, count }) => {
           const course = await CurriculumGateway.getCourseById(courseId);
           if (!course) return null;
 
-          const assignments = await AssignmentService.listWithProgress({ courseId });
+          // Skipped for a course nobody holds: the roster read is the expensive
+          // part of this card, and its answer is already known to be empty.
+          const assignments =
+            count === 0 ? [] : await AssignmentService.listWithProgress({ courseId });
           const completed = assignments.filter(
             (entry) => entry.totalSections > 0 && entry.completedSections >= entry.totalSections,
           ).length;

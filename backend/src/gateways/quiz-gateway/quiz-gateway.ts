@@ -115,6 +115,21 @@ export default class QuizGateway {
     });
   }
 
+  /**
+   * Fixes the kind of every quiz in a course, the first time it goes live.
+   *
+   * Separate from the flag above because the conditions differ: `published` is
+   * only worth writing where it is false, while this has to reach quizzes that
+   * were already published in an earlier version and have somehow been left
+   * unlocked. Once set it is never cleared, so re-running it is harmless.
+   */
+  static lockQuizTypesInCourse(courseId: string) {
+    return prisma.quiz.updateMany({
+      where: { deletedAt: null, typeLocked: false, section: { courseId, deletedAt: null } },
+      data: { typeLocked: true },
+    });
+  }
+
   static createQuiz(data: {
     title: string;
     description?: string | null;
@@ -278,6 +293,34 @@ export default class QuizGateway {
   }
 
   // Options are removed by the ON DELETE CASCADE foreign key.
+  /**
+   * Rewrites the order of every question in one quiz.
+   *
+   * Two passes, because `order` is not unique in the database but the sequence
+   * still has to end up dense and collision-free while it is being rewritten:
+   * everything is parked in a range nothing else occupies, then written down to
+   * its final place. One pass would have question 2 taking position 1 while the
+   * old question 1 still held it.
+   *
+   * Scoped by `quizId` on every write so an id from another quiz — a stale tab,
+   * a hand-made request — cannot be dragged into this one.
+   */
+  static reorderQuestions(quizId: string, orderedIds: string[], db: Db) {
+    const PARK = 100_000;
+
+    return Promise.all([
+      ...orderedIds.map((id, index) =>
+        db.question.updateMany({ where: { id, quizId }, data: { order: PARK + index } }),
+      ),
+    ]).then(() =>
+      Promise.all(
+        orderedIds.map((id, index) =>
+          db.question.updateMany({ where: { id, quizId }, data: { order: index + 1 } }),
+        ),
+      ),
+    );
+  }
+
   static deleteQuestion(id: string) {
     return prisma.question.delete({ where: { id } });
   }

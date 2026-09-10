@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import { saveLabel, useAutoSave } from '@/hooks/use-auto-save';
 import { Course, curriculumApi, IMAGE_ONLY_ACCEPT, imageSrc } from '@/services/curriculum-api';
+import { dueDateFromDays } from '@/services/due-dates';
 
 interface Props {
   course: Course;
@@ -48,13 +49,10 @@ const splitLines = (v: string) =>
  * The author is setting a length, not a date, so the date is the part they
  * cannot see for themselves — "14" says nothing about whether that clears the
  * end of the month. Worked out from today because today is when they are
- * looking; the real one is stamped when the lesson is actually handed over.
+ * looking; the real one is stamped when the lesson is actually handed over, by
+ * the same rule.
  */
-const dueIfAssignedToday = (days: string) => {
-  const parsed = Number(days);
-  if (!Number.isInteger(parsed) || parsed < 1) return null;
-  return new Date(Date.now() + parsed * 86_400_000).toLocaleDateString();
-};
+const dueIfAssignedToday = (days: string) => dueDateFromDays(days)?.toLocaleDateString() ?? null;
 
 const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
   const coverRef = useRef<HTMLInputElement>(null);
@@ -310,11 +308,36 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
               className={`${inputClass} max-w-32`}
             />
             <span className="max-w-56 text-xs font-normal text-dark-gray">
-              How long a learner gets once this is assigned to them.
+              How long a learner gets once this is assigned to them. Covers every quiz inside it too
+              — they fall due with the course.
               {dueIfAssignedToday(draft.daysRemaining) &&
-                ` Assigned today, it would be due ${dueIfAssignedToday(draft.daysRemaining)}.`}
+                ` Assigned today, it would be due ${dueIfAssignedToday(draft.daysRemaining)}` +
+                  ' at 11:59 PM.'}
             </span>
           </label>
+
+          {/*
+            What the deadline actually does.
+
+            A deadline has meant one thing until now — past it, the course shuts
+            — and that is right for compliance learning, where sitting it late is
+            the same as not sitting it. For most learning it is not: a week late
+            is worth far more than never, and a hard lock turns a missed date
+            into a support request. So it is the author's call, and the default
+            is the old behaviour.
+          */}
+          <ToggleSwitch
+            checked={course.lockAfterDue !== false}
+            onChange={(v) =>
+              run(
+                () => curriculumApi.updateCourse(course.id, { lockAfterDue: v }),
+                v ? 'Locked once the due date passes' : 'Learners can carry on past the due date',
+                'Failed to change what the deadline does',
+              )
+            }
+            label="Lock after the due date"
+            hint="Off, and it is still marked overdue but can still be finished"
+          />
 
           <ToggleSwitch
             checked={course.sequential}

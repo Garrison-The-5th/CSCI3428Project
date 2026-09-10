@@ -216,6 +216,38 @@ const QuizPlayer = () => {
     );
   }
 
+  /**
+   * Past its deadline, a quiz set shows nothing here.
+   *
+   * The overview closes every way in, but a bookmark or a pasted URL is not a
+   * way in it controls — so this refuses on its own account. The server will
+   * not open a run either; this is what the learner reads instead of an error.
+   */
+  if (course.locked === true) {
+    const dueOn = course.dueDate ? new Date(course.dueDate).toLocaleDateString() : null;
+
+    return (
+      <div className="page-container flex flex-col">
+        <Button
+          onClick={() => navigate(`/quizzes/${course.id}`)}
+          variant="ghost"
+          className="w-fit px-0"
+        >
+          ← Quiz overview
+        </Button>
+        <Card className="bg-light-gray">
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <p className="font-semibold text-dark-gray">These quizzes have closed.</p>
+            <p className="max-w-prose text-dark-gray">
+              {dueOn ? `The deadline passed on ${dueOn}.` : 'The deadline has passed.'} Ask whoever
+              assigned them to you if you still need to sit them.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="page-container flex flex-col">
       <Button

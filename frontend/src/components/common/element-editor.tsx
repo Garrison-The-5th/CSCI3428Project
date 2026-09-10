@@ -24,12 +24,13 @@
 import { Bars3Icon, CheckIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
+import EditedTag from '@/components/common/edited-tag';
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import RichTextEditor from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
-import { curriculumApi, SectionElement } from '@/services/curriculum-api';
+import { curriculumApi, EditMark, SectionElement } from '@/services/curriculum-api';
 
 interface ElementEditorProps {
   element: SectionElement;
@@ -38,6 +39,11 @@ interface ElementEditorProps {
   onSaved: () => void;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
   dragging?: boolean;
+  /**
+   * Set when this element has been changed since the last publish, naming who
+   * changed it. Absent is the common case and draws nothing.
+   */
+  editedMark?: EditMark;
 }
 
 const inputClass = 'bg-white text-dark-gray';
@@ -48,6 +54,7 @@ const ElementEditor = ({
   onSaved,
   dragHandleProps,
   dragging,
+  editedMark,
 }: ElementEditorProps) => {
   /** What is actually stored, in the shape the form holds it. */
   const stored = {
@@ -116,17 +123,23 @@ const ElementEditor = ({
           <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
         </div>
 
+        {/* The tag goes under the summary rather than beside it: a long name
+            beside it pushed the save button and the bin past the right edge,
+            and an unreachable delete is worse than a taller row. */}
         <button
           onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-left"
           aria-expanded={open}
         >
           <ChevronDownIcon
             className={`w-4 h-4 shrink-0 text-dark-gray transition-transform duration-200
               ${open ? 'rotate-180' : ''}`}
           />
-          <span className="min-w-0 flex-1 truncate text-sm text-dark-gray">
-            <span className="font-semibold">{element.type}</span> {summary}
+          <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+            <span className="w-full truncate text-sm text-dark-gray">
+              <span className="font-semibold">{element.type}</span> {summary}
+            </span>
+            <EditedTag mark={editedMark} />
           </span>
         </button>
 

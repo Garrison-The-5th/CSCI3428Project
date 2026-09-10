@@ -125,7 +125,7 @@ describe('outstanding work', () => {
     expect(result.outstandingCourses).toHaveLength(0);
   });
 
-  it('lists an unattempted quiz and resolves its course title', async () => {
+  it('lists an unattempted quiz that was handed over on its own', async () => {
     givenProgress([], []);
 
     const result = await DashboardService.build(
@@ -133,9 +133,9 @@ describe('outstanding work', () => {
       [course()],
       [
         {
-          id: 'quiz-1',
+          id: 'solo',
           title: 'Fire quiz',
-          sectionId: 'm2',
+          sectionId: null,
           dueDate: null,
           questions: [{ id: 'q' }],
         },
@@ -143,15 +143,28 @@ describe('outstanding work', () => {
     );
 
     expect(result.outstandingQuizzes).toHaveLength(1);
-    expect(result.outstandingQuizzes[0]).toMatchObject({
-      quizId: 'quiz-1',
-      courseTitle: 'Fire safety',
-      questionCount: 1,
-    });
+    expect(result.outstandingQuizzes[0]).toMatchObject({ quizId: 'solo', questionCount: 1 });
   });
 
   it('drops an attempted quiz from outstanding', async () => {
-    givenProgress([], ['quiz-1']);
+    givenProgress([], ['solo']);
+
+    const result = await DashboardService.build(
+      1,
+      [course()],
+      [{ id: 'solo', title: 'Fire quiz', sectionId: null, dueDate: null, questions: [] }],
+    );
+
+    expect(result.outstandingQuizzes).toHaveLength(0);
+  });
+
+  /**
+   * A quiz inside a course is part of that course. Chasing it here as well split
+   * one piece of work into two entries carrying the same deadline, and pointed
+   * the learner at the Quizzes tab for something taken inside a lesson.
+   */
+  it('leaves a quiz that belongs to a course out of outstanding quizzes', async () => {
+    givenProgress([], []);
 
     const result = await DashboardService.build(
       1,
@@ -161,32 +174,38 @@ describe('outstanding work', () => {
 
     expect(result.outstandingQuizzes).toHaveLength(0);
   });
+});
 
-  /** A quiz with no due date of its own inherits its course's. */
-  it('falls back to the course due date for a quiz that has none', async () => {
+/**
+ * One course, one date. A quiz inside a course falls due with the course around
+ * it, whatever is written on the quiz itself — otherwise an exam could close a
+ * week before the lesson it belongs to.
+ */
+describe('a quiz in a course is due with the course', () => {
+  it("ignores the quiz's own date in favour of its course's", async () => {
     givenProgress([], []);
-    const due = new Date('2026-12-01');
+    const courseDue = new Date('2026-12-01T23:59:00');
 
     const result = await DashboardService.build(
       1,
-      [course({ dueDate: due })],
-      [{ id: 'quiz-1', title: 'Fire quiz', sectionId: 'm2', dueDate: null, questions: [] }],
+      [course({ dueDate: courseDue })],
+      [
+        {
+          id: 'quiz-1',
+          title: 'Q',
+          sectionId: 'm2',
+          dueDate: new Date('2026-06-01T23:59:00'),
+          questions: [],
+        },
+      ],
     );
 
-    expect(result.outstandingQuizzes[0].dueDate).toBe(due.toISOString());
-  });
-
-  it("prefers the quiz's own due date when it has one", async () => {
-    givenProgress([], []);
-    const quizDue = new Date('2026-06-01');
-
-    const result = await DashboardService.build(
-      1,
-      [course({ dueDate: new Date('2026-12-01') })],
-      [{ id: 'quiz-1', title: 'Q', sectionId: 'm2', dueDate: quizDue, questions: [] }],
-    );
-
-    expect(result.outstandingQuizzes[0].dueDate).toBe(quizDue.toISOString());
+    // Not on either list in its own right, and not carrying its own June date
+    // into the deadlines beside its course's December one.
+    expect(result.outstandingQuizzes).toHaveLength(0);
+    expect(result.upcomingDeadlines.map((entry) => entry.dueDate)).toEqual([
+      courseDue.toISOString(),
+    ]);
   });
 });
 
@@ -203,7 +222,7 @@ describe('upcoming deadlines', () => {
       [],
     );
 
-    expect(result.upcomingDeadlines.map((entry) => entry.courseId)).toEqual(['sooner', 'later']);
+    expect(result.upcomingDeadlines.map((entry) => entry.id)).toEqual(['sooner', 'later']);
   });
 
   it('omits a course with no due date — that is not a deadline', async () => {
@@ -211,6 +230,111 @@ describe('upcoming deadlines', () => {
 
     const result = await DashboardService.build(1, [course()], []);
     expect(result.upcomingDeadlines).toHaveLength(0);
+  });
+
+  /**
+   * Courses and standalone quizzes rank against one clock. The list answers
+   * "what is due next", so a quiz due before a course has to sort above it
+   * rather than sit on a list of its own.
+   */
+  it('ranks a standalone quiz among the courses', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(
+      1,
+      [course({ id: 'course-1', title: 'Course', dueDate: new Date('2026-12-01T23:59:00') })],
+      [
+        {
+          id: 'solo',
+          title: 'Solo quiz',
+          sectionId: null,
+          dueDate: new Date('2026-09-01T23:59:00'),
+          questions: [],
+        },
+      ],
+    );
+
+    expect(result.upcomingDeadlines.map((entry) => [entry.kind, entry.id])).toEqual([
+      ['quiz', 'solo'],
+      ['course', 'course-1'],
+    ]);
+  });
+
+  /** It falls due with its course, which is already on the list. */
+  it('leaves a quiz that belongs to a course off the list', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(
+      1,
+      [course({ dueDate: new Date('2026-12-01T23:59:00') })],
+      [
+        {
+          id: 'quiz-1',
+          title: 'In a course',
+          sectionId: 'm2',
+          dueDate: new Date('2026-09-01T23:59:00'),
+          questions: [],
+        },
+      ],
+    );
+
+    expect(result.upcomingDeadlines.map((entry) => entry.kind)).toEqual(['course']);
+  });
+});
+
+/**
+ * Past 11:59 PM on its day, a course is shut. The dashboard says so rather than
+ * leaving the browser to work it out from a clock the learner can change.
+ */
+describe('locking', () => {
+  it('locks a course whose deadline has gone', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(
+      1,
+      [course({ dueDate: new Date('2020-01-01T23:59:00') })],
+      [],
+    );
+
+    expect(result.courseProgress[0].locked).toBe(true);
+    expect(result.upcomingDeadlines[0].overdue).toBe(true);
+  });
+
+  /** The deadline is 11:59 PM, so the day it falls on is still theirs. */
+  it('leaves a course due later today unlocked', async () => {
+    givenProgress([], []);
+    const tonight = new Date();
+    tonight.setHours(23, 59, 0, 0);
+
+    const result = await DashboardService.build(1, [course({ dueDate: tonight })], []);
+
+    expect(result.courseProgress[0].locked).toBe(false);
+  });
+
+  it('leaves a course with no deadline unlocked', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(1, [course()], []);
+    expect(result.courseProgress[0].locked).toBe(false);
+  });
+
+  /**
+   * A course whose author turned the lock off is late, not shut. The distinction
+   * is the whole point of the setting: the learner is told they are overdue and
+   * can still finish.
+   */
+  it('leaves a passed deadline open when the course says not to lock', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(
+      1,
+      [course({ dueDate: new Date('2020-01-01T23:59:00'), lockAfterDue: false })],
+      [],
+    );
+
+    expect(result.courseProgress[0].locked).toBe(false);
+    // Still on the deadline list, still marked overdue.
+    expect(result.upcomingDeadlines[0].overdue).toBe(true);
   });
 });
 

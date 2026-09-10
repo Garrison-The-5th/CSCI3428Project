@@ -25,16 +25,19 @@ import {
   PlusIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import EditedTag from '@/components/common/edited-tag';
 import ElementEditor from '@/components/common/element-editor';
 import { NewBadge, newMarkers } from '@/components/common/new-badge';
 import QuizEditor from '@/components/common/quiz-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import LockOverlay from '@/components/ui/lock-overlay';
 import Spinner from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { useEditLocks } from '@/contexts/edit-locks-context';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
 import ModuleColorPicker from '@/pages/private/admin/editor/module-color-picker';
 import {
@@ -150,6 +153,30 @@ const StructureEditor = ({
   const [openQuizId, setOpenQuizId] = useState<string | null>(null);
   /** Collapsed rather than expanded, so reopening the editor looks unchanged. */
   const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
+
+  /**
+   * Modules somebody else has open, and how this pane says which one is ours.
+   *
+   * A module is claimed whole rather than section by section because editing one
+   * really means editing the sections and elements inside it — there is no
+   * smaller unit an author actually works in, and locking at a finer grain would
+   * let two people rearrange the same module's contents against each other.
+   */
+  const { lockedModules, claim, marks } = useEditLocks();
+
+  /**
+   * Whichever module is expanded is the one being worked in, so that is the
+   * claim. Collapsing them all gives it up — an author looking at a course
+   * outline is not editing any of it.
+   */
+  const openModuleId = useMemo(
+    () => groups.find((group) => !collapsedModuleIds.has(group.module.id))?.module.id ?? null,
+    [groups, collapsedModuleIds],
+  );
+
+  useEffect(() => {
+    claim('MODULE', openModuleId);
+  }, [openModuleId, claim]);
 
   const selectedSection = course.sections.find((m) => m.id === selectedSectionId) ?? null;
 
@@ -478,179 +505,195 @@ const StructureEditor = ({
                 const collapsed = collapsedModuleIds.has(group.module.id);
                 const minutes = group.sections.reduce((sum, m) => sum + m.estimatedMinutes, 0);
 
+                const lockedBy = lockedModules[group.module.id];
+
                 return (
-                  <div key={group.module.id} className="flex flex-col gap-1">
-                    {/* Module heading — drag it to move the whole module */}
-                    <div
-                      draggable
-                      onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => handleModuleDrop(group.module.id)}
-                      onDragEnd={() => setDrag(null)}
-                      className={`flex cursor-grab items-center gap-1 rounded-md border px-2 py-2
-                        ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
-                        ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
-                      // The tint the learner will see, previewed where it is set.
-                      style={moduleTint(group.module.color)}
-                    >
-                      <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
-
-                      {editingModule?.id === group.module.id ? (
-                        // Renaming takes over the row: the drag handle and the
-                        // collapse toggle would both fight a text field.
-                        <Input
-                          autoFocus
-                          value={editingModule.title}
-                          onChange={(e) =>
-                            setEditingModule({ id: group.module.id, title: e.target.value })
-                          }
-                          onBlur={saveModuleTitle}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveModuleTitle();
-                            if (e.key === 'Escape') setEditingModule(null);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          aria-label="Module title"
-                          className={`${inputClass} h-8 min-w-0 flex-1`}
-                        />
-                      ) : (
-                        <button
-                          onClick={() => toggleModule(group.module.id)}
-                          aria-expanded={!collapsed}
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        >
-                          <ChevronDownIcon
-                            className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
-                              duration-200 ${collapsed ? '-rotate-90' : ''}`}
-                          />
-                          <span className="min-w-0 flex-1 text-sm text-dark-gray">
-                            <span className="flex flex-wrap items-center gap-2">
-                              <span className="break-words font-semibold">
-                                {group.module.number}. {group.module.title}
-                              </span>
-                              {isNew.module(group.module.id) && <NewBadge />}
-                            </span>
-                            <span className="block text-xs">
-                              {group.sections.length} section
-                              {group.sections.length === 1 ? '' : 's'}
-                              {minutes > 0 && ` · ${minutes} min`}
-                            </span>
-                          </span>
-                        </button>
-                      )}
-
-                      {group.module.id !== 'unmoduleed' && (
-                        <>
-                          <ModuleColorPicker
-                            color={group.module.color}
-                            label={group.module.title}
-                            onSelect={(color) =>
-                              run(
-                                () => curriculumApi.updateModule(group.module.id, { color }),
-                                color ? 'Module colour set' : 'Module colour cleared',
-                                'Failed to change the module colour',
-                              )
-                            }
-                          />
-                          <Button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingModule({
-                                id: group.module.id,
-                                title: group.module.title,
-                              });
-                            }}
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 shrink-0 hover:text-green-hover"
-                            title="Rename module"
-                          >
-                            <PencilSquareIcon className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            onClick={() =>
-                              onDelete({
-                                kind: 'module',
-                                id: group.module.id,
-                                label: `${group.module.number}. ${group.module.title}`,
-                              })
-                            }
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 shrink-0 hover:text-danger-hover"
-                            title="Delete module"
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-
-                    {!collapsed && (
+                  /*
+                    Somebody else is in this module, so the whole group goes
+                    under the sheet — heading, sections and all. Locking only the
+                    heading would leave every section inside it editable, which
+                    is the content the lock exists to protect.
+                  */
+                  <LockOverlay
+                    key={group.module.id}
+                    locked={Boolean(lockedBy)}
+                    reason={lockedBy ? `${lockedBy} is editing this module` : undefined}
+                  >
+                    <div className="flex flex-col gap-1">
+                      {/* Module heading — drag it to move the whole module */}
                       <div
-                        className="flex flex-col gap-1 pl-4"
-                        // Dropping in the gap under the last section appends here,
-                        // which is the only way into an empty module.
+                        draggable
+                        onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
                         onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => handleSectionDrop(group.module.id, null)}
+                        onDrop={() => handleModuleDrop(group.module.id)}
+                        onDragEnd={() => setDrag(null)}
+                        className={`flex cursor-grab items-center gap-1 rounded-md border px-2 py-2
+                          ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
+                          ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
+                        // The tint the learner will see, previewed where it is set.
+                        style={moduleTint(group.module.color)}
                       >
-                        {group.sections.length === 0 ? (
-                          <p className="px-2 py-2 text-xs text-dark-gray">
-                            Empty — drag a section here.
-                          </p>
+                        <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+
+                        {editingModule?.id === group.module.id ? (
+                          // Renaming takes over the row: the drag handle and the
+                          // collapse toggle would both fight a text field.
+                          <Input
+                            autoFocus
+                            value={editingModule.title}
+                            onChange={(e) =>
+                              setEditingModule({ id: group.module.id, title: e.target.value })
+                            }
+                            onBlur={saveModuleTitle}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveModuleTitle();
+                              if (e.key === 'Escape') setEditingModule(null);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Module title"
+                            className={`${inputClass} h-8 min-w-0 flex-1`}
+                          />
                         ) : (
-                          group.sections.map((section: CourseSection) => (
-                            <div
-                              key={section.id}
-                              draggable
-                              onDragStart={() => setDrag({ kind: 'section', id: section.id })}
-                              onDragOver={(e) => e.preventDefault()}
-                              onDrop={(e) => {
-                                e.stopPropagation();
-                                handleSectionDrop(group.module.id, section.id);
-                              }}
-                              onDragEnd={() => setDrag(null)}
-                              className={`flex cursor-grab items-center gap-2 rounded-md border px-3
-                                py-2
-                                ${section.id === selectedSectionId ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}
-                                ${drag?.kind === 'section' && drag.id === section.id ? 'opacity-50' : ''}`}
-                              // The colour is the module's, so its sections read
-                              // as belonging together down the whole outline.
-                              style={
-                                group.module.color
-                                  ? {
-                                      borderLeftWidth: '4px',
-                                      borderLeftColor: group.module.color,
-                                    }
-                                  : undefined
+                          <button
+                            onClick={() => toggleModule(group.module.id)}
+                            aria-expanded={!collapsed}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            <ChevronDownIcon
+                              className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
+                                duration-200 ${collapsed ? '-rotate-90' : ''}`}
+                            />
+                            <span className="min-w-0 flex-1 text-sm text-dark-gray">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <span className="break-words font-semibold">
+                                  {group.module.number}. {group.module.title}
+                                </span>
+                                {isNew.module(group.module.id) && <NewBadge />}
+                                <EditedTag mark={marks.modules[group.module.id]} />
+                              </span>
+                              <span className="block text-xs">
+                                {group.sections.length} section
+                                {group.sections.length === 1 ? '' : 's'}
+                                {minutes > 0 && ` · ${minutes} min`}
+                              </span>
+                            </span>
+                          </button>
+                        )}
+
+                        {group.module.id !== 'unmoduleed' && (
+                          <>
+                            <ModuleColorPicker
+                              color={group.module.color}
+                              label={group.module.title}
+                              onSelect={(color) =>
+                                run(
+                                  () => curriculumApi.updateModule(group.module.id, { color }),
+                                  color ? 'Module colour set' : 'Module colour cleared',
+                                  'Failed to change the module colour',
+                                )
                               }
+                            />
+                            <Button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingModule({
+                                  id: group.module.id,
+                                  title: group.module.title,
+                                });
+                              }}
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0 hover:text-green-hover"
+                              title="Rename module"
                             >
-                              <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
-                              <button
-                                onClick={() => onSelectSection(section.id)}
-                                className="min-w-0 flex-1 text-left text-sm text-dark-gray"
-                              >
-                                <span className="flex flex-wrap items-center gap-2">
-                                  <span>
-                                    <span className="font-semibold">{section.number}</span>{' '}
-                                    {section.title}
-                                  </span>
-                                  {isNew.section(section.id, section.moduleId) && <NewBadge />}
-                                </span>
-                                <span className="block text-xs">
-                                  {section.elements.length} items
-                                  {section.quizzes.length > 0 &&
-                                    ` · ${section.quizzes.length} quiz`}
-                                  {section.estimatedMinutes > 0 &&
-                                    ` · ${section.estimatedMinutes} min`}
-                                </span>
-                              </button>
-                            </div>
-                          ))
+                              <PencilSquareIcon className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              onClick={() =>
+                                onDelete({
+                                  kind: 'module',
+                                  id: group.module.id,
+                                  label: `${group.module.number}. ${group.module.title}`,
+                                })
+                              }
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0 hover:text-danger-hover"
+                              title="Delete module"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </Button>
+                          </>
                         )}
                       </div>
-                    )}
-                  </div>
+
+                      {!collapsed && (
+                        <div
+                          className="flex flex-col gap-1 pl-4"
+                          // Dropping in the gap under the last section appends here,
+                          // which is the only way into an empty module.
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => handleSectionDrop(group.module.id, null)}
+                        >
+                          {group.sections.length === 0 ? (
+                            <p className="px-2 py-2 text-xs text-dark-gray">
+                              Empty — drag a section here.
+                            </p>
+                          ) : (
+                            group.sections.map((section: CourseSection) => (
+                              <div
+                                key={section.id}
+                                draggable
+                                onDragStart={() => setDrag({ kind: 'section', id: section.id })}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                  e.stopPropagation();
+                                  handleSectionDrop(group.module.id, section.id);
+                                }}
+                                onDragEnd={() => setDrag(null)}
+                                className={`flex cursor-grab items-center gap-2 rounded-md border
+                                  px-3 py-2
+                                  ${section.id === selectedSectionId ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}
+                                  ${drag?.kind === 'section' && drag.id === section.id ? 'opacity-50' : ''}`}
+                                // The colour is the module's, so its sections read
+                                // as belonging together down the whole outline.
+                                style={
+                                  group.module.color
+                                    ? {
+                                        borderLeftWidth: '4px',
+                                        borderLeftColor: group.module.color,
+                                      }
+                                    : undefined
+                                }
+                              >
+                                <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+                                <button
+                                  onClick={() => onSelectSection(section.id)}
+                                  className="min-w-0 flex-1 text-left text-sm text-dark-gray"
+                                >
+                                  <span className="flex flex-wrap items-center gap-2">
+                                    <span>
+                                      <span className="font-semibold">{section.number}</span>{' '}
+                                      {section.title}
+                                    </span>
+                                    {isNew.section(section.id, section.moduleId) && <NewBadge />}
+                                    <EditedTag mark={marks.sections[section.id]} />
+                                  </span>
+                                  <span className="block text-xs">
+                                    {section.elements.length} items
+                                    {section.quizzes.length > 0 &&
+                                      ` · ${section.quizzes.length} quiz`}
+                                    {section.estimatedMinutes > 0 &&
+                                      ` · ${section.estimatedMinutes} min`}
+                                  </span>
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </LockOverlay>
                 );
               })}
             </div>
@@ -847,6 +890,7 @@ const StructureEditor = ({
                     <ElementEditor
                       key={item.id}
                       element={item.element}
+                      editedMark={marks.elements[item.id]}
                       dragging={contentDragId === item.id}
                       dragHandleProps={{
                         draggable: true,
@@ -884,38 +928,48 @@ const StructureEditor = ({
                           onClick={() =>
                             setOpenQuizId(openQuizId === item.quiz.id ? null : item.quiz.id)
                           }
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-left"
                           aria-expanded={openQuizId === item.quiz.id}
                         >
                           <ChevronDownIcon
                             className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
                               duration-200 ${openQuizId === item.quiz.id ? 'rotate-180' : ''}`}
                           />
-                          <span className="min-w-0 flex-1 truncate text-sm text-dark-gray">
-                            <span className="font-semibold">QUIZ</span> {item.quiz.title} ·{' '}
-                            {item.quiz.questions.length} question
-                            {item.quiz.questions.length === 1 ? '' : 's'}
-                            {item.quiz.timeLimitMinutes !== null &&
-                              ` · ${item.quiz.timeLimitMinutes} min`}
-                            {!item.quiz.published && ' · draft'}
+                          {/* Tag underneath, so a long name cannot push the
+                              bin on the right out of the row. */}
+                          <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                            <span className="w-full truncate text-sm text-dark-gray">
+                              <span className="font-semibold">QUIZ</span> {item.quiz.title} ·{' '}
+                              {item.quiz.questions.length} question
+                              {item.quiz.questions.length === 1 ? '' : 's'}
+                              {item.quiz.timeLimitMinutes !== null &&
+                                ` · ${item.quiz.timeLimitMinutes} min`}
+                              {!item.quiz.published && ' · draft'}
+                            </span>
+                            <EditedTag mark={marks.quizzes[item.id]} />
                           </span>
                         </button>
+
+                        {/* Deleting the quiz lives on its row rather than
+                            inside the editor: it belongs with the other things
+                            done *to* a quiz, not among the fields that describe
+                            one. */}
+                        <Button
+                          onClick={() =>
+                            onDelete({ kind: 'quiz', id: item.quiz.id, label: item.quiz.title })
+                          }
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 hover:text-danger-hover"
+                          title="Delete quiz"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </Button>
                       </div>
 
                       {openQuizId === item.quiz.id && (
                         <div className="border-t border-navy/30 bg-light-gray p-4">
-                          <QuizEditor
-                            quiz={item.quiz}
-                            onChanged={onRefresh}
-                            onNotify={onNotify}
-                            onDeleteQuiz={() =>
-                              onDelete({
-                                kind: 'quiz',
-                                id: item.quiz.id,
-                                label: item.quiz.title,
-                              })
-                            }
-                          />
+                          <QuizEditor quiz={item.quiz} onChanged={onRefresh} onNotify={onNotify} />
                         </div>
                       )}
                     </div>

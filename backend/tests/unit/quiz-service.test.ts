@@ -679,6 +679,13 @@ describe('getQuizzesForLearner — quiz sets only', () => {
     mockEnrolment.forEmail.mockResolvedValue({
       courseIds: new Set(['course-set', 'course-lesson']),
       quizIds: new Set(),
+      // No deadline on either, so nothing here is locked and the lists are
+      // decided by placement alone — which is what this block is about.
+      dueByCourseId: new Map([
+        ['course-set', null],
+        ['course-lesson', null],
+      ]),
+      dueByQuizId: new Map(),
     } as never);
     mockCurriculum.getPublishedCourses.mockResolvedValue([
       { id: 'course-set' },
@@ -704,6 +711,176 @@ describe('getQuizzesForLearner — quiz sets only', () => {
     ] as never);
 
     expect(await QuizService.getQuizzesForLearner('ada@example.com')).toEqual([]);
+  });
+});
+
+/**
+ * What a quiz is stops being the author's to change once it has been published.
+ *
+ * Its kind decides how a learner can be given it, and there is no edit that
+ * undoes having given it the old way: an exam shared with somebody who has an
+ * account sits on their Quizzes tab, and relabelling it a one-time link
+ * afterwards leaves it sitting there — listed and reachable, which is the one
+ * thing a one-time link must never be.
+ */
+describe('updateQuiz — the kind is fixed once published', () => {
+  beforeEach(() => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+    } as never);
+    mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'QUIZ_SET' } as never);
+    mockCurriculum.getSectionsForRenumber.mockResolvedValue([{ id: 'section-1' }] as never);
+    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
+    mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
+  });
+
+  it('refuses a change of kind on a published quiz', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ type: 'EXAM', typeLocked: true }) as never,
+    );
+
+    await expect(QuizService.updateQuiz('quiz-1', { type: 'ONE_TIME' })).rejects.toThrow(
+      /can no longer be changed/,
+    );
+    expect(mockQuizGateway.updateQuiz).not.toHaveBeenCalled();
+  });
+
+  /** A form that posts every field back is not trying to change anything. */
+  it('allows the kind it already has to be sent again', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ type: 'EXAM', typeLocked: true }) as never,
+    );
+
+    await expect(
+      QuizService.updateQuiz('quiz-1', { type: 'EXAM', showResults: false }),
+    ).resolves.toBeDefined();
+  });
+
+  it('still allows a change while the quiz is a draft', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ type: 'EXAM', typeLocked: false }) as never,
+    );
+
+    await expect(QuizService.updateQuiz('quiz-1', { type: 'ONE_TIME' })).resolves.toBeDefined();
+  });
+});
+
+/**
+ * Reordering has to be all-or-nothing over the quiz's own questions.
+ *
+ * A partial list would leave the rest at numbers that no longer mean anything,
+ * and a stray id would drag a question out of another quiz — so both are refused
+ * rather than tidied up. Either one means the client and the server disagree
+ * about what this quiz contains, and guessing which is right is how a quiz ends
+ * up scrambled.
+ */
+describe('reorderQuestions', () => {
+  const twoQuestions = quizFixture({
+    questions: [
+      { id: 'q1', order: 1 },
+      { id: 'q2', order: 2 },
+    ],
+  });
+
+  beforeEach(() => {
+    mockQuizGateway.getQuizById.mockResolvedValue(twoQuestions as never);
+    // The reorder runs inside a transaction, so the mock has to actually call
+    // the callback for the gateway write to be observable here.
+    (mockQuizGateway.runTransaction as unknown as jest.Mock).mockImplementation(
+      async (fn: (db: unknown) => unknown) => fn({}),
+    );
+  });
+
+  it('rewrites the order when the list is exactly right', async () => {
+    await QuizService.reorderQuestions('quiz-1', ['q2', 'q1']);
+
+    expect(mockQuizGateway.reorderQuestions).toHaveBeenCalledWith(
+      'quiz-1',
+      ['q2', 'q1'],
+      expect.anything(),
+    );
+  });
+
+  it('refuses a list that leaves a question out', async () => {
+    await expect(QuizService.reorderQuestions('quiz-1', ['q1'])).rejects.toThrow(
+      /every question in this quiz/,
+    );
+    expect(mockQuizGateway.reorderQuestions).not.toHaveBeenCalled();
+  });
+
+  it('refuses a list naming a question from another quiz', async () => {
+    await expect(QuizService.reorderQuestions('quiz-1', ['q1', 'elsewhere'])).rejects.toThrow(
+      /every question in this quiz/,
+    );
+    expect(mockQuizGateway.reorderQuestions).not.toHaveBeenCalled();
+  });
+
+  it('refuses a list naming the same question twice', async () => {
+    await expect(QuizService.reorderQuestions('quiz-1', ['q1', 'q1'])).rejects.toThrow(
+      /listed twice/,
+    );
+    expect(mockQuizGateway.reorderQuestions).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A quiz in a course has no deadline of its own.
+ *
+ * It falls due with the course around it — one piece of work, one date. An exam
+ * that closed a week before the lesson holding it would be nobody's idea of a
+ * single deadline, so the length is not merely ignored on the way in but cleared
+ * from the row, leaving nothing for a later reader to be misled by.
+ */
+describe('updateQuiz — days remaining follows placement', () => {
+  beforeEach(() => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+    } as never);
+    mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'LESSON' } as never);
+    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
+    mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
+  });
+
+  it('clears a length set on a quiz that sits in a course', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ sectionId: 'section-1', daysRemaining: 30 }) as never,
+    );
+
+    await QuizService.updateQuiz('quiz-1', { daysRemaining: 14 });
+
+    expect(mockQuizGateway.updateQuiz).toHaveBeenCalledWith(
+      'quiz-1',
+      expect.objectContaining({ daysRemaining: null }),
+    );
+  });
+
+  /** Nothing to clear, so nothing is written — an idle save stays idle. */
+  it('leaves a quiz in a course that already has none alone', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ sectionId: 'section-1', daysRemaining: null }) as never,
+    );
+
+    await QuizService.updateQuiz('quiz-1', { daysRemaining: 14 });
+
+    expect(mockQuizGateway.updateQuiz).toHaveBeenCalledWith(
+      'quiz-1',
+      expect.not.objectContaining({ daysRemaining: expect.anything() }),
+    );
+  });
+
+  it('keeps the length on a quiz standing on its own', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ sectionId: null, daysRemaining: null }) as never,
+    );
+
+    await QuizService.updateQuiz('quiz-1', { sectionId: null, daysRemaining: 14 });
+
+    expect(mockQuizGateway.updateQuiz).toHaveBeenCalledWith(
+      'quiz-1',
+      expect.objectContaining({ daysRemaining: 14 }),
+    );
   });
 });
 
@@ -859,5 +1036,54 @@ describe('question validation', () => {
     await expect(QuizService.addQuestion('quiz-1', { prompt: 'Q', options: many })).rejects.toThrow(
       /at most 10 options/,
     );
+  });
+});
+
+/**
+ * The two doors a learner reaches a quiz through, and what the deadline does at
+ * them.
+ *
+ * Guarded on the server as well as in the pages: a saved URL or a bare POST
+ * reaches these without going near a greyed-out button. Whether the deadline
+ * shuts anything is the owning course's choice, so the guard has to read it
+ * rather than assume the old rule.
+ */
+describe('assertNotPastDue', () => {
+  const gone = new Date('2020-01-01T23:59:00');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAssignments.quizDeadlineFor.mockResolvedValue(gone as never);
+    mockCurriculum.courseIdFromQuiz.mockResolvedValue('course-1' as never);
+  });
+
+  it('refuses once the deadline has gone', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', lockAfterDue: true } as never);
+
+    await expect(QuizService.assertNotPastDue(1, 'quiz-1')).rejects.toThrow(/can no longer/);
+  });
+
+  /** Late is not shut, and refusing here would contradict the page that offered it. */
+  it('allows it when the course does not lock after the due date', async () => {
+    mockCurriculum.getCourseById.mockResolvedValue({
+      id: 'course-1',
+      lockAfterDue: false,
+    } as never);
+
+    await expect(QuizService.assertNotPastDue(1, 'quiz-1')).resolves.toBeUndefined();
+  });
+
+  /** No course behind it means nobody's choice to read, so the deadline stands. */
+  it('refuses for a quiz with no course when the deadline has gone', async () => {
+    mockCurriculum.courseIdFromQuiz.mockResolvedValue(null as never);
+
+    await expect(QuizService.assertNotPastDue(1, 'quiz-1')).rejects.toThrow(/can no longer/);
+  });
+
+  it('allows anything with no deadline at all', async () => {
+    mockAssignments.quizDeadlineFor.mockResolvedValue(null as never);
+
+    await expect(QuizService.assertNotPastDue(1, 'quiz-1')).resolves.toBeUndefined();
+    expect(mockCurriculum.getCourseById).not.toHaveBeenCalled();
   });
 });

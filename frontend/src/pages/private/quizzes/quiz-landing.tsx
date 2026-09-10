@@ -181,15 +181,31 @@ const QuizLanding = () => {
    */
   const next = entries.find((entry) => !attempted.has(entry.quiz.id)) ?? null;
   const allDone = entries.length > 0 && next === null;
-  const startLabel = allDone
-    ? 'Completed'
-    : !next
-      ? 'No quizzes yet'
-      : next.quiz.timeLimitMinutes !== null
-        ? `Start quiz · ${next.quiz.timeLimitMinutes} min`
-        : 'Start quiz';
 
-  const openQuiz = (quizId: string) => navigate(`/quizzes/${course.id}/take/${quizId}`);
+  /**
+   * Past its deadline, a quiz set is shut like any other course.
+   *
+   * A set is one piece of work with one date, so this closes every quiz in it at
+   * once rather than each carrying a date of its own. The server decides it and
+   * also refuses to open a run, so this is the courteous half of the lock.
+   */
+  const locked = course.locked === true;
+  const dueOn = course.dueDate ? new Date(course.dueDate).toLocaleDateString() : null;
+
+  const startLabel = locked
+    ? 'Closed'
+    : allDone
+      ? 'Completed'
+      : !next
+        ? 'No quizzes yet'
+        : next.quiz.timeLimitMinutes !== null
+          ? `Start quiz · ${next.quiz.timeLimitMinutes} min`
+          : 'Start quiz';
+
+  const openQuiz = (quizId: string) => {
+    if (locked) return;
+    navigate(`/quizzes/${course.id}/take/${quizId}`);
+  };
 
   return (
     <div className="page-container flex flex-col">
@@ -277,7 +293,7 @@ const QuizLanding = () => {
                       )}
                     </span>
                     {isNew.item(entry.quiz.id, entry.sectionId, entry.moduleId) && <NewBadge />}
-                    {next?.quiz.id === entry.quiz.id && (
+                    {!locked && next?.quiz.id === entry.quiz.id && (
                       <span
                         className="shrink-0 rounded-full bg-navy px-2 py-0.5 text-xs font-semibold
                           text-white"
@@ -396,13 +412,22 @@ const QuizLanding = () => {
             <CardContent className="flex flex-col gap-4 p-4">
               <Button
                 onClick={() => next && openQuiz(next.quiz.id)}
-                disabled={!next}
-                className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover"
+                disabled={!next || locked}
+                title={locked ? 'The deadline for these quizzes has passed' : undefined}
+                className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover
+                  disabled:cursor-not-allowed disabled:bg-dark-gray/40"
               >
                 {startLabel}
               </Button>
 
-              {next && (
+              {locked && (
+                <p className="-mt-2 text-center text-sm text-danger">
+                  {dueOn ? `The deadline passed on ${dueOn}.` : 'The deadline has passed.'} Ask
+                  whoever assigned this if you still need it.
+                </p>
+              )}
+
+              {!locked && next && (
                 <p className="-mt-2 break-words text-center text-sm text-dark-gray">
                   {next.quiz.title}
                   {next.quiz.timeLimitMinutes === null && ' · no time limit'}

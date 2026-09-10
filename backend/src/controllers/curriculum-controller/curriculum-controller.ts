@@ -30,8 +30,14 @@ import { fail } from '@/controllers/http-errors';
 import { enforceUploadQuota } from '@/controllers/middleware/rate-limit';
 import CurriculumService from '@/services/curriculum-service/curriculum-service';
 import DashboardService from '@/services/dashboard-service/dashboard-service';
+import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
+import EditLeaseService, {
+  EDIT_LEASE_HEARTBEAT_MS,
+} from '@/services/edit-lease-service/edit-lease-service';
 import NotificationService from '@/services/notification-service/notification-service';
 import PublicationService from '@/services/publication-service/publication-service';
+
+import { EditScope } from '../../../generated/prisma';
 
 // req.params values are typed `string | string[]` in Express 5, so normalize before use.
 function param(req: Request, name: string): string {
@@ -45,6 +51,12 @@ function param(req: Request, name: string): string {
  * exactly the courses that belong to nobody — see
  * `CurriculumGateway.accessibleCourses`.
  */
+/** Only the two scopes exist; anything else is a bad request, not a new kind. */
+function parseEditScope(value: unknown): EditScope {
+  if (value === EditScope.MODULE || value === EditScope.QUESTION) return value;
+  throw new Error('scope must be MODULE or QUESTION');
+}
+
 function isGlobalAuthor(req: AuthenticatedRequest): boolean {
   return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
 }
@@ -363,6 +375,54 @@ export default class CurriculumController {
     }
   }
 
+  /**
+   * One version read against the one learners are on now, for the version card.
+   *
+   * Separate from `getVersion` because it is a different question and a heavier
+   * answer: this loads both trees and merges them, and the plain read is still
+   * what the restore path wants.
+   */
+  @get('/versions/:id/diff')
+  @use(requireCourseEditor(fromVersionParam('id')))
+  @use(authenticateAndAttachUser)
+  async getVersionDiff(req: Request, res: Response) {
+    try {
+      const diff = await PublicationService.getVersionDiff(param(req, 'id'));
+      return res.send(diff);
+    } catch (error) {
+      return fail(res, error, 'Error comparing that version');
+    }
+  }
+
+  /**
+   * Keeps one version for good, or lets it go back to the ordinary history.
+   *
+   * Gated per course for the same reason restoring is: a version is the course's
+   * own content, so deciding how long it is kept belongs to whoever may edit it.
+   */
+  @post('/versions/:id/archive')
+  @use(requireCourseEditor(fromVersionParam('id')))
+  @use(authenticateAndAttachUser)
+  async setVersionArchived(req: AuthenticatedRequest, res: Response) {
+    try {
+      const archived = (req.body as { archived?: unknown })?.archived !== false;
+      const result = await PublicationService.setVersionArchived(
+        param(req as Request, 'id'),
+        archived,
+        req.user?.id ?? null,
+      );
+
+      return res.send({
+        message: archived
+          ? `Version ${result.version} will be kept permanently`
+          : `Version ${result.version} moved back to version history`,
+        ...result,
+      });
+    } catch (error) {
+      return fail(res, error, 'Error updating that version');
+    }
+  }
+
   /** Permanently removes one archived version. The live one is refused. */
   @del('/versions/:id')
   @use(requireCourseEditor(fromVersionParam('id')))
@@ -373,6 +433,104 @@ export default class CurriculumController {
       return res.send({ message: `Version ${result.version} deleted`, ...result });
     } catch (error) {
       return fail(res, error, 'Error deleting that version');
+    }
+  }
+
+  /**
+   * What has been changed since the last publish, and who changed it.
+   *
+   * Its own call rather than a field on the course, so the tree the editor draws
+   * stays the tree that gets published — see EditAttributionService.marksForCourse.
+   */
+  @get('/courses/:id/edit-marks')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async getEditMarks(req: AuthenticatedRequest, res: Response) {
+    try {
+      const marks = await EditAttributionService.marksForCourse(
+        param(req as Request, 'id'),
+        req.user?.id ?? null,
+      );
+      return res.send({ marks });
+    } catch (error) {
+      return fail(res, error, 'Error loading recent edits');
+    }
+  }
+
+  /**
+   * What is locked in this course right now, and by whom.
+   *
+   * Polled by every open editor. Deliberately cheap: one indexed read of a table
+   * that holds a handful of rows per course, returning ids and first names and
+   * nothing else. There is no socket layer here, and adding one to answer a
+   * question this small would be a great deal of machinery for a list that
+   * changes when somebody clicks into a module.
+   */
+  @get('/courses/:id/edit-leases')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async listEditLeases(req: AuthenticatedRequest, res: Response) {
+    try {
+      const leases = await EditLeaseService.listForCourse(
+        param(req as Request, 'id'),
+        req.user!.id,
+      );
+      return res.send({ leases, heartbeatMs: EDIT_LEASE_HEARTBEAT_MS });
+    } catch (error) {
+      return fail(res, error, 'Error loading who is editing');
+    }
+  }
+
+  /**
+   * Takes or renews a claim on one module or question.
+   *
+   * The same call for both, so the editor has one thing to send on opening
+   * something and every few seconds after — and so a claim that lapsed while a
+   * tab was asleep is simply taken again rather than needing a separate path.
+   */
+  @post('/courses/:id/edit-leases')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async claimEditLease(req: AuthenticatedRequest, res: Response) {
+    try {
+      const body = req.body as { scope?: unknown; targetId?: unknown };
+      const scope = parseEditScope(body.scope);
+      const targetId = String(body.targetId ?? '').trim();
+      if (!targetId) throw new Error('targetId is required');
+
+      const result = await EditLeaseService.claim(
+        param(req as Request, 'id'),
+        scope,
+        targetId,
+        req.user!.id,
+      );
+
+      return res.send({ ...result, heartbeatMs: EDIT_LEASE_HEARTBEAT_MS });
+    } catch (error) {
+      return fail(res, error, 'Error claiming that for editing');
+    }
+  }
+
+  /**
+   * Gives up a claim. With no `targetId`, gives up everything this person holds
+   * in the course — what an editor sends on its way out.
+   */
+  @del('/courses/:id/edit-leases')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async releaseEditLease(req: AuthenticatedRequest, res: Response) {
+    try {
+      const body = (req.body ?? {}) as { scope?: unknown; targetId?: unknown };
+      const targetId = String(body.targetId ?? '').trim();
+      const courseId = param(req as Request, 'id');
+
+      const result = targetId
+        ? await EditLeaseService.release(parseEditScope(body.scope), targetId, req.user!.id)
+        : await EditLeaseService.releaseAll(courseId, req.user!.id);
+
+      return res.send(result);
+    } catch (error) {
+      return fail(res, error, 'Error releasing that');
     }
   }
 
@@ -436,6 +594,11 @@ export default class CurriculumController {
   async createModule(req: Request, res: Response) {
     try {
       const module = await CurriculumService.createModule(param(req, 'courseId'), req.body);
+      await EditAttributionService.stamp(
+        'MODULE',
+        module?.id ?? '',
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'Module created successfully', module });
     } catch (error) {
       return fail(res, error, 'Error creating module');
@@ -443,7 +606,7 @@ export default class CurriculumController {
   }
 
   @put('/modules/:id')
-  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(requireCourseEditor(fromModuleParam('id'), { attributes: { kind: 'MODULE' } }))
   @use(authenticateAndAttachUser)
   async updateModule(req: Request, res: Response) {
     try {
@@ -456,7 +619,7 @@ export default class CurriculumController {
 
   /** Soft delete — the module and its sections move to the recycle bin. */
   @del('/modules/:id')
-  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(requireCourseEditor(fromModuleParam('id'), { attributes: { kind: 'MODULE' } }))
   @use(authenticateAndAttachUser)
   async deleteModule(req: Request, res: Response) {
     try {
@@ -468,7 +631,7 @@ export default class CurriculumController {
   }
 
   @post('/modules/:id/restore')
-  @use(requireCourseEditor(fromModuleParam('id')))
+  @use(requireCourseEditor(fromModuleParam('id'), { attributes: { kind: 'MODULE' } }))
   @use(authenticateAndAttachUser)
   async restoreModule(req: Request, res: Response) {
     try {
@@ -500,6 +663,11 @@ export default class CurriculumController {
   async createSection(req: Request, res: Response) {
     try {
       const section = await CurriculumService.createSection(param(req, 'courseId'), req.body);
+      await EditAttributionService.stamp(
+        'SECTION',
+        section?.id ?? '',
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'Section created successfully', section });
     } catch (error) {
       return fail(res, error, 'Error creating section');
@@ -532,7 +700,7 @@ export default class CurriculumController {
   }
 
   @put('/sections/:id')
-  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
   async updateSection(req: Request, res: Response) {
     try {
@@ -545,7 +713,7 @@ export default class CurriculumController {
 
   /** Soft delete — the section moves to the recycle bin and can be restored. */
   @del('/sections/:id')
-  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
   async deleteSection(req: Request, res: Response) {
     try {
@@ -557,7 +725,7 @@ export default class CurriculumController {
   }
 
   @post('/sections/:id/restore')
-  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
   async restoreSection(req: Request, res: Response) {
     try {
@@ -572,7 +740,7 @@ export default class CurriculumController {
   @post('/sections/:id/image')
   @use(enforceUploadQuota)
   @use(mediaUpload.single('file'))
-  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
   async uploadSectionImage(req: Request, res: Response) {
     try {
@@ -580,6 +748,11 @@ export default class CurriculumController {
         return res.status(400).send({ errorMessage: 'No file uploaded' });
       }
       const element = await CurriculumService.addUploadedElement(param(req, 'id'), req.file);
+      await EditAttributionService.stamp(
+        'ELEMENT',
+        element.id,
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'File added', element });
     } catch (error) {
       return fail(res, error, 'Error uploading file');
@@ -618,7 +791,7 @@ export default class CurriculumController {
    * Body: { items: [{ kind: 'element' | 'quiz', id }] } in the new order.
    */
   @put('/sections/:id/content-order')
-  @use(requireCourseEditor(fromSectionParam('id')))
+  @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
   async reorderSectionContent(req: Request, res: Response) {
     try {
@@ -647,6 +820,13 @@ export default class CurriculumController {
 
     try {
       const element = await CurriculumService.createElement(param(req, 'sectionId'), req.body);
+      // Stamped here rather than by the middleware: a new row has no id until it
+      // exists, and the route names the section it went into, not the element.
+      await EditAttributionService.stamp(
+        'ELEMENT',
+        element.id,
+        (req as AuthenticatedRequest).user?.id ?? null,
+      );
       return res.send({ message: 'Element created successfully', element });
     } catch (error) {
       return fail(res, error, 'Error creating element');
@@ -654,7 +834,7 @@ export default class CurriculumController {
   }
 
   @put('/elements/:id')
-  @use(requireCourseEditor(fromElementParam('id')))
+  @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
   @use(authenticateAndAttachUser)
   async updateElement(req: Request, res: Response) {
     try {
@@ -666,7 +846,7 @@ export default class CurriculumController {
   }
 
   @del('/elements/:id')
-  @use(requireCourseEditor(fromElementParam('id')))
+  @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
   @use(authenticateAndAttachUser)
   async deleteElement(req: Request, res: Response) {
     try {

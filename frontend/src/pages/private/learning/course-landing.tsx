@@ -126,9 +126,29 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
    * a learner arriving fresh would see, and the honest thing to preview.
    */
   const items = useMemo(() => (course ? flattenCourse(course) : []), [course]);
+
+  /**
+   * Past its deadline, this course is shut.
+   *
+   * The server decides it — `locked` comes back on the course — because a lock
+   * worked out from the browser's clock is one the learner can move, and that
+   * clock is not the one their deadline was set against.
+   *
+   * An author previewing their own course is never locked out of it: a deadline
+   * belongs to a learner's assignment, and there is no assignment behind a
+   * preview.
+   */
+  const locked = !preview && course?.locked === true;
+
+  /**
+   * Nothing is unlocked once the deadline has gone, which is what closes every
+   * shortcut in the content box at once. They already draw a padlock and refuse
+   * a click for anything outside this set, so a closed course reuses the whole
+   * of that rather than growing a second disabled state alongside it.
+   */
   const unlocked = useMemo(
-    () => (course ? unlockedItemIds(course, items, progress) : new Set<string>()),
-    [course, items, progress],
+    () => (course && !locked ? unlockedItemIds(course, items, progress) : new Set<string>()),
+    [course, items, progress, locked],
   );
 
   if (loading) {
@@ -164,6 +184,13 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
   const itemDone = itemDoneFor(course, progress);
   const started = hasStartedCourse(course, progress);
 
+  const dueOn = course.dueDate ? new Date(course.dueDate).toLocaleDateString() : null;
+
+  /** Why a shortcut is doing nothing, when it is the deadline doing it. */
+  const lockedReason = dueOn
+    ? `This course closed on ${dueOn} and can no longer be opened`
+    : 'This course has closed and can no longer be opened';
+
   /**
    * Opening the player at a particular item.
    *
@@ -172,7 +199,10 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
    * way of being told where to start rather than two.
    */
   const openAt = (id?: string) => {
-    if (preview) return;
+    // Belt as well as braces. Every shortcut below is disabled once the deadline
+    // has passed, but they are disabled in a dozen places and this is one — so
+    // the refusal lives at the single door rather than only on the handles.
+    if (preview || locked) return;
     navigate(`/learning/${course.id}/content${id ? `?item=${encodeURIComponent(id)}` : ''}`);
   };
 
@@ -273,10 +303,14 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
                 {formatMinutes(stats.totalMinutes)} total
               </p>
               {!preview && course.sections.length > 0 && (
-                <p className="text-sm text-dark-gray">
-                  {course.sequential
-                    ? 'Pick anything you have reached to jump straight to it.'
-                    : 'Pick anything to jump straight to it.'}
+                <p className={`text-sm ${locked ? 'font-medium text-danger' : 'text-dark-gray'}`}>
+                  {locked
+                    ? dueOn
+                      ? `Closed on ${dueOn}. Nothing here can be opened.`
+                      : 'Closed. Nothing here can be opened.'
+                    : course.sequential
+                      ? 'Pick anything you have reached to jump straight to it.'
+                      : 'Pick anything to jump straight to it.'}
                 </p>
               )}
             </CardHeader>
@@ -301,11 +335,13 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
                         onClick={() => moduleEntry && openAt(itemId(moduleEntry))}
                         disabled={preview || !moduleOpen || !moduleEntry}
                         title={
-                          moduleOpen
-                            ? preview
-                              ? 'Disabled while previewing'
-                              : `Go to ${group.module.title}`
-                            : 'Finish the previous module to open this one'
+                          locked
+                            ? lockedReason
+                            : moduleOpen
+                              ? preview
+                                ? 'Disabled while previewing'
+                                : `Go to ${group.module.title}`
+                              : 'Finish the previous module to open this one'
                         }
                         className={`flex w-full items-center gap-2 rounded-md px-1 py-1 text-left ${
                           moduleOpen && moduleEntry && !preview
@@ -381,11 +417,13 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
                                 onClick={() => sectionEntry && openAt(itemId(sectionEntry))}
                                 disabled={preview || !open || !sectionEntry}
                                 title={
-                                  open
-                                    ? preview
-                                      ? 'Disabled while previewing'
-                                      : `Go to ${section.title}`
-                                    : 'Finish the item before this one to unlock it'
+                                  locked
+                                    ? lockedReason
+                                    : open
+                                      ? preview
+                                        ? 'Disabled while previewing'
+                                        : `Go to ${section.title}`
+                                      : 'Finish the item before this one to unlock it'
                                 }
                                 className={`flex min-w-0 flex-1 items-center gap-3 rounded-md px-2
                                   py-2 text-left ${
@@ -452,11 +490,13 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
                                         onClick={() => openAt(item.id)}
                                         disabled={preview || !itemOpen}
                                         title={
-                                          itemOpen
-                                            ? preview
-                                              ? 'Disabled while previewing'
-                                              : 'Go to this item'
-                                            : 'Finish the item before this one to unlock it'
+                                          locked
+                                            ? lockedReason
+                                            : itemOpen
+                                              ? preview
+                                                ? 'Disabled while previewing'
+                                                : 'Go to this item'
+                                              : 'Finish the item before this one to unlock it'
                                         }
                                         className={`flex w-full items-center gap-2 rounded-md px-2
                                           py-1 text-left text-sm ${
@@ -608,13 +648,27 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
               */}
               <Button
                 onClick={() => openAt(started && resumeAt ? itemId(resumeAt) : undefined)}
-                title={preview ? 'Disabled while previewing' : undefined}
-                className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover"
+                disabled={locked}
+                title={locked ? lockedReason : preview ? 'Disabled while previewing' : undefined}
+                className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover
+                  disabled:cursor-not-allowed disabled:bg-dark-gray/40"
               >
-                {started ? 'Continue' : 'Start course'}
+                {locked ? 'Closed' : started ? 'Continue' : 'Start course'}
               </Button>
 
-              {started && resumeAt && (
+              {/* Said plainly under the button as well as in its tooltip: a
+                  greyed-out button that gives no reason reads as a fault. */}
+              {locked && (
+                <p className="-mt-2 flex items-start gap-2 text-center text-sm text-danger">
+                  <LockClosedIcon className="mt-0.5 w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 text-left">
+                    {dueOn ? `The deadline passed on ${dueOn}.` : 'The deadline has passed.'} Ask
+                    whoever assigned this if you still need it.
+                  </span>
+                </p>
+              )}
+
+              {!locked && started && resumeAt && (
                 <p className="-mt-2 break-words text-center text-sm text-dark-gray">
                   Picks up at{' '}
                   {resumeAt.kind === 'quiz'
@@ -627,7 +681,7 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
                       )}
                 </p>
               )}
-              {started && !resumeAt && (
+              {!locked && started && !resumeAt && (
                 <p className="-mt-2 text-center text-sm text-dark-gray">
                   You have worked through everything here.
                 </p>

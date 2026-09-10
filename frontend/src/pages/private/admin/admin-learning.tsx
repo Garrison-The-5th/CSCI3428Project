@@ -12,8 +12,12 @@
  * drafts. Creating one drops you into its editor; clicking a card opens it. The
  * editor lives on its own route and is only reachable from here.
  */
-import { MagnifyingGlassIcon, PlusIcon } from '@heroicons/react/24/outline';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AdjustmentsHorizontalIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+} from '@heroicons/react/24/outline';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import ToastNotification from '@/components/common/toast-notification';
@@ -26,6 +30,23 @@ import { logger } from '@/utils/logger';
 
 type Toast = { show: boolean; message: string; type: 'success' | 'error' };
 
+/**
+ * Which lessons to show.
+ *
+ * The page already splits its cards into Published and Drafts, so a filter here
+ * hides one of those sections rather than reshuffling the cards — someone who
+ * picks Drafts is saying "stop showing me the published ones", and a page that
+ * answered by merging both into one grid would have ignored them.
+ */
+type Filter = 'all' | 'published' | 'drafts' | 'required';
+
+const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
+  { key: 'all', label: 'Everything', hint: 'Every lesson, published and draft' },
+  { key: 'published', label: 'Published', hint: 'Live, and reachable by whoever holds them' },
+  { key: 'drafts', label: 'Drafts', hint: 'Not published, so no learner can reach them yet' },
+  { key: 'required', label: 'Required', hint: 'Marked as required learning' },
+];
+
 const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
 
@@ -37,6 +58,10 @@ const AdminLearning = () => {
 
   const [newCourseTitle, setNewCourseTitle] = useState('');
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const filtersRef = useRef<HTMLDivElement>(null);
 
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
@@ -56,6 +81,16 @@ const AdminLearning = () => {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // Clicking away closes the filter menu, which is what a menu is expected to do.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onClick = (event: MouseEvent) => {
+      if (!filtersRef.current?.contains(event.target as Node)) setFiltersOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [filtersOpen]);
 
   /** Creating a lesson opens its editor straight away — there is nothing to see here. */
   const handleCreateCourse = async () => {
@@ -89,23 +124,36 @@ const AdminLearning = () => {
    */
   const matching = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return lessons;
 
-    return lessons.filter((course) =>
-      [
-        course.title,
-        course.shortDescription ?? '',
-        ...course.tags,
-        ...course.sections.map((section) => `${section.number} ${section.title}`),
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [lessons, search]);
+    return lessons
+      .filter((course) => (filter === 'required' ? course.required : true))
+      .filter((course) => {
+        if (!query) return true;
+        return [
+          course.title,
+          course.shortDescription ?? '',
+          ...course.tags,
+          ...course.sections.map((section) => `${section.number} ${section.title}`),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      });
+  }, [lessons, search, filter]);
+
+  /**
+   * Which of the two sections to draw.
+   *
+   * Required is not a third state — a required lesson is still published or
+   * still a draft — so it narrows the cards above and leaves both sections
+   * standing. The other two hide the section they are not about.
+   */
+  const showPublished = filter === 'all' || filter === 'published' || filter === 'required';
+  const showDrafts = filter === 'all' || filter === 'drafts' || filter === 'required';
 
   const published = matching.filter((course) => course.published);
   const drafts = matching.filter((course) => !course.published);
+  const activeFilter = FILTERS.find((entry) => entry.key === filter)!;
 
   const courseCard = (course: Course) => {
     const cover = imageSrc(course.imageData, course.imageType);
@@ -165,18 +213,69 @@ const AdminLearning = () => {
 
       <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-navy" />
 
-      <div className="relative mb-6 max-w-md">
-        <MagnifyingGlassIcon
-          className="pointer-events-none absolute top-1/2 left-3 w-5 h-5 -translate-y-1/2
-            text-dark-gray"
-        />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search lessons — drafts and published..."
-          aria-label="Search lessons"
-          className={`${inputClass} pl-10`}
-        />
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="relative min-w-60 flex-1 sm:max-w-md">
+          <MagnifyingGlassIcon
+            className="pointer-events-none absolute top-1/2 left-3 w-5 h-5 -translate-y-1/2
+              text-dark-gray"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search lessons — drafts and published..."
+            aria-label="Search lessons"
+            className={`${inputClass} pl-10`}
+          />
+        </div>
+
+        <div ref={filtersRef} className="relative">
+          <Button
+            onClick={() => setFiltersOpen((open) => !open)}
+            variant="outline"
+            aria-expanded={filtersOpen}
+            aria-haspopup="menu"
+            className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
+          >
+            <AdjustmentsHorizontalIcon className="w-5 h-5" />
+            Filters
+            {filter !== 'all' && (
+              <Badge className="bg-navy px-2 text-white">{activeFilter.label}</Badge>
+            )}
+          </Button>
+
+          {filtersOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-gray-300 bg-white
+                p-1 shadow-lg"
+            >
+              {FILTERS.map((entry) => (
+                <button
+                  key={entry.key}
+                  role="menuitemradio"
+                  aria-checked={filter === entry.key}
+                  onClick={() => {
+                    setFilter(entry.key);
+                    setFiltersOpen(false);
+                  }}
+                  className={`flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left ${
+                    filter === entry.key
+                      ? 'bg-navy text-white'
+                      : 'text-dark-gray hover:bg-light-gray'
+                  }`}
+                >
+                  <span className="text-sm font-semibold">{entry.label}</span>
+                  <span
+                    className={`text-xs
+                    ${filter === entry.key ? 'text-white/80' : 'text-dark-gray'}`}
+                  >
+                    {entry.hint}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <Card className="mb-8 border-2 border-navy/30 bg-light-gray shadow-sm">
@@ -205,37 +304,52 @@ const AdminLearning = () => {
         </Card>
       ) : (
         <div className="flex flex-col gap-10">
-          <section>
-            <h2 className="mb-1 text-xl font-bold text-dark-gray">
-              Published{published.length > 0 && ` (${published.length})`}
-            </h2>
-            <p className="mb-4 text-sm text-dark-gray">Visible to learners now.</p>
-            {published.length === 0 ? (
-              <p className="text-dark-gray">
-                {search.trim() ? 'No published lesson matches that.' : 'Nothing published yet.'}
-              </p>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
-                {published.map(courseCard)}
-              </div>
-            )}
-          </section>
+          {/* Both sections filtered by the same search, so the counts in these
+              headings are honest while one is running: "Published (1)" means one
+              match, not one course that happens to be published somewhere. */}
+          {showPublished && (
+            <section>
+              <h2 className="mb-1 text-xl font-bold text-dark-gray">
+                Published{published.length > 0 && ` (${published.length})`}
+              </h2>
+              <p className="mb-4 text-sm text-dark-gray">Visible to learners now.</p>
+              {published.length === 0 ? (
+                <p className="text-dark-gray">
+                  {search.trim()
+                    ? 'No published lesson matches that.'
+                    : filter === 'required'
+                      ? 'No published lesson is marked required.'
+                      : 'Nothing published yet.'}
+                </p>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
+                  {published.map(courseCard)}
+                </div>
+              )}
+            </section>
+          )}
 
-          <section>
-            <h2 className="mb-1 text-xl font-bold text-dark-gray">
-              Drafts{drafts.length > 0 && ` (${drafts.length})`}
-            </h2>
-            <p className="mb-4 text-sm text-dark-gray">Hidden from learners until published.</p>
-            {drafts.length === 0 ? (
-              <p className="text-dark-gray">
-                {search.trim() ? 'No draft matches that.' : 'No drafts.'}
-              </p>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
-                {drafts.map(courseCard)}
-              </div>
-            )}
-          </section>
+          {showDrafts && (
+            <section>
+              <h2 className="mb-1 text-xl font-bold text-dark-gray">
+                Drafts{drafts.length > 0 && ` (${drafts.length})`}
+              </h2>
+              <p className="mb-4 text-sm text-dark-gray">Hidden from learners until published.</p>
+              {drafts.length === 0 ? (
+                <p className="text-dark-gray">
+                  {search.trim()
+                    ? 'No draft matches that.'
+                    : filter === 'required'
+                      ? 'No draft is marked required.'
+                      : 'No drafts.'}
+                </p>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
+                  {drafts.map(courseCard)}
+                </div>
+              )}
+            </section>
+          )}
         </div>
       )}
 

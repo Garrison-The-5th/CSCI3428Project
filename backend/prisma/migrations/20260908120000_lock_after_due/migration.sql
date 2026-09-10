@@ -1,0 +1,11 @@
+-- Whether a deadline shuts a course or only reports that it passed.
+--
+-- Until now every deadline was a gate: past 11:59 PM on the due day the way in
+-- closed and the quizzes inside refused to start. That is right for compliance
+-- learning and wrong for most of the rest, where a week late is worth far more
+-- than never — so it becomes the author's choice, per course.
+--
+-- Default true, which is exactly what a deadline meant before this column
+-- existed. Every course carries on behaving as it did, and an author who wants
+-- the softer rule asks for it.
+ALTER TABLE "Course" ADD COLUMN "lockAfterDue" BOOLEAN NOT NULL DEFAULT true;

@@ -178,7 +178,13 @@ const Learning = () => {
                       {course.title}
                     </CardTitle>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      {course.required && (
+                      {/* Past its deadline the course cannot be opened, so the
+                          card says so here rather than let somebody click in and
+                          find every way through greyed out. */}
+                      {course.locked && (
+                        <Badge className="w-fit bg-danger px-2 text-white">Closed</Badge>
+                      )}
+                      {course.required && !course.locked && (
                         <Badge className="w-fit bg-navy px-2 text-white">Required</Badge>
                       )}
                       {hasNew && <NewBadge label="New content" />}

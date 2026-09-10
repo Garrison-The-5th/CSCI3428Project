@@ -28,6 +28,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import QuizRunner from '@/components/common/quiz-runner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatDue } from '@/services/due-dates';
 import { useLearnerApi } from '@/services/learner-api';
 import { Quiz, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
@@ -172,8 +173,12 @@ const StandaloneQuiz = () => {
                   </li>
                 </ul>
                 {quiz.dueDate && (
-                  <p className="mt-4 text-sm font-medium text-dark-gray">
-                    Due {new Date(quiz.dueDate).toLocaleDateString()}
+                  <p
+                    className={`mt-4 text-sm font-medium ${
+                      quiz.locked ? 'text-danger' : 'text-dark-gray'
+                    }`}
+                  >
+                    {quiz.locked ? 'Closed' : 'Due'} {formatDue(quiz.dueDate)}
                   </p>
                 )}
               </CardContent>
@@ -183,12 +188,23 @@ const StandaloneQuiz = () => {
           <aside className="lg:sticky lg:top-20 lg:self-start">
             <Card className="bg-light-gray shadow-lg">
               <CardContent className="flex flex-col gap-3 p-4">
+                {/* Past its deadline there is no way in. The server refuses to
+                    open a run either, so this is the polite half of the lock
+                    rather than the whole of it. */}
                 <Button
                   onClick={() => setRunning(true)}
-                  className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover"
+                  disabled={quiz.locked === true}
+                  title={quiz.locked ? 'The deadline for this quiz has passed' : undefined}
+                  className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover
+                    disabled:cursor-not-allowed disabled:bg-dark-gray/40"
                 >
-                  {attempted ? 'Take it again' : 'Start quiz'}
+                  {quiz.locked ? 'Closed' : attempted ? 'Take it again' : 'Start quiz'}
                 </Button>
+                {quiz.locked && (
+                  <p className="text-center text-sm text-danger">
+                    The deadline has passed. Ask whoever assigned it if you still need it.
+                  </p>
+                )}
                 <p className="text-center text-sm text-dark-gray">
                   {QUIZ_TYPE_LABELS[quiz.type]}
                   {quiz.timeLimitMinutes !== null && ` · ${quiz.timeLimitMinutes} min`}

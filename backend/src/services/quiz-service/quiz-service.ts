@@ -5,12 +5,19 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { optionalText, parseDaysRemaining, requiredText } from '@/config/validation';
+import {
+  endOfDueDay,
+  isLockedOut,
+  isPastDue,
+  optionalText,
+  parseDaysRemaining,
+  requiredText,
+} from '@/config/validation';
 import { ConflictError, NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
-import EnrolmentService from '@/services/enrolment-service/enrolment-service';
+import EnrolmentService, { dueFor } from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 
 import { CourseKind, QuizType } from '../../../generated/prisma';
@@ -72,6 +79,18 @@ function validateOptions(options: OptionInput[]): Array<{ text: string; isCorrec
 export class AlreadyCompletedError extends ConflictError {
   constructor() {
     super('You have already completed this quiz');
+  }
+}
+
+/**
+ * Refusing work whose deadline has gone.
+ *
+ * A 409 for the same reason `AlreadyCompletedError` is one: "this closed on
+ * Tuesday" is a state the page renders, not a malformed request.
+ */
+export class PastDueError extends ConflictError {
+  constructor(due: Date) {
+    super(`This closed on ${due.toLocaleDateString()} and can no longer be taken`);
   }
 }
 
@@ -340,7 +359,27 @@ export default class QuizService {
       // in two places, one of which stripped it of everything it was written to
       // follow on from.
       .filter((snapshot) => snapshot.kind === CourseKind.QUIZ_SET)
-      .flatMap((snapshot) => snapshot.sections.flatMap((section) => section.quizzes ?? []))
+      // A quiz inside a set is due when the set is due, on the date this person
+      // was given it. The set is the piece of work; its sections cannot each
+      // fall due on a day of their own.
+      .flatMap((snapshot) => {
+        const due = dueFor(
+          enrolment.dueByCourseId,
+          snapshot.id,
+          snapshot.dueDate ? new Date(snapshot.dueDate) : null,
+        );
+        // `locked` is settled here rather than left to the browser, for the same
+        // reason a course's is: the learner's clock is neither the one the
+        // deadline was set against nor one they cannot change. Whether the
+        // deadline shuts anything is the set's own choice.
+        return snapshot.sections.flatMap((section) =>
+          (section.quizzes ?? []).map((quiz) => ({
+            ...quiz,
+            dueDate: due,
+            locked: isLockedOut(due, snapshot.lockAfterDue),
+          })),
+        );
+      })
       // Learning checks are taken inside the lesson they belong to and are never
       // listed here; a one-time quiz is reached only through its link, and the
       // filter is written on kind rather than on placement so neither can slip
@@ -367,7 +406,16 @@ export default class QuizService {
         )
       : [];
 
-    return [...fromCourses, ...standalone].map((quiz) => redactAnswers(quiz));
+    // A quiz standing on its own falls due when this person's assignment says.
+    // A quiz standing on its own has no course whose choice to read, so the
+    // deadline shuts it — which is what a deadline meant before this was a
+    // choice, and the safe answer where nobody has made one.
+    const dated = standalone.map((quiz) => {
+      const due = dueFor(enrolment.dueByQuizId, quiz.id, quiz.dueDate);
+      return { ...quiz, dueDate: due, locked: isPastDue(due) };
+    });
+
+    return [...fromCourses, ...dated].map((quiz) => redactAnswers(quiz));
   }
 
   /** Author view, answers included. */
@@ -504,6 +552,20 @@ export default class QuizService {
     // not against what was sent — changing only the type has to be judged against
     // the section it is already in, and vice versa.
     const type = data.type !== undefined ? parseQuizType(data.type) : quiz.type;
+
+    // Once published, what a quiz is cannot change.
+    //
+    // Its kind decides how a learner can be given it, and there is no edit that
+    // undoes having given it the old way: an exam shared with somebody who has
+    // an account sits on their Quizzes tab, and turning it into a one-time link
+    // afterwards leaves it there — listed and reachable, which is exactly what a
+    // one-time link is defined by never being. Sending the kind it already has
+    // is allowed, so a form that posts every field back is not an error.
+    if (quiz.typeLocked && type !== quiz.type) {
+      throw new Error(
+        'this quiz has been published, so what kind of quiz it is can no longer be changed — copy it into a new quiz instead',
+      );
+    }
     const daysRemaining = parseDaysRemaining(data.daysRemaining);
     const sectionId =
       data.sectionId !== undefined ? data.sectionId || null : (quiz.sectionId ?? null);
@@ -548,7 +610,18 @@ export default class QuizService {
           ? { allowMultipleAttempts: false }
           : {}),
       ...(data.dueDate !== undefined ? { dueDate: parseDate(data.dueDate, 'dueDate') } : {}),
-      ...(daysRemaining !== undefined ? { daysRemaining } : {}),
+      // A quiz that sits in a course has no deadline of its own to set. It falls
+      // due with the course around it — one piece of work, one date — so a
+      // length here is not merely ignored but cleared, and a quiz dragged into a
+      // course loses the one it was carrying rather than keeping a number that
+      // nothing will ever read.
+      ...(settled.sectionId
+        ? quiz.daysRemaining === null
+          ? {}
+          : { daysRemaining: null }
+        : daysRemaining !== undefined
+          ? { daysRemaining }
+          : {}),
       ...(settled.timeLimitMinutes !== quiz.timeLimitMinutes
         ? { timeLimitMinutes: settled.timeLimitMinutes }
         : {}),
@@ -624,6 +697,32 @@ export default class QuizService {
 
       return QuizGateway.createQuestion(quizId, fields, insertOrder, options, db);
     });
+  }
+
+  /**
+   * Puts a quiz's questions in the order given.
+   *
+   * The list has to name every question in the quiz and nothing else. A partial
+   * list would leave the rest at numbers that no longer mean anything, and one
+   * carrying a stray id would silently drag a question out of another quiz — so
+   * both are refused rather than tidied up, because either one means the client
+   * and the server disagree about what this quiz contains.
+   */
+  static async reorderQuestions(quizId: string, orderedIds: string[]) {
+    const quiz = await QuizGateway.getQuizById(quizId);
+    if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+
+    const existing = quiz.questions.map((question) => question.id);
+    const given = new Set(orderedIds);
+
+    if (given.size !== orderedIds.length) throw new Error('the same question was listed twice');
+    if (given.size !== existing.length || existing.some((id) => !given.has(id))) {
+      throw new Error('the order must list every question in this quiz, and only those');
+    }
+
+    await QuizGateway.runTransaction((db) => QuizGateway.reorderQuestions(quizId, orderedIds, db));
+
+    return QuizGateway.getQuizById(quizId);
   }
 
   static async updateQuestion(id: string, data: QuestionInput) {
@@ -831,6 +930,32 @@ export default class QuizService {
   }
 
   /**
+   * Stops here if this person's deadline for the quiz has gone.
+   *
+   * Guarded on the server, not only in the pages: the buttons are greyed out and
+   * the player refuses to render, but neither is a lock — a saved URL or a bare
+   * POST reaches these two methods without going near either. Starting and
+   * submitting are the two doors that matter, so both are checked.
+   *
+   * The deadline is the one on their assignment, which for a quiz inside a
+   * course is the course's — see `AssignmentGateway.quizDeadlineFor`.
+   *
+   * Whether that deadline shuts anything is the course's own choice. A course
+   * with `lockAfterDue` off is late rather than closed, and refusing to open its
+   * quiz would contradict the page that just offered it. A quiz with no course
+   * behind it has nobody's choice to read, so the deadline stands.
+   */
+  static async assertNotPastDue(userId: number, quizId: string) {
+    const due = endOfDueDay(await AssignmentGateway.quizDeadlineFor(userId, quizId));
+    if (!due) return;
+
+    const course = await CurriculumGateway.courseIdFromQuiz(quizId);
+    const owner = course ? await CurriculumGateway.getCourseById(course) : null;
+
+    if (isLockedOut(due, owner?.lockAfterDue)) throw new PastDueError(due);
+  }
+
+  /**
    * Opens a run at a quiz, or hands back the one already open.
    *
    * The deadline is worked out here and stored, never sent up by the browser, so
@@ -843,6 +968,8 @@ export default class QuizService {
     const quiz = await QuizService.quizForRun(quizId);
 
     const type = quiz.type ?? QuizType.EXAM;
+
+    await QuizService.assertNotPastDue(userId, quizId);
 
     // One sitting means one sitting, whichever way they come back at it. That
     // covers a one-time link always, and an exam whose author did not allow
@@ -921,6 +1048,17 @@ export default class QuizService {
 
     const session =
       type === QuizType.LEARNING_CHECK ? null : await QuizGateway.findOpenSession(userId, quizId);
+
+    // A paper already open is finished, however late it lands. Somebody who
+    // started at ten to midnight must not have their answers thrown away for
+    // handing in at five past — the deadline decides whether they may begin, and
+    // the quiz's own timer decides how long they then get.
+    //
+    // With no open run there is nothing to protect, so the deadline stands: this
+    // is the door a direct submit would otherwise walk through without ever
+    // calling `startSession`.
+    if (!session) await QuizService.assertNotPastDue(userId, quizId);
+
     const timedOut = Boolean(session?.expiresAt && session.expiresAt.getTime() <= Date.now());
 
     const marked = quiz.questions.map((question) => {

@@ -20,10 +20,11 @@
  * on screen said a second switch existed. A course is published whole now, from
  * the one button above the editor, and that covers every quiz in it.
  */
-import { CheckIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, CheckIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
 import ConfirmDialog from '@/components/common/confirm-dialog';
+import EditedTag from '@/components/common/edited-tag';
 import QuestionFields, {
   emptyQuestionDraft,
   QuestionDraft,
@@ -32,7 +33,9 @@ import QuestionFields, {
 } from '@/components/common/question-fields';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import LockOverlay from '@/components/ui/lock-overlay';
 import ToggleSwitch from '@/components/ui/toggle-switch';
+import { useEditLocks } from '@/contexts/edit-locks-context';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
 import {
   Quiz,
@@ -51,7 +54,6 @@ interface QuizEditorProps {
   onChanged: () => Promise<void> | void;
   onNotify: (message: string, type?: 'success' | 'error') => void;
   /** Deleting the quiz is the parent's business, so it can confirm consistently. */
-  onDeleteQuiz: () => void;
   /** Hide the title field where the parent already shows it. */
   showTitle?: boolean;
   /**
@@ -69,34 +71,78 @@ interface QuizEditorProps {
    * one-time link no longer fits — see services/one-time-link.ts.
    */
   unavailableTypes?: Partial<Record<QuizType, string>>;
+  /**
+   * The estimate shown in Settings, and how to save it.
+   *
+   * Passed in because it does not live on the quiz: for a quiz set it is the
+   * section's `estimatedMinutes`, which is the row carrying the quiz's name and
+   * order. The editor owns the field so that everything an author sets about a
+   * quiz is in one place, and the caller owns where it is written.
+   */
+  estimatedMinutes?: number | null;
+  onSaveEstimatedMinutes?: (minutes: number) => Promise<unknown>;
+  /**
+   * Renames the quiz, when the caller has to do more than rename the quiz.
+   *
+   * A quiz set names the same thing twice — on the section that carries its
+   * order and on the quiz itself — and they are one name to an author, so a
+   * rename has to move both. Left out, the editor writes the quiz's own title
+   * and nothing else, which is right everywhere else.
+   */
+  onSaveTitle?: (title: string) => Promise<unknown>;
+  /**
+   * Whether the deadline shuts this quiz, and how to change it.
+   *
+   * Passed in for the same reason the estimate is: it belongs to the course, and
+   * a quiz set is a course. The editor renders the switch so that everything an
+   * author sets about a quiz is in one place, and the caller owns where it goes.
+   */
+  lockAfterDue?: boolean;
+  onSaveLockAfterDue?: (lock: boolean) => Promise<unknown>;
 }
 
 const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
 
-/**
- * The date a deadline of this many days would land on.
- *
- * The author is setting a length, so the date is the part they cannot see for
- * themselves — "14" says nothing about whether it clears the end of the month.
- * Worked out from today because today is when they are looking; the real one is
- * stamped when the quiz is actually handed over.
- */
-const dueIfAssignedToday = (days: string) => {
-  const parsed = Number(days);
-  if (!Number.isInteger(parsed) || parsed < 1) return null;
-  return new Date(Date.now() + parsed * 86_400_000).toLocaleDateString();
-};
+/** The two fixed rows at the top of the sidebar, which are not questions. */
+type Pane = 'settings' | 'new';
 
 const QuizEditor = ({
   quiz,
   onChanged,
   onNotify,
-  onDeleteQuiz,
   showTitle = true,
   typeChoices,
   unavailableTypes,
+  estimatedMinutes,
+  onSaveEstimatedMinutes,
+  onSaveTitle,
+  lockAfterDue,
+  onSaveLockAfterDue,
 }: QuizEditorProps) => {
+  /**
+   * What the right-hand pane is showing: Settings, a new question, or one of
+   * the existing questions.
+   *
+   * Settings on open, always. It is the only thing that is true of the quiz as a
+   * whole, and an editor that opened on whichever question happened to be first
+   * made the quiz's own properties feel like something hidden behind them.
+   */
+  const [pane, setPane] = useState<Pane | string>('settings');
+
+  /** The question being dragged, for reordering the sidebar. */
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  /**
+   * Questions somebody else has open, and how this editor says it has one.
+   *
+   * Read from context rather than passed in: the panes between here and the
+   * course editor have no interest in who is editing what, and threading it
+   * through them would put the plumbing in three files that never use it.
+   * Outside a course editor there is no provider and nothing is ever locked,
+   * which is the right answer for a preview.
+   */
+  const { lockedQuestions, claim, marks } = useEditLocks();
   const [draft, setDraft] = useState(emptyQuestionDraft());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<QuestionDraft>(emptyQuestionDraft());
@@ -109,8 +155,11 @@ const QuizEditor = ({
   useEffect(() => setTitle(quiz.title), [quiz.id, quiz.title]);
 
   const { state: titleState, saveNow: saveTitleNow } = useAutoSave(title, async (value) => {
-    if (!value.trim()) return;
-    await quizApi.updateQuiz(quiz.id, { title: value.trim() });
+    const next = value.trim();
+    if (!next) return;
+    // The caller renames it where a rename means more than one write — see
+    // `onSaveTitle`. Otherwise the quiz's own title is the whole of it.
+    await (onSaveTitle ? onSaveTitle(next) : quizApi.updateQuiz(quiz.id, { title: next }));
     await onChanged();
   });
 
@@ -122,38 +171,6 @@ const QuizEditor = ({
     () => setTimeLimit(quiz.timeLimitMinutes === null ? '' : String(quiz.timeLimitMinutes)),
     [quiz.id, quiz.timeLimitMinutes],
   );
-
-  // Blank means no deadline, which is why this is a string rather than a number.
-  const [daysRemaining, setDaysRemaining] = useState(
-    quiz.daysRemaining == null ? '' : String(quiz.daysRemaining),
-  );
-  useEffect(
-    () => setDaysRemaining(quiz.daysRemaining == null ? '' : String(quiz.daysRemaining)),
-    [quiz.id, quiz.daysRemaining],
-  );
-
-  /**
-   * Saved on blur rather than per keystroke, for the same reason the time limit
-   * below is: half-typed "1" on the way to "14" is a perfectly valid number of
-   * days and would otherwise be written as one.
-   */
-  const saveDaysRemaining = async () => {
-    const trimmed = daysRemaining.trim();
-    const next = trimmed === '' ? null : Number(trimmed);
-
-    if (next !== null && (!Number.isInteger(next) || next < 1)) {
-      onNotify('Days remaining is a whole number of days, 1 or more', 'error');
-      setDaysRemaining(quiz.daysRemaining == null ? '' : String(quiz.daysRemaining));
-      return;
-    }
-    if (next === (quiz.daysRemaining ?? null)) return;
-
-    await run(
-      () => quizApi.updateQuiz(quiz.id, { daysRemaining: next }),
-      next === null ? 'No deadline on this quiz' : `Learners get ${next} days once assigned`,
-      'Failed to update the deadline',
-    );
-  };
 
   const saveTimeLimit = async () => {
     const trimmed = timeLimit.trim();
@@ -301,6 +318,51 @@ const QuizEditor = ({
     };
   };
 
+  /**
+   * Opens one question in the right-hand pane, claiming it as we go.
+   *
+   * The claim is the caller's to make — it knows the course the quiz belongs to
+   * and this does not — so this only reports the move.
+   */
+  const openQuestion = (question: QuizQuestion) => {
+    if (lockedQuestions[question.id]) return;
+    setPane(question.id);
+    startEditing(question);
+    claim('QUESTION', question.id);
+  };
+
+  /** Leaves whatever question was open, giving up its claim. */
+  const leaveQuestion = (next: Pane) => {
+    setPane(next);
+    setEditingId(null);
+    claim('QUESTION', null);
+  };
+
+  /**
+   * Drops the dragged question in front of the one it was released on.
+   *
+   * The whole order is sent rather than a "move this there" instruction: the
+   * server refuses a list that is not exactly this quiz's questions, which turns
+   * a stale tab into a refusal instead of a silently scrambled quiz.
+   */
+  const dropOn = async (targetId: string) => {
+    const from = dragId;
+    setDragId(null);
+    if (!from || from === targetId) return;
+
+    const ids = quiz.questions.map((question) => question.id);
+    const without = ids.filter((id) => id !== from);
+    const at = without.indexOf(targetId);
+    if (at < 0) return;
+
+    await run(
+      () =>
+        quizApi.reorderQuestions(quiz.id, [...without.slice(0, at), from, ...without.slice(at)]),
+      'Questions reordered',
+      'Failed to reorder the questions',
+    );
+  };
+
   const startEditing = (question: QuizQuestion) => {
     setEditingId(question.id);
     setEditDraft(toDraft(question));
@@ -356,47 +418,70 @@ const QuizEditor = ({
     }
   };
 
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Quiz settings */}
-      <div className="flex flex-col gap-3">
-        {showTitle && (
-          <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
-            <span className="flex items-center justify-between gap-3">
-              Quiz title
-              <span className="flex items-center gap-1">
-                <span className="text-xs font-normal">
-                  {saveStatus(titleState, title.trim() !== quiz.title)}
-                </span>
-                <Button
-                  onClick={saveTitleNow}
-                  disabled={titleState === 'saving'}
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 hover:text-green-hover"
-                  title="Save the title now"
-                >
-                  <CheckIcon className="w-4 h-4" />
-                </Button>
-              </span>
-            </span>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-        )}
-
-        {/* What kind of quiz this is. Everything below reads off it, so it sits
-            first: changing it is what turns other controls on and off. */}
+  /**
+   * Everything true of the quiz as a whole. The first thing the sidebar offers
+   * and what the editor opens on.
+   */
+  const settingsPane = (
+    <div className="flex flex-col gap-3">
+      {showTitle && (
         <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
-          Quiz type
+          <span className="flex items-center justify-between gap-3">
+            Quiz title
+            <span className="flex items-center gap-1">
+              <span className="text-xs font-normal">
+                {saveStatus(titleState, title.trim() !== quiz.title)}
+              </span>
+              <Button
+                onClick={saveTitleNow}
+                disabled={titleState === 'saving'}
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 hover:text-green-hover"
+                title="Save the title now"
+              >
+                <CheckIcon className="w-4 h-4" />
+              </Button>
+            </span>
+          </span>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+        </label>
+      )}
+
+      {/* What kind of quiz this is. Everything below reads off it, so it sits
+            first: changing it is what turns other controls on and off.
+
+            Fixed once the quiz has been published. Its kind decides how a
+            learner can be given it, and there is no edit that undoes having
+            given it the old way — an exam shared with somebody who has an
+            account sits on their Quizzes tab, and relabelling it a one-time link
+            afterwards leaves it sitting there. */}
+      <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
+        Quiz type
+        {/*
+            Only the picker goes under the sheet, and only as wide as it is.
+
+            The label and the hints below it are still worth reading on a locked
+            quiz — more so, in fact, since they say what kind it settled on. It
+            is the choice that is closed, not the explanation of it. The wrapper
+            is bounded to the dropdown's width rather than left to fill the pane
+            and grey out the empty space beside it.
+
+            No caption on the sheet either. It would have to be short enough to
+            fit a 14rem control and would still be a worse explanation than the
+            paragraph directly underneath, which has room to give the reason. The
+            padlock says "locked"; the prose says why.
+          */}
+        {/* The width is set on the wrapper and the control fills it, so the
+            sheet and the dropdown are the same box by construction rather than
+            by two numbers that have to be kept equal. */}
+        <LockOverlay locked={quiz.typeLocked === true} className="w-56 max-w-full">
           <select
             value={quiz.type}
             onChange={(e) => changeType(e.target.value as QuizType)}
-            className="h-9 max-w-56 rounded-md border border-gray-300 bg-white px-2 text-sm
-              text-dark-gray"
+            disabled={quiz.typeLocked === true}
+            className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-sm
+              text-dark-gray disabled:cursor-not-allowed disabled:bg-gray-100"
           >
             {availableTypes.map((type) => (
               <option
@@ -408,269 +493,396 @@ const QuizEditor = ({
               </option>
             ))}
           </select>
-          <span className="max-w-prose text-xs font-normal text-dark-gray">
-            {QUIZ_TYPE_HINTS[quiz.type]}
-          </span>
-          {/* A greyed option explains itself here rather than in the list: a
+        </LockOverlay>
+        <span className="max-w-prose text-xs font-normal text-dark-gray">
+          {QUIZ_TYPE_HINTS[quiz.type]}
+        </span>
+        {/* A greyed option explains itself here rather than in the list: a
               disabled <option> shows no tooltip, so the reason would otherwise
               be nowhere an author could read it. */}
-          {availableTypes
-            .filter((type) => type !== quiz.type && reasonUnavailable(type) !== undefined)
-            .map((type) => (
-              <span key={type} className="max-w-prose text-xs font-normal text-dark-gray">
-                {QUIZ_TYPE_LABELS[type]} is unavailable: {reasonUnavailable(type)}
-              </span>
-            ))}
-        </label>
+        {availableTypes
+          .filter((type) => type !== quiz.type && reasonUnavailable(type) !== undefined)
+          .map((type) => (
+            <span key={type} className="max-w-prose text-xs font-normal text-dark-gray">
+              {QUIZ_TYPE_LABELS[type]} is unavailable: {reasonUnavailable(type)}
+            </span>
+          ))}
+      </label>
 
-        {/* No publish control here on purpose — see the note at the top of the file. */}
-
-        <div className="flex flex-wrap items-start gap-6">
-          {/* Whether they are told how they did at all. Off sends them straight on
-              to the next element without a score. */}
-          <ToggleSwitch
-            checked={quiz.showResults}
-            onChange={(v) =>
-              run(
-                () => quizApi.updateQuiz(quiz.id, { showResults: v }),
-                v
-                  ? 'Learners will see their score after submitting'
-                  : 'Learners go straight on without seeing a score',
-                'Failed to change result visibility',
-              )
-            }
-            label="Show results"
-            hint="The score ring after submitting"
-          />
-
-          <ToggleSwitch
-            checked={quiz.showAnswers}
-            onChange={(v) =>
-              run(
-                () => quizApi.updateQuiz(quiz.id, { showAnswers: v }),
-                v
-                  ? 'Correct answers will be shown after an attempt'
-                  : 'Correct answers are now hidden',
-                'Failed to change answer visibility',
-              )
-            }
-            label="Show correct answers"
-            hint="After the learner submits"
-          />
-
-          {/* Only an exam has sittings to count. A learning check keeps no mark,
-              so having another go at one costs nothing and is always offered; a
-              one-time link is defined by never offering it. */}
-          {quiz.type === 'EXAM' && (
-            <ToggleSwitch
-              checked={quiz.allowMultipleAttempts === true}
-              onChange={(v) =>
-                run(
-                  () => quizApi.updateQuiz(quiz.id, { allowMultipleAttempts: v }),
-                  v ? 'Learners can retake this exam' : 'Learners get one attempt at this exam',
-                  'Failed to change how many attempts are allowed',
-                )
-              }
-              label="Allow multiple attempts"
-              hint="Adds Try again to the result screen, and when they come back to it"
-            />
-          )}
-
-          {/* A learning check is never chased, so it has no deadline to set.
-              The deadline itself is a length rather than a date: the same quiz
-              goes out to different people at different times, and one fixed date
-              would give the last of them a week and the first a month. */}
-          <label
-            className={`flex flex-col gap-1 text-sm font-medium ${
-              can.canHaveDueDate ? 'text-dark-gray' : 'text-dark-gray/40'
-            }`}
-          >
-            Days remaining
-            <Input
-              type="number"
-              min={1}
-              disabled={!can.canHaveDueDate}
-              value={can.canHaveDueDate ? daysRemaining : ''}
-              onChange={(e) => setDaysRemaining(e.target.value)}
-              onBlur={saveDaysRemaining}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-              placeholder={can.canHaveDueDate ? 'No deadline' : 'Never due'}
-              title={
-                can.canHaveDueDate
-                  ? 'How long a learner gets once this quiz is assigned to them.'
-                  : 'A learning check is not marked, so it has no deadline'
-              }
-              className={`${inputClass} max-w-32 disabled:cursor-not-allowed disabled:bg-gray-100`}
-            />
-            {can.canHaveDueDate && (
-              <span className="max-w-56 text-xs font-normal text-dark-gray">
-                Days from being assigned.
-                {dueIfAssignedToday(daysRemaining) &&
-                  ` Assigned today, due ${dueIfAssignedToday(daysRemaining)}.`}
-              </span>
-            )}
-          </label>
-
-          {/* Saves on blur rather than per keystroke: half-typed "3" on the way to
-              "30" is a valid time limit, and would otherwise be saved as one. */}
-          <label
-            className={`flex flex-col gap-1 text-sm font-medium ${
-              can.canBeTimed ? 'text-dark-gray' : 'text-dark-gray/40'
-            }`}
-          >
-            Time limit (mins)
-            <Input
-              type="number"
-              min={1}
-              disabled={!can.canBeTimed}
-              value={can.canBeTimed ? timeLimit : ''}
-              onChange={(e) => setTimeLimit(e.target.value)}
-              onBlur={saveTimeLimit}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-              placeholder={can.canBeTimed ? 'No limit' : 'Never timed'}
-              title={
-                can.canBeTimed
-                  ? 'Minutes the learner gets once they start. Leave blank for untimed.'
-                  : 'A learning check is never timed'
-              }
-              className={`${inputClass} max-w-28 disabled:cursor-not-allowed disabled:bg-gray-100`}
-            />
-          </label>
-
-          <Button
-            onClick={onDeleteQuiz}
-            variant="ghost"
-            size="icon"
-            className="ml-auto hover:text-danger-hover"
-            title="Delete quiz"
-          >
-            <TrashIcon className="w-5 h-5" />
-          </Button>
-        </div>
-
-        {/* Where it lives, which the kind decides. Stated rather than hidden: an
-            author changing the type needs to see what that did to the placement. */}
-        <p className="text-xs text-dark-gray">
-          {quiz.type === 'ONE_TIME'
-            ? 'Reached only through the link you send. It never appears on the Quizzes tab, even ' +
-              'for somebody signed in with the address it went to.'
-            : quiz.sectionId
-              ? 'Sits inside a section, in the content order you dropped it at.'
-              : 'Stands on its own — reached from the Quizzes tab or through a shared link.'}
+      {quiz.typeLocked && (
+        <p className="max-w-prose text-xs text-dark-gray">
+          This quiz has been published, it cannot be changed.
         </p>
+      )}
+
+      {/* No publish control here on purpose — see the note at the top of the file. */}
+
+      {/*
+        The switches, in alphabetical order.
+
+        There is no meaningful precedence between them — they are four unrelated
+        yes/no questions about the same quiz — so any order is arbitrary and an
+        arbitrary order that an author can predict beats one they have to search.
+        Stacked rather than laid across the pane so the list stays scannable when
+        one of them is hidden.
+      */}
+      <div className="flex flex-col items-start gap-3">
+        {/* Only an exam has sittings to count. A learning check keeps no mark,
+            so having another go at one costs nothing and is always offered; a
+            one-time link is defined by never offering it. */}
+        {quiz.type === 'EXAM' && (
+          <ToggleSwitch
+            checked={quiz.allowMultipleAttempts === true}
+            onChange={(v) =>
+              run(
+                () => quizApi.updateQuiz(quiz.id, { allowMultipleAttempts: v }),
+                v ? 'Learners can retake this exam' : 'Learners get one attempt at this exam',
+                'Failed to change how many attempts are allowed',
+              )
+            }
+            label="Allow multiple attempts"
+            hint="Adds Try again to the result screen, and when they come back to it"
+          />
+        )}
+
+        {/* What the deadline actually does, which is the author's to decide —
+            see the same switch on a lesson's landing page. */}
+        {onSaveLockAfterDue && (
+          <ToggleSwitch
+            checked={lockAfterDue !== false}
+            onChange={(v) =>
+              run(
+                () => onSaveLockAfterDue(v),
+                v ? 'Locked once the due date passes' : 'Learners can carry on past the due date',
+                'Failed to change what the deadline does',
+              )
+            }
+            label="Lock after the due date"
+            hint="Off, and it is still marked overdue but can still be taken"
+          />
+        )}
+
+        <ToggleSwitch
+          checked={quiz.showAnswers}
+          onChange={(v) =>
+            run(
+              () => quizApi.updateQuiz(quiz.id, { showAnswers: v }),
+              v
+                ? 'Correct answers will be shown after an attempt'
+                : 'Correct answers are now hidden',
+              'Failed to change answer visibility',
+            )
+          }
+          label="Show correct answers"
+          hint="After the learner submits"
+        />
+
+        {/* Whether they are told how they did at all. Off sends them straight on
+            to the next element without a score. */}
+        <ToggleSwitch
+          checked={quiz.showResults}
+          onChange={(v) =>
+            run(
+              () => quizApi.updateQuiz(quiz.id, { showResults: v }),
+              v
+                ? 'Learners will see their score after submitting'
+                : 'Learners go straight on without seeing a score',
+              'Failed to change result visibility',
+            )
+          }
+          label="Show results"
+          hint="The score ring after submitting"
+        />
       </div>
 
-      <hr className="h-px border-t-0 bg-gray-300" />
+      {/*
+        No deadline field anywhere here.
 
-      {/* Questions */}
-      {quiz.questions.map((question) => {
-        const isEditing = editingId === question.id;
-        // Only the row being edited can have moved on from what is stored; every
-        // other one is, by definition, exactly what came back from the server.
-        const dirty = isEditing && JSON.stringify(editDraft) !== JSON.stringify(toDraft(question));
+        A quiz's deadline is never its own. One inside a course falls due with
+        the course around it — one piece of work, one date — and a quiz set is a
+        course, so its deadline is set where every other course's is: on the
+        landing page, in days. Offering a second number here could only disagree
+        with that one.
+      */}
 
-        return (
-          <div key={question.id} className="rounded-lg border border-gray-300 bg-white p-4">
-            <div className="flex items-start justify-between gap-4">
-              <p className="min-w-0 break-words font-semibold text-dark-gray">
-                {question.order}.{!isEditing && ` ${question.prompt}`}
-                {isEditing && ' Editing question'}
-              </p>
-              <div className="flex shrink-0 items-center gap-1">
-                {/* A question in the list is a stored question, and saying
-                    nothing about it read as the opposite — see saveStatus. */}
-                <span className="text-xs text-dark-gray">
-                  {isEditing ? saveStatus(editState, dirty) : 'Saved'}
-                </span>
-                {isEditing && (
-                  <Button
-                    onClick={saveEditNow}
-                    disabled={editState === 'saving'}
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 hover:text-green-hover"
-                    title="Save this question now"
-                  >
-                    <CheckIcon className="w-4 h-4" />
-                  </Button>
-                )}
-                <Button
-                  onClick={() => (isEditing ? setEditingId(null) : startEditing(question))}
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 hover:text-green-hover"
-                  title={isEditing ? 'Cancel editing' : 'Edit question'}
-                >
-                  <PencilIcon className="w-4 h-4" />
-                </Button>
-                <Button
-                  onClick={() => setPendingQuestion({ id: question.id, label: question.prompt })}
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 hover:text-danger-hover"
-                  title="Delete question"
-                >
-                  <TrashIcon className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
+      {/*
+        The two minutes fields, side by side and below the switches.
 
-            {isEditing ? (
-              <div className="mt-3">
-                <QuestionFields
-                  draft={editDraft}
-                  radioName={`edit-${question.id}`}
-                  onChange={(patch) => setEditDraft((prev) => ({ ...prev, ...patch }))}
-                  onTooFewOptions={() => onNotify('A question needs at least 2 options', 'error')}
-                  actions={
-                    <>
-                      <Button onClick={saveQuestion} className={primaryBtn}>
-                        Save Changes
-                      </Button>
-                      <Button
-                        onClick={() => setEditingId(null)}
-                        variant="outline"
-                        className="bg-white text-dark-gray hover:bg-light-gray"
-                      >
-                        Cancel
-                      </Button>
-                    </>
-                  }
-                />
-              </div>
-            ) : (
-              <ul className="mt-2 flex flex-col gap-1">
-                {question.options.map((option) => (
-                  <li
-                    key={option.id}
-                    className={`text-sm ${
-                      option.isCorrect ? 'font-semibold text-green' : 'text-dark-gray'
-                    }`}
-                  >
-                    {option.text}
-                    {option.isCorrect && ' ✓'}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })}
+        They are the pair most easily confused — this is the estimate that feeds
+        the card totals, that is the clock the learner races — and reading them
+        against each other is the fastest way to keep them apart. Naming them
+        differently was not enough while they sat in different rows.
+      */}
+      <div className="flex flex-wrap items-start gap-6">
+        {/* Saves on blur rather than per keystroke: half-typed "3" on the way to
+            "30" is a valid time limit, and would otherwise be saved as one. */}
+        <label
+          className={`flex flex-col gap-1 text-sm font-medium ${
+            can.canBeTimed ? 'text-dark-gray' : 'text-dark-gray/40'
+          }`}
+        >
+          Time limit (mins)
+          <Input
+            type="number"
+            min={1}
+            disabled={!can.canBeTimed}
+            value={can.canBeTimed ? timeLimit : ''}
+            onChange={(e) => setTimeLimit(e.target.value)}
+            onBlur={saveTimeLimit}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            placeholder={can.canBeTimed ? 'No limit' : 'Never timed'}
+            title={
+              can.canBeTimed
+                ? 'Minutes the learner gets once they start. Leave blank for untimed.'
+                : 'A learning check is never timed'
+            }
+            className={`${inputClass} max-w-28 disabled:cursor-not-allowed disabled:bg-gray-100`}
+          />
+        </label>
 
-      {/* New question */}
-      <div className="rounded-lg border-2 border-dashed border-navy/30 p-4">
-        <h4 className="mb-3 font-semibold text-dark-gray">New Question</h4>
+        {onSaveEstimatedMinutes && (
+          <label
+            className="flex flex-col gap-1 text-sm font-medium text-dark-gray"
+            title="Roughly how long this takes, for the totals. The countdown is Time limit."
+          >
+            Estimated time (mins)
+            <Input
+              type="number"
+              min={0}
+              defaultValue={String(estimatedMinutes ?? 0)}
+              onBlur={(e) =>
+                run(
+                  () => onSaveEstimatedMinutes(Number(e.target.value) || 0),
+                  'Estimate updated',
+                  'Failed to update the estimate',
+                )
+              }
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              className={`${inputClass} max-w-28`}
+            />
+          </label>
+        )}
+      </div>
+
+      {/*
+        No delete button here.
+
+        Deleting the quiz is not a setting, and it sat one careless click from
+        the fields around it. It belongs with the other destructive actions in
+        the shell that owns the quiz, which is also the only place that knows
+        what deleting it takes with it.
+      */}
+
+      {/* Where it lives, which the kind decides. Stated rather than hidden: an
+            author changing the type needs to see what that did to the placement. */}
+      <p className="text-xs text-dark-gray">
+        {quiz.type === 'ONE_TIME'
+          ? 'Reached only through the link you send. It never appears on the Quizzes tab, even ' +
+            'for somebody signed in with the address it went to.'
+          : quiz.sectionId
+            ? 'Sits inside a section, in the content order you dropped it at.'
+            : 'Stands on its own — reached from the Quizzes tab or through a shared link.'}
+      </p>
+    </div>
+  );
+
+  /** The form for whichever question is open, filling the right-hand pane. */
+  const questionPane = (question: QuizQuestion) => {
+    const dirty = JSON.stringify(editDraft) !== JSON.stringify(toDraft(question));
+
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h4 className="min-w-0 break-words font-semibold text-dark-gray">
+            Question {question.order}
+          </h4>
+          <span className="flex shrink-0 items-center gap-1">
+            <span className="text-xs text-dark-gray">{saveStatus(editState, dirty)}</span>
+            <Button
+              onClick={saveEditNow}
+              disabled={editState === 'saving'}
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:text-green-hover"
+              title="Save this question now"
+            >
+              <CheckIcon className="w-4 h-4" />
+            </Button>
+          </span>
+        </div>
+
         <QuestionFields
-          draft={draft}
-          radioName={`new-${quiz.id}`}
-          onChange={(patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+          draft={editDraft}
+          radioName={`edit-${question.id}`}
+          onChange={(patch) => setEditDraft((prev) => ({ ...prev, ...patch }))}
           onTooFewOptions={() => onNotify('A question needs at least 2 options', 'error')}
           actions={
-            <Button onClick={addQuestion} className={primaryBtn}>
-              Save Question
-            </Button>
+            <>
+              <Button onClick={saveQuestion} className={primaryBtn}>
+                Save Changes
+              </Button>
+              <Button
+                onClick={() => leaveQuestion('settings')}
+                variant="outline"
+                className="bg-white text-dark-gray hover:bg-light-gray"
+              >
+                Done
+              </Button>
+            </>
           }
         />
+      </div>
+    );
+  };
+
+  /** A blank question, which is always the second row in the sidebar. */
+  const newQuestionPane = (
+    <div className="flex flex-col gap-3">
+      <h4 className="font-semibold text-dark-gray">New question</h4>
+      <QuestionFields
+        draft={draft}
+        radioName={`new-${quiz.id}`}
+        onChange={(patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+        onTooFewOptions={() => onNotify('A question needs at least 2 options', 'error')}
+        actions={
+          <Button onClick={addQuestion} className={primaryBtn}>
+            Save Question
+          </Button>
+        }
+      />
+    </div>
+  );
+
+  /** One of the two fixed rows at the top of the sidebar. */
+  const fixedRow = (key: Pane, label: string, hint: string) => (
+    <button
+      onClick={() => leaveQuestion(key)}
+      className={`flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left ${
+        pane === key ? 'bg-navy text-white' : 'text-dark-gray hover:bg-white'
+      }`}
+    >
+      <span className="text-sm font-semibold">{label}</span>
+      <span className={`text-xs ${pane === key ? 'text-white/80' : 'text-dark-gray'}`}>{hint}</span>
+    </button>
+  );
+
+  const openQuestionRow = quiz.questions.find((question) => question.id === pane) ?? null;
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+      {/*
+        The list of what this quiz is made of, and the only way between the
+        pieces. Settings first, a new question second, then the questions
+        themselves in the order a learner meets them — which is also the order
+        they can be dragged into.
+      */}
+      <aside
+        className="flex h-fit flex-col gap-1 rounded-lg border border-gray-300 bg-light-gray p-2"
+      >
+        {fixedRow('settings', 'Settings', 'Title, type, timing')}
+        {fixedRow('new', 'New question', 'Add one to the end')}
+
+        <hr className="my-1 h-px border-t-0 bg-gray-300" />
+
+        {quiz.questions.length === 0 ? (
+          <p className="px-3 py-4 text-center text-xs text-dark-gray">No questions yet.</p>
+        ) : (
+          quiz.questions.map((question) => {
+            const lockedBy = lockedQuestions[question.id];
+            const isOpen = pane === question.id;
+
+            return (
+              <div
+                key={question.id}
+                draggable={!lockedBy}
+                onDragStart={() => setDragId(question.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => dropOn(question.id)}
+                onDragEnd={() => setDragId(null)}
+                className={`flex items-center gap-1 rounded-md px-1 ${
+                  isOpen ? 'bg-navy text-white' : 'text-dark-gray hover:bg-white'
+                }
+                  ${dragId === question.id ? 'opacity-50' : ''}`}
+              >
+                <Bars3Icon
+                  className={`w-4 h-4 shrink-0 ${lockedBy ? 'opacity-30' : 'cursor-grab'}`}
+                  aria-hidden="true"
+                />
+
+                {/*
+                  The prompt is the question's name here; there is nothing
+                  shorter that identifies it. The "last edited by" tag goes
+                  underneath rather than beside it, because a name long enough to
+                  fill the row used to push the buttons on the right past the
+                  edge of the sidebar and put delete out of reach.
+                */}
+                <button
+                  onClick={() => openQuestion(question)}
+                  disabled={Boolean(lockedBy)}
+                  title={lockedBy ? `${lockedBy} is editing this` : question.prompt}
+                  className="flex min-h-14 min-w-0 flex-1 flex-col items-start justify-center gap-1
+                    py-2 text-left text-sm disabled:cursor-not-allowed"
+                >
+                  <span className="w-full truncate">
+                    {question.order}. {question.prompt || 'Untitled question'}
+                  </span>
+                  <EditedTag mark={marks.questions[question.id]} />
+                </button>
+
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <span className={`text-[10px] ${isOpen ? 'text-white/80' : 'text-dark-gray'}`}>
+                    {isOpen ? saveStatus(editState, false) : 'Saved'}
+                  </span>
+                  {/*
+                    Red while somebody else has it open, which is the one state
+                    where clicking would lose work rather than merely be
+                    inconvenient. It is the pencil that turns, not the row: the
+                    row still has to be readable.
+                  */}
+                  <Button
+                    onClick={() => openQuestion(question)}
+                    disabled={Boolean(lockedBy)}
+                    variant="ghost"
+                    size="icon"
+                    className={`h-7 w-7 ${
+                      lockedBy
+                        ? 'text-danger disabled:opacity-100'
+                        : isOpen
+                          ? 'text-white hover:text-white'
+                          : 'hover:text-green-hover'
+                      }`}
+                    title={lockedBy ? `${lockedBy} is editing this` : 'Edit question'}
+                  >
+                    <PencilIcon className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    onClick={() => setPendingQuestion({ id: question.id, label: question.prompt })}
+                    disabled={Boolean(lockedBy)}
+                    variant="ghost"
+                    size="icon"
+                    className={`h-7 w-7 ${
+                      isOpen ? 'text-white hover:text-white' : 'hover:text-danger-hover'
+                    }`}
+                    title={lockedBy ? `${lockedBy} is editing this` : 'Delete question'}
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </Button>
+                </span>
+              </div>
+            );
+          })
+        )}
+      </aside>
+
+      <div className="min-w-0 rounded-lg border border-gray-300 bg-white p-4">
+        {pane === 'settings'
+          ? settingsPane
+          : pane === 'new'
+            ? newQuestionPane
+            : openQuestionRow
+              ? questionPane(openQuestionRow)
+              : /* The open question was deleted or reordered away underneath us. */
+                settingsPane}
       </div>
 
       <ConfirmDialog
