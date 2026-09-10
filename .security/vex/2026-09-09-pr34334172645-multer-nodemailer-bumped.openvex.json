@@ -11,10 +11,10 @@
     "invocation_id": "34334172645"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-09-10T21:00:01Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -22,7 +22,11 @@
         "name": "CVE-2026-77037",
         "description": "multer vulnerable to Denial of Service via file descriptor leak on aborted uploads"
       },
-      "products": [{ "@id": "pkg:npm/multer@2.2.0" }],
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.3.0",
       "action_reference": "run=34334172645",
@@ -40,7 +44,11 @@
         "name": "CVE-2026-77078",
         "description": "multer vulnerable to Denial of Service via crafted multipart field names"
       },
-      "products": [{ "@id": "pkg:npm/multer@2.2.0" }],
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.3.0",
       "action_reference": "run=34334172645",
@@ -58,7 +66,11 @@
         "name": "CVE-2026-82333",
         "description": "multer vulnerable to Denial of Service via oversized array index in field names"
       },
-      "products": [{ "@id": "pkg:npm/multer@2.2.0" }],
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.3.0",
       "action_reference": "run=34334172645",
@@ -76,7 +88,11 @@
         "name": "GHSA-2x7j-588g-ccc2",
         "description": "Nodemailer: Quadratic (O(n^2)) time complexity in addressparser allows remote DoS via a crafted address list"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@9.0.5" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "9.1.1",
       "action_reference": "run=34334172645",
@@ -94,7 +110,11 @@
         "name": "GHSA-8m3c-c648-2xjj",
         "description": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@9.0.5" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "9.1.1",
       "action_reference": "run=34334172645",
@@ -112,7 +132,11 @@
         "name": "GHSA-cc9r-2j5m-2m83",
         "description": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@9.0.5" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "9.1.1",
       "action_reference": "run=34334172645",
@@ -130,7 +154,11 @@
         "name": "GHSA-wmmp-3585-3rmp",
         "description": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to attacker-controlled domain"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@9.0.5" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "9.1.1",
       "action_reference": "run=34334172645",
