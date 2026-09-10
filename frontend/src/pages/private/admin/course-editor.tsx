@@ -42,7 +42,7 @@ import {
 } from '@/pages/private/admin/editor/panes';
 import { CourseLanding, CoursePlayer } from '@/pages/private/learning/learner-previews';
 import { Course, curriculumApi, PublicationState } from '@/services/curriculum-api';
-import { Quiz, quizApi, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
+import { Quiz, QUIZ_TYPE_LABELS,quizApi } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 import { logger } from '@/utils/logger';
 
