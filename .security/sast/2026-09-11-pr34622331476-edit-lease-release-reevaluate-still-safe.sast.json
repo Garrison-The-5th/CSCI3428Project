@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-09-11-pr34622331476-edit-lease-release-reevaluate-still-safe.sast.json",
+  "version": 1,
+  "timestamp": "2026-09-11T16:35:24.036Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "34622331476"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 532,
+          "end_line": 532,
+          "commit_sha": "40a1191f53a1c8468e486cb47672a4b987258227"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "REEVALUATE (touched): merged commit 2f05d38 touched curriculum-controller.ts. Re-verified — the code path is unchanged in substance: `res.send(result)` on line 532 still receives the return of EditLeaseService.release/releaseAll (edit-lease-service.ts:82-91): `{released: boolean}` (from `count > 0`) or `{released: number}` (a Prisma updateMany count). Neither payload contains user-supplied strings, and res.send auto-detects the object argument and serialises as JSON with Content-Type application/json — a browser cannot render it as HTML. Two independent defences still hold; original not_affected disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2026-12-10",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
