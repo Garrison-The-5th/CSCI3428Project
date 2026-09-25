@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-09-10-pr34531001125-edit-lease-release-json-response.sast.json",
+  "version": 1,
+  "timestamp": "2026-09-10T21:18:09.367Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "34531001125"
+  },
+  "review": {
+    "reviewer": "jacob.matthews@ttgteams.com",
+    "reviewed_at": "2026-09-11T16:29:57Z",
+    "decision": "approved",
+    "notes": "<!--"
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 531,
+          "end_line": 531,
+          "commit_sha": "ddf6d2baf00d859b47106c9d3213b95e407f7fa3"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Rule fires on `res.send(result)` in the DELETE /courses/:id/edit-leases handler (curriculum-controller.ts:531). The `result` argument is the return of EditLeaseService.release/releaseAll (edit-lease-service.ts:82-90): `{ released: boolean }` or `{ released: number }` derived from a Prisma updateMany count — no user-supplied strings ever land in the response body. Express's `res.send` also type-detects the non-string argument and serialises as JSON with Content-Type application/json, so a browser would not render it as HTML even if attacker-controlled content were somehow reflected. Both conditions independently defeat the XSS pattern the rule targets.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2026-12-09",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}

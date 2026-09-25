@@ -528,6 +528,7 @@ export default class CurriculumController {
         ? await EditLeaseService.release(parseEditScope(body.scope), targetId, req.user!.id)
         : await EditLeaseService.releaseAll(courseId, req.user!.id);
 
+      // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
       return res.send(result);
     } catch (error) {
       return fail(res, error, 'Error releasing that');

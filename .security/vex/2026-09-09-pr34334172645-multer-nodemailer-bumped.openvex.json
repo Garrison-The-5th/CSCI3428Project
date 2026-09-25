@@ -1,0 +1,175 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-09-09-pr34334172645-multer-nodemailer-bumped.openvex.json",
+  "version": 1,
+  "timestamp": "2026-09-09T09:35:54.037Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "34334172645"
+  },
+  "review": {
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-09-10T21:00:01Z",
+    "decision": "approved",
+    "notes": "<!--"
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-77037",
+        "description": "multer vulnerable to Denial of Service via file descriptor leak on aborted uploads"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "2.3.0",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped multer ^2.0.2 -> ^2.3.0 in backend/package.json; lockfile resolves to 2.3.0. Advisory fixes the file-descriptor leak on aborted uploads via upstream commit eef7444. Backend lint + typecheck + tests (445) + build all green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-77037",
+        "https://github.com/expressjs/multer/commit/eef74440b491ef0f976f3d25895e8089ae495df0"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-77078",
+        "description": "multer vulnerable to Denial of Service via crafted multipart field names"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "2.3.0",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped multer ^2.0.2 -> ^2.3.0 in backend/package.json; lockfile resolves to 2.3.0. Fix covers crafted multipart field-name DoS via upstream commit 87a584e. Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-77078",
+        "https://github.com/expressjs/multer/commit/87a584e8c8d4da873292635fa1d8c4d78d985b76"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-82333",
+        "description": "multer vulnerable to Denial of Service via oversized array index in field names"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.2.0"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "2.3.0",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped multer ^2.0.2 -> ^2.3.0 in backend/package.json; lockfile resolves to 2.3.0. Fix covers oversized-array-index DoS via upstream commit 73c1759. Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-82333",
+        "https://github.com/expressjs/multer/commit/73c1759fa93b87366bc6dbd7abe1b80ddff7d27c"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-2x7j-588g-ccc2",
+        "description": "Nodemailer: Quadratic (O(n^2)) time complexity in addressparser allows remote DoS via a crafted address list"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "9.1.1",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped nodemailer ^9.0.5 -> ^9.1.1 in backend/package.json; lockfile resolves to 9.1.1, which is at or past the 9.1.0 fix. Addressparser DoS closed by upstream commits 34da642/7cc38af. Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-2x7j-588g-ccc2",
+        "https://github.com/nodemailer/nodemailer/commit/34da64282dcdc9b0581c721a27ab2fa226673150"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-8m3c-c648-2xjj",
+        "description": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "9.1.1",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped nodemailer ^9.0.5 -> ^9.1.1 in backend/package.json; lockfile resolves to 9.1.1, containing the 9.1.1 fix. Legacy resolveContent() bypass closed by upstream commits ab7ef34/dc48ed3. Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-8m3c-c648-2xjj",
+        "https://github.com/nodemailer/nodemailer/commit/ab7ef348b9a97b1fd70e7bfbeb56d4ea4a07946b"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-cc9r-2j5m-2m83",
+        "description": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "9.1.1",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped nodemailer ^9.0.5 -> ^9.1.1 in backend/package.json; lockfile resolves to 9.1.1, past the 9.1.0 fix. RFC 5322 comment mis-parsing closed by upstream commit 902b63e (PR #1848). Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-cc9r-2j5m-2m83",
+        "https://github.com/nodemailer/nodemailer/pull/1848"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-wmmp-3585-3rmp",
+        "description": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to attacker-controlled domain"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@9.0.5"
+        }
+      ],
+      "status": "fixed",
+      "fixed_in_version": "9.1.1",
+      "action_reference": "run=34334172645",
+      "impact_statement": "Bumped nodemailer ^9.0.5 -> ^9.1.1 in backend/package.json; lockfile resolves to 9.1.1, past the 9.1.0 fix. IDN/Punycode allow-list bypass closed by upstream commits 259c32d/b212ac4. Backend gates green after the bump.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-wmmp-3585-3rmp",
+        "https://github.com/nodemailer/nodemailer/commit/259c32d7d266301e3377a212776c3fff993c0148"
+      ]
+    }
+  ]
+}
