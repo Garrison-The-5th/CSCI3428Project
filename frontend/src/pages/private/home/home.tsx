@@ -3,7 +3,7 @@
  * Description: The learner's dashboard.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Home - the learner's dashboard.
@@ -11,7 +11,12 @@
  * Left  : outstanding courses with a progress ring each, then outstanding quizzes.
  * Right : upcoming due dates, soonest first, with the time still needed.
  */
-import { ClockIcon, ExclamationTriangleIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import {
+  ClockIcon,
+  ExclamationTriangleIcon,
+  QuestionMarkCircleIcon,
+  SparklesIcon,
+} from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -173,9 +178,9 @@ const HomePage = () => {
               <CardTitle className="text-lg text-dark-gray">Outstanding learning</CardTitle>
             </CardHeader>
             <CardContent>
-              {outstandingCourses.length === 0 ? (
+              {outstandingCourses.length === 0 && outstandingQuizzes.length === 0 ? (
                 <p className="py-8 text-center text-dark-gray">
-                  Nothing outstanding — every course you have started is finished.
+                  Nothing outstanding — everything you have been given is finished.
                 </p>
               ) : (
                 /**
@@ -230,46 +235,70 @@ const HomePage = () => {
                       </Link>
                     </li>
                   ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Outstanding quizzes */}
-          <Card className="bg-light-gray shadow-sm">
-            <CardHeader className="p-4">
-              <CardTitle className="text-lg text-dark-gray">Outstanding quizzes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {outstandingQuizzes.length === 0 ? (
-                <p className="py-8 text-center text-dark-gray">No quizzes waiting for you.</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {outstandingQuizzes.map((quiz) => (
-                    <li key={quiz.quizId}>
-                      <Link
-                        to="/quizzes"
-                        className="flex items-center justify-between gap-3 rounded-lg border
-                          border-gray-300 bg-white px-4 py-3"
+                  {/*
+                    Quizzes in the same rail as the courses.
+
+                    They had a box of their own underneath, which split "what do
+                    I still have to do" into two answers and made the shorter of
+                    the two easy to scroll past. They are the same question, so
+                    they are one list — and a quiz handed over on its own is a
+                    piece of outstanding learning by any reading.
+
+                    Same width as a course card, and a ring's worth of space
+                    given over to the question count rather than to a percentage.
+                    A quiz has no part-way through to report: it is one sitting,
+                    so the honest figure is how big it is, not how far in.
+                  */}
+                  {outstandingQuizzes.map((quiz) => {
+                    const due = quiz.dueDate ? dueLabel(quiz.dueDate) : null;
+
+                    return (
+                      <li
+                        key={quiz.quizId}
+                        className="shrink-0 snap-start"
+                        style={{ width: DONUT_SIZE }}
                       >
-                        <span className="min-w-0">
-                          <span className="block font-semibold text-dark-gray">{quiz.title}</span>
-                          {quiz.dueDate && (
-                            <span
-                              className={`block text-sm font-medium ${
-                                dueLabel(quiz.dueDate).overdue ? 'text-danger' : 'text-dark-gray'
-                              }`}
-                            >
-                              {dueLabel(quiz.dueDate).text}
+                        {/* Straight at the quiz rather than at the Quizzes grid.
+                            Everything listed here is a quiz handed over on its
+                            own, which is exactly what the standalone page is
+                            for, and sending them to the grid made them find
+                            again the thing they had just clicked. */}
+                        <Link
+                          to={`/quizzes/standalone/${quiz.quizId}`}
+                          title={quiz.title}
+                          className="flex flex-col items-center gap-1 rounded-lg py-1
+                            transition-colors hover:bg-white/70"
+                        >
+                          <span
+                            className="flex flex-col items-center justify-center gap-1 rounded-full
+                              border-4 border-navy/30 bg-white text-dark-gray"
+                            style={{ width: DONUT_SIZE, height: DONUT_SIZE }}
+                          >
+                            <QuestionMarkCircleIcon className="w-8 h-8 text-navy" />
+                            <span className="text-xs font-semibold">
+                              {quiz.questionCount} question{quiz.questionCount === 1 ? '' : 's'}
                             </span>
-                          )}
-                        </span>
-                        <span className="shrink-0 text-sm text-dark-gray">
-                          {quiz.questionCount} question{quiz.questionCount === 1 ? '' : 's'}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
+                          </span>
+
+                          <p
+                            className="line-clamp-2 w-full text-center text-sm font-semibold
+                              break-words text-dark-gray"
+                          >
+                            {quiz.title}
+                          </p>
+                          <p
+                            className={`text-center text-xs font-medium ${
+                              due?.overdue ? 'text-danger' : 'text-dark-gray'
+                            }`}
+                          >
+                            {due ? due.text : 'No deadline'}
+                          </p>
+                          <Badge className="bg-navy px-2 text-xs text-white">Quiz</Badge>
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </CardContent>
@@ -292,34 +321,51 @@ const HomePage = () => {
                     course, and listing both would print one deadline twice. */}
                 {deadlines.map((item) => {
                   const due = dueLabel(item.dueDate, item.overdue);
+                  /*
+                    Where this deadline actually lives.
+
+                    A course line opens the course; a quiz line opens the quiz
+                    itself, since only quizzes handed over on their own reach
+                    this list — one inside a course is due with the course and is
+                    never listed here. Both are routes under /learning or
+                    /quizzes, so the rail lights the matching tab on arrival
+                    exactly as it would had the tab been clicked.
+                  */
+                  const to =
+                    item.kind === 'course'
+                      ? `/learning/${item.id}`
+                      : `/quizzes/standalone/${item.id}`;
 
                   return (
-                    <li
-                      key={`${item.kind}-${item.id}`}
-                      className="rounded-lg border border-gray-300 bg-white px-4 py-3"
-                    >
-                      <p className="font-semibold text-dark-gray">{item.title}</p>
-                      <p
-                        className={`mt-1 flex items-center gap-1 text-sm font-medium ${
-                          due.overdue ? 'text-danger' : 'text-dark-gray'
-                        }`}
+                    <li key={`${item.kind}-${item.id}`}>
+                      <Link
+                        to={to}
+                        className="block rounded-lg border border-gray-300 bg-white px-4 py-3
+                          transition-colors hover:bg-light-gray"
                       >
-                        {due.overdue && <ExclamationTriangleIcon className="w-4 h-4" />}
-                        {due.text}
-                      </p>
-                      <p className="mt-1 text-sm text-dark-gray">
-                        {new Date(item.dueDate).toLocaleDateString()}
-                        {item.kind === 'course' &&
-                          ` · ${formatMinutes(item.remainingMinutes)} left`}
-                      </p>
-                      {/* A quiz is one sitting, so there is no part-way through
+                        <p className="font-semibold text-dark-gray">{item.title}</p>
+                        <p
+                          className={`mt-1 flex items-center gap-1 text-sm font-medium ${
+                            due.overdue ? 'text-danger' : 'text-dark-gray'
+                          }`}
+                        >
+                          {due.overdue && <ExclamationTriangleIcon className="w-4 h-4" />}
+                          {due.text}
+                        </p>
+                        <p className="mt-1 text-sm text-dark-gray">
+                          {new Date(item.dueDate).toLocaleDateString()}
+                          {item.kind === 'course' &&
+                            ` · ${formatMinutes(item.remainingMinutes)} left`}
+                        </p>
+                        {/* A quiz is one sitting, so there is no part-way through
                           it to report — only which of the two it is. */}
-                      <p className="mt-1 text-sm text-dark-gray">
-                        {item.kind === 'course'
-                          ? `${item.percentComplete}% complete (${item.completedSections}/` +
-                            `${item.totalSections} sections)`
-                          : 'Quiz'}
-                      </p>
+                        <p className="mt-1 text-sm text-dark-gray">
+                          {item.kind === 'course'
+                            ? `${item.percentComplete}% complete (${item.completedSections}/` +
+                              `${item.totalSections} sections)`
+                            : 'Quiz'}
+                        </p>
+                      </Link>
                     </li>
                   );
                 })}

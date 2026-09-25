@@ -2,7 +2,8 @@
  * File: course-progress.ts
  * Description: What a learner has unlocked in a course, worked out in one place.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-11
+ * Modified by: Jacob Matthews
+ * Date: 2026-09-25
  */
 /**
  * Where a learner has got to, and what that opens.
@@ -72,6 +73,35 @@ export function legacySectionIds(course: Course, progress: LearnerProgress): Set
 }
 
 /**
+ * Layer quizzes still waiting on the content above them.
+ *
+ * A layer quiz on a directed course is the end of its layer — read what everyone
+ * at this level reads, then say what applies to you next — so it stays shut until
+ * that content has been seen. The server names the sections each one waits on
+ * rather than sending a rule, so this only has to ask a question the browser can
+ * already answer.
+ *
+ * Independent of `sequential`: a directed course gates at its branch points
+ * whether or not its author also asked for step-by-step unlocking, because the
+ * gate is what the branching is made of rather than a preference about pace.
+ *
+ * Exported because the player computes its own unlock walk and has to shut the
+ * same doors. The rule being in one place is the point — the landing page and
+ * the player disagreed about this for a while, and the landing page offered a
+ * link into a quiz the player then refused to open.
+ */
+export function shutLayerQuizIds(course: Course, progress: LearnerProgress): Set<string> {
+  const viewed = new Set(progress.viewedSectionIds);
+  const shut = new Set<string>();
+
+  for (const lock of course.directedLocks ?? []) {
+    if (lock.requires.some((sectionId) => !viewed.has(sectionId))) shut.add(lock.quizId);
+  }
+
+  return shut;
+}
+
+/**
  * What the learner has unlocked.
  *
  * On a sequential course items open one at a time: the first is always available
@@ -79,17 +109,27 @@ export function legacySectionIds(course: Course, progress: LearnerProgress): Set
  * the same rule rather than being locked separately — a section is locked when
  * none of its items are reachable, and a module when none of its sections are.
  *
- * Non-sequential courses lock nothing.
+ * Non-sequential courses lock nothing — except a layer quiz, which is not a
+ * matter of pace. Both passes end by shutting those, so everything downstream of
+ * this set agrees about what is reachable.
  */
 export function unlockedItemIds(
   course: Course,
   items: CourseItem[],
   progress: LearnerProgress,
 ): Set<string> {
+  const shut = shutLayerQuizIds(course, progress);
+  const shutLayers = (ids: Set<string>) => {
+    for (const item of items) {
+      if (item.kind === 'quiz' && shut.has(item.quiz.id)) ids.delete(itemId(item));
+    }
+    return ids;
+  };
+
   const unlocked = new Set<string>();
   if (!course.sequential) {
     for (const item of items) unlocked.add(itemId(item));
-    return unlocked;
+    return shutLayers(unlocked);
   }
 
   const done = itemDoneFor(course, progress);
@@ -107,7 +147,7 @@ export function unlockedItemIds(
     unlocked.add(itemId(item));
   }
 
-  return unlocked;
+  return shutLayers(unlocked);
 }
 
 /** Whether one item counts as done, which is what opens the next one. */
@@ -122,19 +162,26 @@ export function itemDoneFor(course: Course, progress: LearnerProgress) {
       : viewedElements.has(item.element.id) || legacy.has(item.sectionId);
 }
 
-/** A section is reachable when any of its items is. */
+/**
+ * A section is reachable when any of its items is.
+ *
+ * The pace setting is checked second rather than first, because a layer quiz's
+ * section can be shut on a course that is not sequential at all — the branch
+ * point is part of how the course is built, not a preference about how fast to
+ * go through it.
+ */
 export function sectionUnlocked(
   course: Course,
   items: CourseItem[],
   unlocked: Set<string>,
   sectionId: string,
 ): boolean {
-  if (!course.sequential) return true;
   const own = items.filter((item) => item.sectionId === sectionId);
   // A section with no content at all cannot block anything, and locking it would
   // leave a padlock nobody can ever open.
   if (own.length === 0) return true;
-  return own.some((item) => unlocked.has(itemId(item)));
+  if (own.some((item) => unlocked.has(itemId(item)))) return true;
+  return !course.sequential && !own.some((item) => item.kind === 'quiz');
 }
 
 /** A module is reachable when any of the sections inside it is. */
@@ -144,7 +191,6 @@ export function moduleUnlocked(
   unlocked: Set<string>,
   sections: CourseSection[],
 ): boolean {
-  if (!course.sequential) return true;
   if (sections.length === 0) return true;
   return sections.some((section) => sectionUnlocked(course, items, unlocked, section.id));
 }

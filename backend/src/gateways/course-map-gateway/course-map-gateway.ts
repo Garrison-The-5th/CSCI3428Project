@@ -1,0 +1,280 @@
+/**
+ * File: course-map-gateway.ts
+ * Description: All database access for a course's directed-learning map.
+ * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
+ * Modified by: Jacob Matthews
+ * Date: 2026-09-22
+ */
+import { Prisma } from '../../../generated/prisma';
+import { prisma } from '../../../prisma/prisma-client';
+
+type Db = Prisma.TransactionClient;
+
+/**
+ * A node with everything the editor and the learner projection read off it: its
+ * placed sections in order, and the connections at both ends.
+ *
+ * The sections come back as headings — id, number, title — rather than as the
+ * full tree. The map cares where a section sits, not what is inside it, and
+ * elements carry base64 media that nothing on this page would draw.
+ */
+const nodeInclude = {
+  items: {
+    orderBy: { order: 'asc' as const },
+    include: {
+      section: {
+        select: {
+          id: true,
+          courseId: true,
+          number: true,
+          title: true,
+          estimatedMinutes: true,
+          deletedAt: true,
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Depth first, then left to right. The same order the learner reads them in, so
+ * anything walking this list is already in course order without sorting again.
+ */
+const nodeOrder: Prisma.CourseMapNodeOrderByWithRelationInput[] = [
+  { depth: 'asc' },
+  { x: 'asc' },
+  { title: 'asc' },
+];
+
+export type MapNodeRow = Prisma.CourseMapNodeGetPayload<{ include: typeof nodeInclude }>;
+
+export default class CourseMapGateway {
+  // ---- Reading ----
+
+  static getNodes(courseId: string, db: Db = prisma) {
+    return db.courseMapNode.findMany({
+      where: { courseId },
+      orderBy: nodeOrder,
+      include: nodeInclude,
+    });
+  }
+
+  static getEdges(courseId: string, db: Db = prisma) {
+    return db.courseMapEdge.findMany({ where: { courseId } });
+  }
+
+  static getNodeById(id: string, db: Db = prisma) {
+    return db.courseMapNode.findUnique({ where: { id }, include: nodeInclude });
+  }
+
+  static getRoot(courseId: string, db: Db = prisma) {
+    return db.courseMapNode.findFirst({ where: { courseId, isRoot: true } });
+  }
+
+  static courseIdFromNode(id: string) {
+    return prisma.courseMapNode
+      .findUnique({ where: { id }, select: { courseId: true } })
+      .then((node) => node?.courseId ?? null);
+  }
+
+  // ---- Nodes ----
+
+  static createNode(
+    data: { courseId: string; title: string; x: number; y: number; isRoot?: boolean },
+    db: Db = prisma,
+  ) {
+    return db.courseMapNode.create({
+      data: { ...data, depth: data.isRoot ? 0 : 1 },
+      include: nodeInclude,
+    });
+  }
+
+  static updateNode(
+    id: string,
+    data: { title?: string; x?: number; y?: number; depth?: number },
+    db: Db = prisma,
+  ) {
+    return db.courseMapNode.update({ where: { id }, data, include: nodeInclude });
+  }
+
+  /** Depths are rewritten wholesale after any change to the connections. */
+  static async setDepths(depths: Map<string, number>, db: Db = prisma) {
+    await Promise.all(
+      [...depths].map(([id, depth]) => db.courseMapNode.update({ where: { id }, data: { depth } })),
+    );
+  }
+
+  static deleteNode(id: string, db: Db = prisma) {
+    return db.courseMapNode.delete({ where: { id } });
+  }
+
+  // ---- Edges ----
+
+  static createEdge(
+    data: { courseId: string; parentId: string; childId: string },
+    db: Db = prisma,
+  ) {
+    return db.courseMapEdge.create({ data });
+  }
+
+  static deleteEdge(parentId: string, childId: string, db: Db = prisma) {
+    return db.courseMapEdge.deleteMany({ where: { parentId, childId } });
+  }
+
+  static setEdgeOption(id: string, optionId: string | null, db: Db = prisma) {
+    return db.courseMapEdge.update({ where: { id }, data: { optionId } });
+  }
+
+  // ---- Items ----
+
+  /**
+   * Replaces a node's content list in one go.
+   *
+   * One call covers reordering inside a node, dragging between two nodes and
+   * dragging back to the staging manager, because all three are the same fact
+   * stated about one node: here is what it holds now, in this order.
+   */
+  static async setItems(
+    nodeId: string,
+    items: Array<{ sectionId: string; sourceCourseId: string }>,
+    db: Db = prisma,
+  ) {
+    await db.courseMapItem.deleteMany({ where: { nodeId } });
+    if (items.length > 0) {
+      await db.courseMapItem.createMany({
+        data: items.map((item, index) => ({ ...item, nodeId, order: index })),
+      });
+    }
+  }
+
+  /** Every section already placed somewhere on this course's map. */
+  static async placedSectionIds(courseId: string, db: Db = prisma): Promise<Set<string>> {
+    const items = await db.courseMapItem.findMany({
+      where: { node: { courseId } },
+      select: { sectionId: true },
+    });
+    return new Set(items.map((item) => item.sectionId));
+  }
+
+  /**
+   * The maps that place this section, other than its own course's.
+   *
+   * Answers "who serves this content besides whoever wrote it". A section
+   * borrowed onto another course's map is delivered by that course — it is in
+   * that course's published snapshot and reached by whoever holds it — so
+   * anything asking whether a learner may see it has to look there too, not only
+   * at the course the section was authored in.
+   */
+  static async coursesPlacingSection(sectionId: string, db: Db = prisma): Promise<string[]> {
+    const items = await db.courseMapItem.findMany({
+      where: { sectionId },
+      select: { node: { select: { courseId: true } } },
+    });
+    return [...new Set(items.map((item) => item.node.courseId))];
+  }
+
+  /** Drops one section from wherever it sits, so it can be placed elsewhere. */
+  static removeSection(courseId: string, sectionId: string, db: Db = prisma) {
+    return db.courseMapItem.deleteMany({ where: { sectionId, node: { courseId } } });
+  }
+
+  // ---- Imports ----
+
+  static getImports(courseId: string, db: Db = prisma) {
+    return db.courseMapImport.findMany({
+      where: { courseId },
+      orderBy: { order: 'asc' },
+      select: { id: true, sourceCourseId: true, order: true },
+    });
+  }
+
+  static async addImport(courseId: string, sourceCourseId: string, db: Db = prisma) {
+    const last = await db.courseMapImport.findFirst({
+      where: { courseId },
+      orderBy: { order: 'desc' },
+      select: { order: true },
+    });
+    return db.courseMapImport.create({
+      data: { courseId, sourceCourseId, order: (last?.order ?? -1) + 1 },
+    });
+  }
+
+  static removeImport(courseId: string, sourceCourseId: string, db: Db = prisma) {
+    return db.courseMapImport.deleteMany({ where: { courseId, sourceCourseId } });
+  }
+
+  // ---- Layer quizzes ----
+
+  static getLayers(courseId: string, db: Db = prisma) {
+    return db.directedLayerQuiz.findMany({ where: { courseId }, orderBy: { depth: 'asc' } });
+  }
+
+  static createLayer(
+    data: { courseId: string; depth: number; quizId: string; moduleId: string },
+    db: Db = prisma,
+  ) {
+    return db.directedLayerQuiz.create({ data });
+  }
+
+  static deleteLayer(id: string, db: Db = prisma) {
+    return db.directedLayerQuiz.delete({ where: { id } });
+  }
+
+  /** The layer a quiz belongs to, or null if it is not a layer quiz at all. */
+  static layerForQuiz(quizId: string, db: Db = prisma) {
+    return db.directedLayerQuiz.findUnique({ where: { quizId } });
+  }
+
+  // ---- Learner choices ----
+
+  static getChoices(userId: number, courseId: string, db: Db = prisma) {
+    return db.directedChoice.findMany({
+      where: { userId, courseId },
+      orderBy: { depth: 'asc' },
+    });
+  }
+
+  /**
+   * Records what a learner picked at one layer, replacing whatever they picked
+   * before. A retake is an overwrite rather than a second row: this is their
+   * current path, not the history of how they arrived at it.
+   */
+  static saveChoice(
+    userId: number,
+    courseId: string,
+    depth: number,
+    chosenNodeIds: string[],
+    db: Db = prisma,
+  ) {
+    return db.directedChoice.upsert({
+      where: { userId_courseId_depth: { userId, courseId, depth } },
+      create: { userId, courseId, depth, chosenNodeIds },
+      update: { chosenNodeIds, answeredAt: new Date() },
+    });
+  }
+
+  /**
+   * Forgets nodes that no longer exist, across every learner of this course.
+   *
+   * Run after the author deletes a node or a connection. Leaving the id behind
+   * would be harmless today and a trap later — node ids are uuids, but a stale
+   * id in a choice list makes "what did they pick" answer with something the map
+   * no longer contains.
+   */
+  static async pruneChoices(courseId: string, liveNodeIds: string[], db: Db = prisma) {
+    const live = new Set(liveNodeIds);
+    const choices = await db.directedChoice.findMany({ where: { courseId } });
+
+    await Promise.all(
+      choices
+        .map((choice) => ({
+          choice,
+          kept: choice.chosenNodeIds.filter((id) => live.has(id)),
+        }))
+        .filter(({ choice, kept }) => kept.length !== choice.chosenNodeIds.length)
+        .map(({ choice, kept }) =>
+          db.directedChoice.update({ where: { id: choice.id }, data: { chosenNodeIds: kept } }),
+        ),
+    );
+  }
+}

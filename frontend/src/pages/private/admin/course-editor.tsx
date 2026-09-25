@@ -3,7 +3,7 @@
  * Description: The shell around the three editing modules.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * CourseEditor — the shell around the three editing modules.
@@ -17,6 +17,7 @@ import {
   ArrowLeftIcon,
   CloudArrowUpIcon,
   EyeIcon,
+  MapIcon,
   QuestionMarkCircleIcon,
   Squares2X2Icon,
   TrashIcon,
@@ -35,20 +36,22 @@ import { EditLocksProvider } from '@/contexts/edit-locks-context';
 import {
   ArchivePane,
   CourseAccess,
+  CourseMapPane,
   LandingPageEditor,
   type PendingVersion,
   QuizPane,
   StructureEditor,
 } from '@/pages/private/admin/editor/panes';
 import { CourseLanding, CoursePlayer } from '@/pages/private/learning/learner-previews';
+import { courseMapApi } from '@/services/course-map-api';
 import { Course, curriculumApi, PublicationState } from '@/services/curriculum-api';
-import { Quiz, quizApi, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
+import { Quiz, QUIZ_TYPE_LABELS, quizApi } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 import { logger } from '@/utils/logger';
 
 type Toast = { show: boolean; message: string; type: 'success' | 'error' };
 type EditorPane =
-  'landing' | 'modules' | 'access' | 'versions' | 'preview-landing' | 'preview-content';
+  'landing' | 'modules' | 'mapping' | 'access' | 'versions' | 'preview-landing' | 'preview-content';
 type PendingDelete = {
   kind: 'course' | 'module' | 'section' | 'quiz' | 'element';
   id: string;
@@ -71,6 +74,11 @@ function panesFor(
     mode === 'quiz'
       ? { key: 'modules', label: 'Quiz', Icon: QuestionMarkCircleIcon }
       : { key: 'modules', label: 'Modules', Icon: Squares2X2Icon },
+    // Only a lesson has a path through it to direct. A quiz set is one module of
+    // quizzes, which is not a journey anybody can be sent different ways along.
+    ...(mode === 'quiz'
+      ? []
+      : [{ key: 'mapping' as const, label: 'Course mapping', Icon: MapIcon }]),
     // Named for what it governs. A quiz set is not "a course" to the person
     // building one, and the sidebar is the only place that word appears.
     { key: 'access', label: mode === 'quiz' ? 'Quiz access' : 'Course access', Icon: UsersIcon },
@@ -146,6 +154,8 @@ const CourseEditor = ({
   const [versionBusy, setVersionBusy] = useState(false);
   /** Open while the author is being asked to check the quiz kinds this publish fixes. */
   const [confirmingTypeLock, setConfirmingTypeLock] = useState(false);
+  /** Set while the soft publish to the course map is in flight. */
+  const [staging, setStaging] = useState(false);
 
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
@@ -209,6 +219,29 @@ const CourseEditor = ({
       notify(err instanceof Error && err.message ? err.message : 'Failed to publish', 'error');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  /**
+   * The soft publish: hands the content as it stands to the course map.
+   *
+   * Sits beside Publish because it is the step before it on a directed course —
+   * write the content, stage it, map it, then send it out — and because that is
+   * the only place an author would look for it. Nothing here reaches a learner.
+   */
+  const stage = async () => {
+    if (!course || staging) return;
+    try {
+      setStaging(true);
+      const response = await courseMapApi.stage(course.id);
+      await fetchCourse();
+      setPane('mapping');
+      notify(response.message ?? 'Staged — your content is ready to map');
+    } catch (err) {
+      logger.error('Failed to stage:', err);
+      notify(err instanceof Error && err.message ? err.message : 'Failed to stage', 'error');
+    } finally {
+      setStaging(false);
     }
   };
 
@@ -410,6 +443,22 @@ const CourseEditor = ({
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-3">
+            {/* The step before publishing on a directed course, and so the button
+              immediately before it. Offered only on a lesson, because a quiz set
+              has no path through it to direct. */}
+            {mode === 'lesson' && (
+              <Button
+                onClick={stage}
+                disabled={staging}
+                variant="outline"
+                className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
+                title="Hand this content to the course map. Learners see nothing until you publish."
+              >
+                <MapIcon className="w-5 h-5" />
+                {staging ? 'Staging...' : 'Stage course to mapping'}
+              </Button>
+            )}
+
             {/* Publishing a first version and publishing an update are the same
               action, but they read very differently to an author, so the button
               says which one it is about to do. */}
@@ -556,6 +605,10 @@ const CourseEditor = ({
             it, and either way may share it: there is no wider admin who can reach
             it over their head, so there is nobody left to defer to.
           */}
+            {pane === 'mapping' && mode === 'lesson' && (
+              <CourseMapPane course={course} onNotify={notify} onRefresh={fetchCourse} />
+            )}
+
             {pane === 'access' && (
               <CourseAccess course={course} canManageAuthors mode={mode} onNotify={notify} />
             )}
@@ -585,7 +638,21 @@ const CourseEditor = ({
 
             {pane === 'preview-content' && (
               <>
-                <PreviewBanner note="Notes work but are not saved, and progress is not recorded." />
+                {/* What the preview does and does not do, said plainly, because
+                  all three are things an author would otherwise discover by
+                  being surprised: a quiz they thought they had taken, a course
+                  that reads straight through when the map says otherwise, and
+                  notes that disappear. */}
+                <PreviewBanner
+                  note={
+                    'Notes work but are not saved, and progress is not recorded. Quizzes cannot ' +
+                    'be handed in here.' +
+                    (course.directedLearning
+                      ? ' The map is applied, so answering a directed learning quiz changes ' +
+                        'what follows exactly as it will for a learner.'
+                      : '')
+                  }
+                />
                 <CoursePlayer previewCourse={course} preview />
               </>
             )}

@@ -17,7 +17,27 @@ Built on the TTG full-stack boilerplate: React frontend, Node.js/Express backend
 
 A **Course** holds **Modules**; a Module holds **Sections**; a Section holds **Elements** (rich text, YouTube video, image, PDF) and **Quizzes**. Module and section numbers are derived from position — section `2.3` is the third section of the second module — so reordering renumbers the course and there is no free-text number to keep in step. Elements and quizzes share one ordering sequence, so a quiz can sit between two pieces of content rather than always at the end.
 
-Quizzes come in three kinds, and the kind decides where one may live and what it may do. A **learning check** sits inside a section, is never timed, never keeps a mark, and must be attempted before the learner may move on. An **exam** is the ordinary graded quiz — standalone or inside a section, optionally timed, reported to the dashboard. A **one-time quiz** is sent as a link, may be answered once, and then disappears from the learner's side entirely; what they answered is kept under their name on the admin dashboard. Every question is multiple choice or multiple answer, and each quiz chooses whether the learner is shown their result at all.
+Quizzes come in four kinds, and the kind decides where one may live and what it may do. A **learning check** sits inside a section, is never timed, never keeps a mark, and must be attempted before the learner may move on. An **exam** is the ordinary graded quiz — standalone or inside a section, optionally timed, reported to the dashboard. A **one-time quiz** is sent as a link, may be answered once, and then disappears from the learner's side entirely; what they answered is kept under their name on the admin dashboard. A **directed learning quiz** is the one kind no author creates: it is generated from a course map, described below. Every question is multiple choice or multiple answer, and each quiz chooses whether the learner is shown their result at all.
+
+### Directed learning
+
+A lesson can opt out of being read straight through. Its author arranges the
+course's sections into **nodes** on a 2D map, connects them into a tree, and
+each layer of that tree gets a generated quiz asking the learner which branches
+apply to them. What they tick is what they are given — so a volunteer on two
+projects and a developer on one can be enrolled on the same course and share
+nothing but the root.
+
+The map is edited on the **Course mapping** tab, after pressing *Stage course to
+mapping* — a soft publish that hands the content as it stands to the map without
+any of it reaching a learner. Sections can be pulled in from other courses the
+author may edit, so training that already exists somewhere is placed rather than
+copied; those stay owned and edited by their own course. A directed course
+cannot be published until every one of its own sections is on the map.
+
+Answers are stored against the node rather than the quiz option, which is what
+lets a learner come back, change what applies to them, and find the training
+they dropped exactly where they left it if they ever take it back.
 
 ### Versioned publishing
 
@@ -51,7 +71,7 @@ See [Code Structure](docs/code_structure.md) for the full domain model and file 
 | Document | What it covers |
 |---|---|
 | [Code Structure](docs/code_structure.md) | Domain model and file tree |
-| [API Reference](docs/api-reference.md) | All 96 routes, access levels and error codes |
+| [API Reference](docs/api-reference.md) | All 108 routes, access levels and error codes |
 | [Testing](docs/testing.md) | Every suite, how to run it, and the merge gate |
 | [UX Design](docs/ux-design.md) | Navigation paths per audience, per-page rationale |
 | [Security Follow-Ups](docs/security-follow-ups.md) | Known gaps against the standards, and why |

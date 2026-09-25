@@ -3,7 +3,7 @@
  * Description: Exercises the timed-quiz session against the real database: that the clock is.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Exercises the timed-quiz session against the real database: that the clock is
@@ -16,6 +16,7 @@ import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway'
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CurriculumService from '@/services/curriculum-service/curriculum-service';
+import PublicationService from '@/services/publication-service/publication-service';
 import QuizService from '@/services/quiz-service/quiz-service';
 
 import { prisma } from '../prisma/prisma-client';
@@ -49,11 +50,12 @@ async function main() {
     timeLimitMinutes: 30,
   });
   const untimed = await QuizService.createQuiz({ title: 'Untimed', sectionId: section!.id });
-  const draft = await QuizService.createQuiz({ title: 'Draft', sectionId: section!.id });
 
-  // Quizzes are created unpublished; a learner can only run a published one.
-  await QuizService.updateQuiz(timed.id, { published: true });
-  await QuizService.updateQuiz(untimed.id, { published: true });
+  // Retakes allowed on the timed one, because the last scenario here is about a
+  // closed run handing out a fresh clock — which is a second sitting, and an
+  // exam is a single sitting unless its author says otherwise. See
+  // Quiz.allowMultipleAttempts and QuizService.isSingleSitting.
+  await QuizService.updateQuiz(timed.id, { allowMultipleAttempts: true });
 
   const question = await QuizService.addQuestion(timed.id, {
     prompt: 'Pick the right one',
@@ -64,7 +66,35 @@ async function main() {
   });
   const right = question.options.find((o) => o.isCorrect)!;
 
-  console.log('a draft quiz can be neither started nor submitted to');
+  /*
+    Published, and published last.
+
+    A quiz is reached through its course's snapshot, so nothing below this runs
+    at all until the course has a version — and the snapshot has to be taken
+    after the questions exist, or the learner is handed an empty paper. Quizzes
+    themselves no longer carry a publish state to set; `createQuiz` writes one
+    that is already true, because the course's publication is what gates it.
+  */
+  await PublicationService.publish(courseId, null);
+
+  /*
+    A second course, deliberately left unpublished, for the refusal below.
+
+    It used to be a third quiz in this same course, back when a quiz had its own
+    draft flag to leave unset. It has not had one for a while: "draft" now means
+    the course has never been published, so that is what this is.
+  */
+  const hidden = await CurriculumService.createCourse('TIMER TEST unpublished — safe to delete');
+  const [hiddenModule] = await CurriculumGateway.getModules(hidden!.id);
+  const hiddenSection = await CurriculumService.createSection(hidden!.id, {
+    moduleId: hiddenModule.id,
+    title: 'Holder',
+  });
+  const draft = await QuizService.createQuiz({ title: 'Draft', sectionId: hiddenSection!.id });
+
+  // Neither door opens: `quizForRun` cannot find it in any snapshot, and both
+  // starting and submitting go through that one lookup.
+  console.log('a quiz in an unpublished course can be neither started nor submitted to');
   for (const [label, run] of [
     ['start', () => QuizService.startSession(user.id, draft.id)],
     ['submit', () => QuizService.submitAttempt(user.id, draft.id, {})],
@@ -161,6 +191,7 @@ async function main() {
   check('two attempts', attempts.filter((a) => a.quizId === timed.id).length, 2);
 
   await prisma.course.delete({ where: { id: courseId } });
+  await prisma.course.delete({ where: { id: hidden!.id } });
   await prisma.user.delete({ where: { id: user.id } });
   console.log('\ncleaned up.');
 

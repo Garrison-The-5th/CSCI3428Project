@@ -3,7 +3,7 @@
  * Description: Takes a quiz of any of the three kinds and submits it for grading.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-11
+ * Date: 2026-09-22
  */
 /**
  * Takes a quiz and submits it for server-side grading. Used on the Quizzes tab and
@@ -125,6 +125,34 @@ interface QuizRunnerProps {
   showDetails?: boolean;
   /** Hide the title where the surrounding page already gives it. */
   showTitle?: boolean;
+  /**
+   * The authoring preview, where this is a picture of a quiz rather than a quiz.
+   *
+   * Nothing here reaches the server: no run is opened, no paper is handed in,
+   * and no attempt is recorded against the author who is checking their own
+   * work. Without this the preview was a real sitting — an author looking at
+   * their one-time link used it up, and an exam with a single attempt could
+   * never be looked at twice.
+   *
+   * What it adds in exchange is the pair of buttons an author actually wants
+   * while checking a quiz: back to the questions, and back to the start panel.
+   * A learner has no such buttons because a learner may not go back; an author
+   * is reading the thing from the outside and has to be able to.
+   */
+  preview?: boolean;
+  /**
+   * What "Complete quiz" means in the preview, where it cannot mean grading.
+   *
+   * Only one kind of quiz has an answer that still means something with nothing
+   * submitted: a layer quiz, whose answer is not a mark but a statement about
+   * which branches of the course to show. The author is in the preview precisely
+   * to try that, so the options they ticked are handed over here and the preview
+   * redraws around them.
+   *
+   * Given this, the submit button works in the preview rather than sitting
+   * disabled — there is something for it to do. Without it, it stays inert.
+   */
+  onPreviewSubmit?: (chosenOptionIds: string[]) => void;
 }
 
 /**
@@ -151,6 +179,8 @@ const QuizRunner = ({
   finishLabel = 'Next',
   showDetails = true,
   showTitle = true,
+  preview = false,
+  onPreviewSubmit,
 }: QuizRunnerProps) => {
   const api = useLearnerApi();
   const [answers, setAnswers] = useState<QuizAnswers>({});
@@ -168,9 +198,27 @@ const QuizRunner = ({
 
   const isLearningCheck = quiz.type === 'LEARNING_CHECK';
   const isOneTime = quiz.type === 'ONE_TIME';
+  const isDirected = quiz.type === 'DIRECTED';
 
-  /** A gated quiz waiting on Start. Never a learning check — it has no front. */
-  const gated = showDetails && !isLearningCheck;
+  /**
+   * Whether a question takes more than one answer.
+   *
+   * A layer quiz always does, whatever its options look like. It has no correct
+   * answers at all — every option is stored `false`, because "which of these
+   * apply to you" is a fact about the learner rather than something to be marked
+   * — so the usual test, more than one option flagged correct, would draw it as
+   * a single-choice question and let somebody pick exactly one branch. Picking
+   * several is the entire point.
+   */
+  const takesSeveral = (question: QuizQuestion) => isDirected || isMultiAnswer(question);
+
+  /**
+   * A gated quiz waiting on Start. Never a learning check — it has no front —
+   * and never a layer quiz, which is not a sitting to be consented to: it is a
+   * form asking what you need, and there is no clock and no single attempt to
+   * warn anybody about.
+   */
+  const gated = showDetails && !isLearningCheck && !isDirected;
 
   /**
    * Which phase is on screen.
@@ -197,6 +245,19 @@ const QuizRunner = ({
 
   const submit = useCallback(
     async (answered: QuizAnswers) => {
+      /*
+        The preview hands nothing in. Grading would record an attempt against the
+        author, and on a one-time link or a single-sitting exam it would close
+        the quiz they were in the middle of checking.
+
+        A layer quiz is the one case with something left to do: its answer is a
+        statement about which branches to show rather than a mark, and applying
+        that to the preview is the whole reason the author pressed the button.
+      */
+      if (preview) {
+        onPreviewSubmit?.(Object.values(answered).flat());
+        return;
+      }
       if (submittedRef.current) return;
       submittedRef.current = true;
 
@@ -238,7 +299,7 @@ const QuizRunner = ({
     },
     // api is rebuilt each render; depending on it would restart the effect below.
 
-    [quiz.id, onCompleted],
+    [quiz.id, onCompleted, preview, onPreviewSubmit],
   );
 
   /**
@@ -280,6 +341,20 @@ const QuizRunner = ({
     setSecondsLeft(null);
     setPhase(gated ? 'checking' : 'running');
 
+    /*
+      The preview asks the server nothing at all.
+
+      A peek is harmless on its own, but the branch below it opens a run when one
+      is not already going — and a run is a clock, an attempt row, and on a
+      one-time link the thing that closes it. So the preview settles the phase
+      from what the quiz *is* rather than from what the server says has happened
+      to it, which is also the honest answer: nothing has happened to it.
+    */
+    if (preview) {
+      setPhase(gated ? 'details' : 'running');
+      return;
+    }
+
     (async () => {
       try {
         const session = await api.peekQuiz(quiz.id);
@@ -299,7 +374,7 @@ const QuizRunner = ({
          * `completed` is the narrower fact: not "they have done it" but "they
          * may not do it again" — a one-time link always, an exam whose author
          * did not allow multiple attempts. A learning check comes back with its
-         * paper and without that flag, which is what puts Try again under it.
+         * paper and without that flag, which is what puts Restart Quiz under it.
          */
         if (session.result) {
           setResult(session.result);
@@ -355,11 +430,17 @@ const QuizRunner = ({
     return () => {
       cancelled = true;
     };
-  }, [quiz.id, gated]);
+  }, [quiz.id, gated, preview]);
 
   /** Pressing Start: this is the call that puts a clock on the wall. */
   const start = async () => {
     if (starting) return;
+
+    // In the preview, Start is a page turn and nothing more: no run, and so no
+    // clock. Timing a preview would put a deadline on an author reading their
+    // own questions, and hand the paper in when it ran out.
+    if (preview) return setPhase('running');
+
     setStarting(true);
     setError(null);
 
@@ -427,7 +508,13 @@ const QuizRunner = ({
    * button appearing is a statement about what will be permitted rather than a
    * hope.
    */
-  const canRetry = isLearningCheck || (quiz.type === 'EXAM' && quiz.allowMultipleAttempts === true);
+  const canRetry =
+    isLearningCheck ||
+    // Always, on a layer quiz. Changing your mind about what you need to learn is
+    // what it is for: somebody moving onto a new project comes back, ticks the
+    // new branch, and their course grows to match.
+    isDirected ||
+    (quiz.type === 'EXAM' && quiz.allowMultipleAttempts === true);
 
   /** Retaking: clears the paper and opens a fresh run. */
   const reset = () => {
@@ -438,8 +525,9 @@ const QuizRunner = ({
     // block on sitting it again — so the banner has to go with the paper.
     setClosed(false);
     submittedRef.current = false;
+    if (preview) return;
     // Retaking opens a fresh run, and with it a fresh clock. No details panel in
-    // between: they have just read them, and pressing Try again is the same act
+    // between: they have just read them, and pressing Restart Quiz is the same act
     // of consent that Start is.
     api
       .startQuiz(quiz.id)
@@ -450,7 +538,7 @@ const QuizRunner = ({
   /** Ticking an option: radio behaviour for one answer, checkbox for several. */
   const choose = (question: QuizQuestion, optionId: string) => {
     setAnswers((prev) => {
-      if (!isMultiAnswer(question)) return { ...prev, [question.id]: [optionId] };
+      if (!takesSeveral(question)) return { ...prev, [question.id]: [optionId] };
 
       const current = prev[question.id] ?? [];
       return {
@@ -532,6 +620,59 @@ const QuizRunner = ({
     </div>
   ) : null;
 
+  /**
+   * The author's way around their own quiz.
+   *
+   * A learner is walked through a quiz in one direction and may not go back —
+   * that is most of what makes it a quiz. An author checking one is reading it
+   * from the outside and needs the opposite: the questions, the start panel they
+   * sit behind, and the ability to go between the two as often as they like.
+   * Offered only in the preview, and never rendered for a learner.
+   *
+   * "Back to the start" is shown only where there is a start panel to go back to
+   * — a learning check and a layer quiz have no front at all — rather than being
+   * shown disabled, because a button that cannot ever do anything on this quiz is
+   * not information the author needs.
+   */
+  const previewBar = preview ? (
+    <div
+      className="flex flex-wrap items-center gap-3 rounded-lg border-2 border-navy/30 bg-navy/5 px-4
+        py-3"
+    >
+      <span className="text-sm font-semibold text-dark-gray">
+        Preview — nothing here is submitted or recorded.
+      </span>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button
+          onClick={() => {
+            setResult(null);
+            setAnswers({});
+            setError(null);
+            setPhase('running');
+          }}
+          variant="outline"
+          className="bg-white text-dark-gray hover:bg-light-gray"
+        >
+          Back to the questions
+        </Button>
+        {gated && (
+          <Button
+            onClick={() => {
+              setResult(null);
+              setAnswers({});
+              setError(null);
+              setPhase('details');
+            }}
+            variant="outline"
+            className="bg-white text-dark-gray hover:bg-light-gray"
+          >
+            Back to the start page
+          </Button>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   if (closed && !result) {
     return (
       <div className="flex flex-col gap-4">
@@ -566,6 +707,7 @@ const QuizRunner = ({
     return (
       <div className="flex flex-col gap-4">
         {heading}
+        {previewBar}
 
         {quiz.description && (
           <p className="whitespace-pre-wrap break-words text-dark-gray">{quiz.description}</p>
@@ -656,7 +798,7 @@ const QuizRunner = ({
             variant="outline"
             className="bg-white text-dark-gray hover:bg-light-gray"
           >
-            Try again
+            Restart Quiz
           </Button>
         )}
       </div>
@@ -667,6 +809,7 @@ const QuizRunner = ({
   return (
     <div className="flex flex-col gap-4">
       {heading}
+      {previewBar}
       {closedNotice}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -705,7 +848,27 @@ const QuizRunner = ({
 
       {/* The score. Only when the author turned results on — with them off the
           learner is never told a number, whatever the answers toggle says. */}
-      {result && result.showResults && (
+      {/* A layer quiz has no result to show. There is no right answer to "which
+          of these apply to you", so a ring and a percentage would be a number
+          about nothing — and telling somebody they scored 0% for describing
+          their own job accurately is worse than saying nothing. What they get
+          instead is confirmation that their course has changed. */}
+      {result && isDirected && (
+        <div
+          className="flex flex-col items-center gap-3 rounded-lg border-2 border-navy/30 bg-navy/5
+            p-6"
+        >
+          <CheckCircleIcon className="w-10 h-10 text-[#5b9748]" />
+          <p className="text-lg font-semibold text-dark-gray">Your learning path is saved</p>
+          <p className="max-w-md text-center text-sm text-dark-gray">
+            The training you picked has been added to this course. Come back and change your answers
+            whenever what you work on changes — anything you drop keeps the progress you made on it.
+          </p>
+          {resultActions}
+        </div>
+      )}
+
+      {result && !isDirected && result.showResults && (
         <div
           className="flex flex-col items-center gap-3 rounded-lg border-2 border-navy/30 bg-navy/5
             p-6"
@@ -731,7 +894,7 @@ const QuizRunner = ({
 
       {/* Answers on, results off: no score anywhere, but they still need the way
           onward that normally lives under the ring. */}
-      {result && !result.showResults && (
+      {result && !isDirected && !result.showResults && (
         <div
           className="flex flex-col items-center gap-3 rounded-lg border-2 border-navy/30 bg-navy/5
             p-4"
@@ -752,7 +915,7 @@ const QuizRunner = ({
       ) : showQuestions ? (
         <>
           {quiz.questions.map((question) => {
-            const multi = isMultiAnswer(question);
+            const multi = takesSeveral(question);
             const chosen = answers[question.id] ?? [];
             // Whether they got this one right. Always sent back, which is what
             // gives a learning check its ticks and crosses without a mark being
@@ -863,10 +1026,20 @@ const QuizRunner = ({
 
           {!result && (
             <div className="flex flex-wrap items-center gap-4">
+              {/* Shown, and inert, in the preview. Hiding it would misrepresent
+                  the page the author is checking — the learner's version of this
+                  screen has a Complete quiz button on it — while letting it work
+                  would grade a sitting the author never meant to take. */}
               <Button
                 onClick={() => setConfirming(true)}
-                disabled={submitting || submitBlocked}
-                title={submitBlocked ? 'Answer every question before handing this in' : undefined}
+                disabled={(preview && !onPreviewSubmit) || submitting || submitBlocked}
+                title={
+                  preview && !onPreviewSubmit
+                    ? 'Nothing is submitted in the preview — use the buttons above to move around'
+                    : submitBlocked
+                      ? 'Answer every question before handing this in'
+                      : undefined
+                }
                 className="bg-navy text-white hover:bg-navy-hover"
               >
                 {submitting ? 'Submitting...' : 'Complete quiz'}

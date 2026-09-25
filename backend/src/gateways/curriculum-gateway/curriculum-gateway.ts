@@ -182,6 +182,8 @@ export default class CurriculumGateway {
       draftUpdatedAt: Date;
       sequential: boolean;
       lockAfterDue: boolean;
+      directedLearning: boolean;
+      stagedAt: Date | null;
       imageData: string | null;
       imageType: string | null;
       instructors: { set: Array<{ id: string }> };
@@ -529,6 +531,23 @@ export default class CurriculumGateway {
   static async getLowestModuleNumber(courseId: string, db: Db = prisma): Promise<number> {
     const lowest = await db.module.aggregate({ where: { courseId }, _min: { number: true } });
     return Math.min(lowest._min.number ?? 0, 0);
+  }
+
+  /**
+   * The highest module number in use, ignoring recycled ones.
+   *
+   * Recycled modules are parked at negative numbers by `softDeleteModule`, so
+   * they cannot collide with anything placed above this. What this guards
+   * against is a course whose live numbers are not dense — counting the modules
+   * and adding one would then hand back a number already taken, and the unique
+   * index on (courseId, number) would refuse the insert.
+   */
+  static async getHighestModuleNumber(courseId: string, db: Db = prisma): Promise<number> {
+    const highest = await db.module.aggregate({
+      where: { courseId, deletedAt: null },
+      _max: { number: true },
+    });
+    return Math.max(highest._max.number ?? 0, 0);
   }
 
   static createModule(

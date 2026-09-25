@@ -186,7 +186,9 @@ test.describe('critical workflows (signed in)', () => {
   });
 
   test('a learner can download their own data (§3.5.3)', async ({ page }) => {
-    await page.goto('/contact');
+    // On Profile, not Contact us: the privacy notice sits with the rest of what
+    // the platform holds about this person.
+    await page.goto('/profile');
 
     const download = page.waitForEvent('download');
     await page.getByRole('button', { name: /download my data/i }).click();

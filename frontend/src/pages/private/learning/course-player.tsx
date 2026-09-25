@@ -3,7 +3,7 @@
  * Description: Working through a course.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 /**
  * CoursePlayer - working through a course.
@@ -40,6 +40,8 @@ import QuizRunner from '@/components/common/quiz-runner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { courseMapApi, type DirectedPreview } from '@/services/course-map-api';
+import { NO_PROGRESS, shutLayerQuizIds as layerQuizzesStillShut } from '@/services/course-progress';
 import {
   Course,
   CourseSection,
@@ -94,7 +96,40 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
 
   const [fetched, setFetched] = useState<Course | null>(null);
   const [newIds, setNewIds] = useState<NewIds | null>(null);
-  const course = previewCourse ?? fetched;
+  /**
+   * The preview of a mapped course, and the answers it is drawn for.
+   *
+   * A directed course is not the course in the editor: the editor holds every
+   * section an author has written, and the map decides which of them a given
+   * learner is ever shown, in what order, behind which quizzes. Previewing the
+   * editor's version of it therefore previewed a course nobody will ever be
+   * given — every branch at once, in module order, with the layer quizzes
+   * sitting among them doing nothing.
+   *
+   * So the preview asks the server for the same projection a learner gets, and
+   * re-asks it whenever the author answers a layer quiz. The answers live here
+   * and are never stored: an author walking their own branches must not end up
+   * with a learning path recorded against them.
+   */
+  const [previewChoices, setPreviewChoices] = useState<Record<number, string[]>>({});
+  const [directedPreview, setDirectedPreview] = useState<DirectedPreview | null>(null);
+  /*
+    The projected course wins where there is one, with its locks folded onto it.
+
+    Folded here rather than kept beside it because that is the shape the rest of
+    this file already reads — the learner endpoint hands back one course carrying
+    `directedLocks`, and the gating below asks the course rather than asking
+    where the course came from. Everything downstream — the rail, the arrows, the
+    unlocking, the progress ticks — then reads an ordinary course and never
+    learns a map was involved, which is the same trick the learner path uses.
+  */
+  const course = useMemo(
+    () =>
+      directedPreview
+        ? { ...directedPreview.course, directedLocks: directedPreview.locks }
+        : (previewCourse ?? fetched),
+    [directedPreview, previewCourse, fetched],
+  );
   const [loading, setLoading] = useState(!previewCourse);
   const [selection, setSelection] = useState<Selection>(null);
   const [viewedSectionIds, setViewedSectionIds] = useState<Set<string>>(new Set());
@@ -123,6 +158,58 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       setLoading(false);
     }
   }, [courseId]);
+
+  /**
+   * Re-reads the projection whenever the author's answers change.
+   *
+   * Only for a mapped course in the preview: everything else here is either a
+   * real learner, who is served the projection by the ordinary course endpoint,
+   * or an unmapped course, which has no branches to walk.
+   */
+  useEffect(() => {
+    if (!preview || !previewCourse?.directedLearning) return;
+
+    let cancelled = false;
+    courseMapApi
+      .directedPreview(previewCourse.id, previewChoices)
+      .then((result) => !cancelled && setDirectedPreview(result))
+      .catch((err) => logger.error('Could not preview the course map:', err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preview, previewCourse?.id, previewCourse?.directedLearning, previewChoices]);
+
+  /**
+   * Records a layer quiz answered in the preview.
+   *
+   * Nothing is submitted in a preview, so the translation the server normally
+   * does at submission — ticked options to chosen branches — is done here from
+   * the map the projection came with. The answers replace rather than add to
+   * what was there for that layer, exactly as a real submission does, so
+   * unticking a branch in the preview drops it just as it would for a learner.
+   */
+  const recordPreviewChoice = useCallback(
+    (quizId: string, chosenOptionIds: string[]) => {
+      const map = directedPreview;
+      if (!map) return;
+
+      const depth = map.quizDepths.find((entry) => entry.quizId === quizId)?.depth;
+      if (depth === undefined) return;
+
+      const chosen = new Set(chosenOptionIds);
+      const nodeIds = [
+        ...new Set(
+          map.optionNodes
+            .filter((entry) => chosen.has(entry.optionId))
+            .map((entry) => entry.nodeId),
+        ),
+      ];
+
+      setPreviewChoices((current) => ({ ...current, [depth]: nodeIds }));
+    },
+    [directedPreview],
+  );
 
   /** Real stored progress — ticks and unlocking must survive a page reload. */
   const fetchProgress = useCallback(async () => {
@@ -206,21 +293,51 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   );
 
   /**
+   * Layer quizzes still waiting on the content above them.
+   *
+   * A layer quiz is the end of its layer — read what everyone at this level
+   * reads, then say what applies to you next — so it stays shut until that
+   * content has been seen. The server names the sections it waits on rather than
+   * sending a rule, so this only has to ask a question the player could already
+   * answer.
+   *
+   * The rule itself lives in course-progress.ts, because the landing page has to
+   * shut exactly the same doors — it did not for a while, and offered a link
+   * into a quiz this player then refused to open.
+   */
+  const shutLayerQuizIds = useMemo(
+    () =>
+      course
+        ? layerQuizzesStillShut(course, { ...NO_PROGRESS, viewedSectionIds: [...viewedSectionIds] })
+        : new Set<string>(),
+    [course, viewedSectionIds],
+  );
+
+  /**
    * On a sequential course, items open one at a time: the first is always
    * available and every other waits for the one before it. Sections and modules
    * fall out of the same rule rather than being locked separately — a section is
    * locked when none of its items are reachable, and a module when none of its
    * sections are.
    *
-   * Non-sequential courses lock nothing.
+   * Non-sequential courses lock nothing — except a layer quiz, which is not a
+   * matter of pace. Both passes end by shutting those, so everything downstream
+   * of this set agrees about what is reachable.
    */
   const unlockedItemIds = useMemo(() => {
     const unlocked = new Set<string>();
     if (!course) return unlocked;
 
+    const shutLayers = (ids: Set<string>) => {
+      for (const item of flatItems) {
+        if (item.kind === 'quiz' && shutLayerQuizIds.has(item.quiz.id)) ids.delete(idOf(item));
+      }
+      return ids;
+    };
+
     if (!course.sequential) {
       for (const item of flatItems) unlocked.add(idOf(item));
-      return unlocked;
+      return shutLayers(unlocked);
     }
 
     for (const [index, item] of flatItems.entries()) {
@@ -236,19 +353,31 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       unlocked.add(idOf(item));
     }
 
-    return unlocked;
-  }, [course, flatItems, itemDone]);
+    return shutLayers(unlocked);
+  }, [course, flatItems, itemDone, shutLayerQuizIds]);
 
   const isUnlocked = (item: NonNullable<Selection>) => unlockedItemIds.has(idOf(item));
 
-  /** A section is reachable when any of its items is. */
+  /**
+   * A section is reachable when any of its items is.
+   *
+   * The pace setting is checked second rather than first, because a layer quiz's
+   * section can be shut on a course that is not sequential at all — the branch
+   * point is part of how the course is built, not a preference about how fast to
+   * go through it.
+   */
   const sectionUnlocked = useCallback(
-    (sectionId: string) =>
-      !course?.sequential ||
-      flatItems.some((item) => item.sectionId === sectionId && unlockedItemIds.has(idOf(item))) ||
+    (sectionId: string) => {
+      const items = flatItems.filter((item) => item.sectionId === sectionId);
       // A section with no content at all cannot block anything.
-      !flatItems.some((item) => item.sectionId === sectionId),
-    [course, flatItems, unlockedItemIds],
+      if (items.length === 0) return true;
+      if (items.some((item) => unlockedItemIds.has(idOf(item)))) return true;
+      return (
+        !course?.sequential &&
+        !items.some((item) => item.kind === 'quiz' && shutLayerQuizIds.has(item.quiz.id))
+      );
+    },
+    [course, flatItems, unlockedItemIds, shutLayerQuizIds],
   );
 
   /** Opening anything inside a section counts that section as seen. */
@@ -594,9 +723,36 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                   <QuizRunner
                     key={selection.quiz.id}
                     quiz={selection.quiz}
+                    // Nothing is handed in while previewing: no run is opened, no
+                    // attempt recorded, and a one-time link is not used up by the
+                    // author checking it. See quiz-runner.
+                    preview={preview}
+                    /*
+                      Given only for a layer quiz, and that is what decides
+                      whether Complete quiz works in the preview at all.
+
+                      An ordinary quiz has nothing left to mean with nothing
+                      submitted, so its button sits disabled and says why. A
+                      layer quiz does: its answer is a statement about which
+                      branches to show, which is exactly what the author is here
+                      to try, so it is applied to the projection instead of to
+                      the database.
+                    */
+                    onPreviewSubmit={
+                      selection.quiz.type === 'DIRECTED'
+                        ? (chosenOptionIds) => {
+                            setAttemptedQuizIds((prev) => new Set(prev).add(selection.quiz.id));
+                            recordPreviewChoice(selection.quiz.id, chosenOptionIds);
+                          }
+                        : undefined
+                    }
                     onCompleted={() => {
                       setAttemptedQuizIds((prev) => new Set(prev).add(selection.quiz.id));
                       fetchProgress();
+                      // Answering a layer quiz *is* a change to the course: the
+                      // branches they ticked are added and the ones they dropped
+                      // go, so the course is read again rather than patched.
+                      if (selection.quiz.type === 'DIRECTED') fetchCourse();
                     }}
                     // With results on this is the Next button under the ring;
                     // with them off the runner calls it the moment the paper is
@@ -897,7 +1053,10 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                                       title={
                                         itemUnlocked
                                           ? undefined
-                                          : 'Finish the item before this one to unlock it'
+                                          : item.kind === 'quiz' &&
+                                              shutLayerQuizIds.has(item.quiz.id)
+                                            ? 'Work through this layer’s training first'
+                                            : 'Finish the item before this one to unlock it'
                                       }
                                       onClick={() => pick(asSelection)}
                                       className={`flex w-full items-center gap-2 rounded-md px-3

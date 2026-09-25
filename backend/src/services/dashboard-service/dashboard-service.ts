@@ -3,11 +3,12 @@
  * Description: Progress figures shared by the learner dashboard and guest sessions.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 import { endOfDueDay, isLockedOut, isPastDue } from '@/config/validation';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
+import CourseMapService from '@/services/course-map-service/course-map-service';
 import EnrolmentService, { dueFor } from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 import { BROWSABLE_QUIZ_TYPES } from '@/services/quiz-service/quiz-service';
@@ -132,8 +133,25 @@ export default class DashboardService {
     ]);
 
     const enrolled = courses.filter((course) => enrolment.courseIds.has(course.id));
-    const snapshots = await PublicationService.getLiveSnapshots(
+    const published = await PublicationService.getLiveSnapshots(
       enrolled.map((course) => course.id),
+    );
+
+    /*
+      Narrowed to this learner's own path before anything is counted.
+
+      A directed course's snapshot holds every branch of the map; one learner is
+      only ever shown the branches they picked. Counting the snapshot whole makes
+      the denominator content they will never be offered, so somebody who has
+      finished everything they can see reads as part way through — and since
+      `CourseCompletion` is stamped at 100% and nowhere else, a directed course
+      could never be completed at all.
+
+      Does nothing to an ordinary course, which is every course that is not built
+      from a map.
+    */
+    const snapshots = await Promise.all(
+      published.map((snapshot) => CourseMapService.forLearner(snapshot, userId)),
     );
 
     // contentUpdatedAt lives on the course row rather than in the snapshot, so

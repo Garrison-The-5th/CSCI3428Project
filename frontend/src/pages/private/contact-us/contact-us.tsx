@@ -3,14 +3,13 @@
  * Description: Contact us for the learning platform.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 import '@/pages/private/contact-us/contact-us.css';
 
 import { EnvelopeIcon, MapPinIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { type SubmitEvent, useEffect, useState } from 'react';
 
-import PrivacyNotice from '@/components/common/privacy-notice';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/auth-context';
@@ -133,8 +132,6 @@ const ContactUs = () => {
           </CardContent>
         </Card>
       </div>
-
-      <PrivacyNotice />
 
       {isSubscribeOpen && (
         <div

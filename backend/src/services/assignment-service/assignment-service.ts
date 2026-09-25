@@ -3,7 +3,7 @@
  * Description: Assignment tokens, guest sessions, scoping and resend throttling.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 import { randomBytes } from 'crypto';
 
@@ -20,6 +20,7 @@ import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway'
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
+import CourseMapService from '@/services/course-map-service/course-map-service';
 import DashboardService from '@/services/dashboard-service/dashboard-service';
 import EmailService from '@/services/email-service/email-service';
 import PublicationService, { NewIds } from '@/services/publication-service/publication-service';
@@ -622,11 +623,22 @@ export default class AssignmentService {
     const due =
       endOfDueDay(assignment.dueDate) ??
       endOfDueDay(snapshot?.dueDate ? new Date(snapshot.dueDate) : null);
-    const course = snapshot
+    /*
+      Narrowed to this holder's own branches, exactly as a signed-in learner's is.
+
+      A link holder was being handed the published snapshot whole, which on a
+      directed course is every branch of the map at once — all the content, in
+      authoring order, with none of the layer quizzes gating anything. They
+      answer those quizzes like anybody else and their choices are recorded, so
+      the only thing missing was reading them back.
+    */
+    const mine = snapshot ? await CourseMapService.forLearner(snapshot, user.id) : null;
+
+    const course = mine
       ? // `locked` is answered here for the same reason a signed-in learner's is
         // answered on the server: a lock the browser works out from its own
         // clock is one the holder of the link can move.
-        { ...snapshot, dueDate: due, locked: isLockedOut(due, snapshot.lockAfterDue) }
+        { ...mine, dueDate: due, locked: isLockedOut(due, mine.lockAfterDue) }
       : null;
 
     const courses = course ? [course] : [];
@@ -851,9 +863,40 @@ export default class AssignmentService {
       ? await AssignmentGateway.listForCourse(target.courseId)
       : await AssignmentGateway.listForQuiz(target.quizId!);
 
-    const course = target.courseId ? await CurriculumGateway.getCourseById(target.courseId) : null;
+    /*
+      Measured against the published version, not the rows an author is editing.
 
-    const sectionIds = new Set(course?.sections.map((m) => m.id) ?? []);
+      A roster built from the draft moved everybody's percentage the moment
+      somebody added a section — content no learner could see yet — and disagreed
+      with the figure the learner's own dashboard showed them. The live rows are
+      the fallback for a course with no version behind it at all, which is the
+      only case where there is nothing published to measure.
+    */
+    const published = target.courseId
+      ? await PublicationService.getLiveSnapshot(target.courseId)
+      : null;
+    const course =
+      published ??
+      (target.courseId ? await CurriculumGateway.getCourseById(target.courseId) : null);
+
+    /*
+      And against each learner's own path through it.
+
+      On a directed course the sections differ per person, so this cannot be
+      hoisted out of the loop the way a fixed course's can — see
+      `CourseMapService.forLearner`. It costs one extra read per learner and only
+      on a course built from a map.
+    */
+    const sectionsFor = async (userId: number | null) =>
+      new Set(
+        course
+          ? (await CourseMapService.forLearner(course, userId)).sections.map(
+              (section) => section.id,
+            )
+          : [],
+      );
+
+    const everyone = await sectionsFor(null);
 
     return Promise.all(
       assignments.map(async (assignment) => {
@@ -863,12 +906,16 @@ export default class AssignmentService {
             ...assignment,
             name: null,
             completedSections: 0,
-            totalSections: sectionIds.size,
+            // Nobody to narrow for, so this is what a learner who has answered
+            // nothing would be given — which is what they are.
+            totalSections: everyone.size,
             percentComplete: 0,
             attempts: 0,
             lastActivityAt: null as Date | null,
           };
         }
+
+        const sectionIds = await sectionsFor(user.id);
 
         const [viewed, attempts] = await Promise.all([
           CurriculumGateway.getViewedSectionIds(user.id),
@@ -1001,6 +1048,13 @@ export default class AssignmentService {
           return {
             courseId,
             title: course.title,
+            // Carried so the dashboard can file a quiz set under Quizzes rather
+            // than among the lessons. The two are handed out and chased in the
+            // same way, which is why they share this list, but they are not the
+            // same thing to read about: a quiz set has no sections to be part
+            // way through, so a row of them mixed in among courses invites the
+            // reader to compare numbers that do not mean the same thing.
+            kind: course.kind,
             imageData: course.imageData,
             imageType: course.imageType,
             published: course.published,

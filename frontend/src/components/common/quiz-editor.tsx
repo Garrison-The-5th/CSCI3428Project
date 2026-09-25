@@ -3,7 +3,7 @@
  * Description: Everything you can do to one quiz: rename it, set how it is marked, write questions.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Everything you can do to one quiz: rename it, choose whether answers are
@@ -541,7 +541,7 @@ const QuizEditor = ({
               )
             }
             label="Allow multiple attempts"
-            hint="Adds Try again to the result screen, and when they come back to it"
+            hint="Adds Restart Quiz to the result screen, and when they come back to it"
           />
         )}
 

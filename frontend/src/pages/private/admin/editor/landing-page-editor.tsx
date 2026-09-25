@@ -3,7 +3,7 @@
  * Description: Landing Page Editor — everything a learner sees on the course overview.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Landing Page Editor — everything a learner sees on the course overview.
@@ -339,18 +339,31 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
             hint="Off, and it is still marked overdue but can still be finished"
           />
 
-          <ToggleSwitch
-            checked={course.sequential}
-            onChange={(v) =>
-              run(
-                () => curriculumApi.updateCourse(course.id, { sequential: v }),
-                v ? 'Sections now unlock in order' : 'Sections can be taken in any order',
-                'Failed to change section order rule',
-              )
-            }
-            label="Unlock sections in order"
-            hint="Each section stays locked until the one before is finished"
-          />
+          {/*
+            Not offered on a quiz set.
+
+            A quiz set is delivered as one sitting: the learner is handed the
+            quiz, takes it, and hands it in. Its sections are authoring furniture
+            — one row per quiz, carrying the name, minutes and order — rather
+            than a run of content anybody walks through, so "each section stays
+            locked until the one before is finished" describes a journey that
+            does not exist. The flag is left untouched rather than forced off,
+            because nothing on a quiz set reads it.
+          */}
+          {course.kind !== 'QUIZ_SET' && (
+            <ToggleSwitch
+              checked={course.sequential}
+              onChange={(v) =>
+                run(
+                  () => curriculumApi.updateCourse(course.id, { sequential: v }),
+                  v ? 'Sections now unlock in order' : 'Sections can be taken in any order',
+                  'Failed to change section order rule',
+                )
+              }
+              label="Unlock sections in order"
+              hint="Each section stays locked until the one before is finished"
+            />
+          )}
         </div>
       </CardContent>
     </Card>

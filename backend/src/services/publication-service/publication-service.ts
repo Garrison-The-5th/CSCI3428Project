@@ -3,13 +3,16 @@
  * Description: Versioned publishing — snapshots, version diffs and archive retention.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 import { logger } from '@/config/logger';
 import { NotFoundError } from '@/controllers/http-errors';
+import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
+import CourseMapService from '@/services/course-map-service/course-map-service';
+import { SnapshotMap } from '@/services/course-map-service/directed-path';
 import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
 
 import { CourseKind, Prisma, QuizType } from '../../../generated/prisma';
@@ -99,6 +102,22 @@ export interface CourseSnapshot {
    * a missing answer as "lock" — which is what a deadline meant then.
    */
   lockAfterDue?: boolean;
+  /**
+   * Whether this version's path is built from a map.
+   *
+   * Absent on every snapshot taken before directed learning existed, which reads
+   * as false — those versions are read straight through, exactly as they were.
+   */
+  directedLearning?: boolean;
+  /**
+   * The map this version went out with, frozen alongside the content.
+   *
+   * Frozen for the same reason the sections are: a learner part way through must
+   * not have their path redrawn under them because an author moved a box this
+   * morning. Null on an undirected course, and absent on anything published
+   * before there were maps.
+   */
+  map?: SnapshotMap | null;
   publishedAt: Date | string | null;
   kind: CourseKind;
   imageData: string | null;
@@ -351,7 +370,33 @@ export default class PublicationService {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
 
+    const map = await CourseMapService.buildSnapshotMap(courseId);
+
+    /*
+      Sections this map borrows from other courses go out with it.
+
+      A directed course is delivered by its map, and the map is allowed to place
+      another course's sections — that is what importing into staging is for. But
+      a snapshot built from `course.sections` alone is this course's own work, so
+      a borrowed section was drawn on the canvas, counted in the editor, and then
+      quietly missing from the version learners were served: `projectDirectedCourse`
+      looks each placed section up and skips the node when it cannot find one, so
+      the branch arrived empty and nothing said why.
+
+      Asked of `deliveredSections` rather than worked out here, because the
+      authoring preview has to answer the same question and answering it twice is
+      what let the two drift apart in the first place.
+
+      They are copied in as they stand at this moment, exactly as the course's
+      own rows are. That is what makes a publication a frozen thing: the lender
+      editing their section tomorrow does not change what went out today, and a
+      learner part way through is not rewritten under.
+    */
+    const delivered = await CourseMapService.deliveredSections(course);
+
     return {
+      directedLearning: course.directedLearning,
+      map,
       id: course.id,
       title: course.title,
       shortDescription: course.shortDescription,
@@ -377,7 +422,7 @@ export default class PublicationService {
         title: module.title,
         color: module.color,
       })),
-      sections: course.sections.map((section) => ({
+      sections: delivered.map((section) => ({
         id: section.id,
         courseId: section.courseId,
         moduleId: section.moduleId,
@@ -449,7 +494,24 @@ export default class PublicationService {
     const since = await PublicationGateway.listPublishedSince(courseId, startedAt);
     if (since.length === 0) return EMPTY_NEW;
 
-    const live = snapshot ?? (await PublicationService.getLiveSnapshot(courseId));
+    const published = snapshot ?? (await PublicationService.getLiveSnapshot(courseId));
+
+    /*
+      What they are actually being served — their branches, not the whole map.
+
+      Narrowed here rather than left to the caller. Four places ask this question
+      and only the ones that happened to hold a projected snapshot already were
+      getting the right answer; the link holder's copy and anything that called
+      this with nothing were told about content on branches they had never
+      picked. On a directed course that is the worst possible false positive:
+      "there is something new in your course" pointing at a branch the learner
+      cannot open, and which will never clear, because reading it is the only
+      thing that retires the mark and they cannot read it.
+
+      Does nothing at all to an ordinary course.
+    */
+    const live = published ? await CourseMapService.forLearner(published, userId) : null;
+
     // Only what still exists in the version they are being served — something
     // added in v4 and deleted in v5 must not be marked new on a page that does
     // not contain it.
@@ -503,6 +565,14 @@ export default class PublicationService {
       ]);
     }
 
+    /*
+      Modules are marked by their authored id, which a directed course no longer
+      has: the projection rewrites its modules into the map's nodes and layers,
+      so nothing here matches and no module heading is ever marked new. That is
+      the right answer rather than a gap — on a directed course the author's
+      modules are not what the learner reads, and the sections inside them are
+      marked individually either way.
+    */
     const newModuleIds = [...new Set(since.flatMap((entry) => entry.newModuleIds))]
       .filter((id) => present.modules.has(id))
       .filter((id) => (sectionsByModule.get(id) ?? []).some((m) => !seenSections.has(m)));
@@ -520,6 +590,17 @@ export default class PublicationService {
   static async publish(courseId: string, publishedById: number | null) {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
+
+    // A directed course is delivered by its map and by nothing else, so a
+    // section nobody mapped is not merely out of order — it is content no
+    // learner can ever be given. Refused here rather than dropped quietly,
+    // because a silent omission is the kind of thing found out months later.
+    // Does nothing at all on an ordinary course.
+    await CourseMapService.assertMappable(courseId);
+
+    // Brought in line first, so what goes out is the map as it stands rather
+    // than the map as it was at the last stage.
+    await CourseMapService.syncQuizzes(courseId);
 
     const snapshot = await PublicationService.buildSnapshot(courseId);
     const previous =
@@ -699,6 +780,40 @@ export default class PublicationService {
     const courseId = await CurriculumGateway.courseIdFromQuiz(quizId);
     if (!courseId) return null;
 
+    const inOwn = await PublicationService.quizInSnapshot(courseId, quizId);
+    if (inOwn) return inOwn;
+
+    /*
+      A quiz can be published by a course that did not write it.
+
+      Another course's map may place the section this quiz sits in, and that
+      course then delivers it: the section is copied into that course's snapshot
+      when it is published, and whoever holds that course reaches the quiz
+      through it. So the quiz being live is not a question about its own course
+      alone — a quiz set written and never published can still be perfectly live
+      as one branch of a published lesson that borrowed it, and refusing to run
+      it because its own course is a draft would break the branch for every
+      learner who picked it.
+
+      Checked second, so the ordinary case costs one lookup and this costs two.
+    */
+    const sectionId = (await QuizGateway.getQuizById(quizId))?.sectionId;
+    if (!sectionId) return null;
+
+    for (const borrower of await CourseMapGateway.coursesPlacingSection(sectionId)) {
+      if (borrower === courseId) continue;
+      const found = await PublicationService.quizInSnapshot(borrower, quizId);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  /** One course's published copy of a quiz, or null if that version has none. */
+  private static async quizInSnapshot(
+    courseId: string,
+    quizId: string,
+  ): Promise<SnapshotQuiz | null> {
     const snapshot = await PublicationService.getLiveSnapshot(courseId);
     if (!snapshot) return null;
 

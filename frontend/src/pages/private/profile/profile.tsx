@@ -1,20 +1,33 @@
 /**
  * File: profile.tsx
- * Description: Profile for the learning platform.
+ * Description: The learner’s own details, and the privacy and data controls that go with them.
  * Author: TTG Full-Stack Web Boilerplate
- * Date: 2026-08-10
+ * Modified by: Jacob Matthews
+ * Date: 2026-09-22
  */
 import '@/pages/private/profile/profile.css';
 
 import { EnvelopeIcon, FingerPrintIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
+import PrivacyNotice from '@/components/common/privacy-notice';
+import ToastNotification from '@/components/common/toast-notification';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 
 const Profile = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  /**
+   * Export and erasure report through a toast.
+   *
+   * The notice can say so itself where it is given a handler, and here it should
+   * be: both of its buttons take seconds and finish silently, so without one an
+   * export that failed and an export that worked look identical.
+   */
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>(
+    { show: false, message: '', type: 'success' },
+  );
 
   useEffect(() => {
     // Simulate loading time for user data
@@ -84,6 +97,29 @@ const Profile = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/*
+        Privacy and data, moved here from Contact us.
+
+        It was on the contact page because that is somewhere a learner already
+        goes with a question, which put it next to a subscribe form and a list of
+        business hours. This is where somebody comes to look at what the platform
+        holds about them, so it is where "what we hold, and how to take it away"
+        belongs — the two halves of §3.5.3 sitting under the three fields they
+        are about.
+      */}
+      <div className="responsive-panel mt-8">
+        <PrivacyNotice
+          onNotify={(message, type = 'success') => setToast({ show: true, message, type })}
+        />
+      </div>
+
+      <ToastNotification
+        show={toast.show}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast((current) => ({ ...current, show: false }))}
+      />
     </div>
   );
 };

@@ -3,9 +3,16 @@
  * Description: Client for assignment management and the public guest endpoints.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
-import { Course, Dashboard, LearnerProgress, NewIds, Note } from '@/services/curriculum-api';
+import {
+  Course,
+  CourseKind,
+  Dashboard,
+  LearnerProgress,
+  NewIds,
+  Note,
+} from '@/services/curriculum-api';
 import { AttemptResult, Quiz, QuizAnswers, QuizSession } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 import { API_BASE_URL } from '@/utils/utils';
@@ -49,6 +56,8 @@ export interface Assignment {
 export interface AssignedCourse {
   courseId: string;
   title: string;
+  /** Lesson or quiz set — the dashboard files the two apart. */
+  kind?: CourseKind;
   imageData: string | null;
   imageType: string | null;
   published: boolean;
@@ -62,6 +71,8 @@ export interface AssignedCourse {
 export interface LearnerCourseProgress {
   courseId: string;
   title: string;
+  /** Lesson or quiz set — the dashboard files the two apart. */
+  kind?: CourseKind;
   imageData: string | null;
   imageType: string | null;
   dueDate: string | null;

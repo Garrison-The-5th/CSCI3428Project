@@ -3,7 +3,7 @@
  * Description: Course, module, section and element rules, including the numbering grid.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 import { logger } from '@/config/logger';
 import { normalizeUpload } from '@/config/media-upload';
@@ -23,11 +23,15 @@ import { NotFoundError } from '@/controllers/http-errors';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
+import CourseMapService from '@/services/course-map-service/course-map-service';
+import { DirectedLock } from '@/services/course-map-service/directed-path';
 import EnrolmentService, {
   dueFor,
   Enrolment,
 } from '@/services/enrolment-service/enrolment-service';
-import PublicationService from '@/services/publication-service/publication-service';
+import PublicationService, {
+  CourseSnapshot,
+} from '@/services/publication-service/publication-service';
 import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
 
 import { CourseKind, ElementType, Prisma, QuizType } from '../../../generated/prisma';
@@ -182,6 +186,31 @@ function withLearnerDueDate<
   };
 }
 
+/** A published course narrowed to one learner's branches, plus what gates them. */
+export type DirectedSnapshot = CourseSnapshot & { directedLocks?: DirectedLock[] };
+
+/**
+ * Narrows a directed course to the branches this person picked.
+ *
+ * Runs on every learner-facing read of a course, and does nothing at all unless
+ * the snapshot says it was published as a directed one — which no snapshot taken
+ * before maps existed does. What comes back is an ordinary course tree in the
+ * map's order, so the player, the progress sums and the dashboard all carry on
+ * reading a normal course and never learn a map was involved.
+ *
+ * Someone who has answered nothing gets the root's content and the first quiz,
+ * which is the right place for a course to start: it cannot ask what applies to
+ * you before you have read what everybody reads.
+ */
+function withDirectedPath(
+  course: CourseSnapshot,
+  userId: number | null,
+): Promise<DirectedSnapshot> {
+  // The rule itself lives on CourseMapService, because four places need it and
+  // for a long time only these two had it — see the note there.
+  return CourseMapService.forLearner(course, userId);
+}
+
 export default class CurriculumService {
   /**
    * Learner view: the published courses this person has actually been enrolled
@@ -189,9 +218,10 @@ export default class CurriculumService {
    * everyone.
    */
   static async getCoursesForLearner(email: string) {
-    const [courses, enrolment] = await Promise.all([
+    const [courses, enrolment, user] = await Promise.all([
       CurriculumGateway.getPublishedCourses(),
       EnrolmentService.forEmail(email),
+      AuthService.getUserByEmail(email),
     ]);
 
     const enrolled = courses.filter((course) => enrolment.courseIds.has(course.id));
@@ -203,9 +233,21 @@ export default class CurriculumService {
     // author is editing — reading the live tables here would leak every
     // unpublished change. A missing snapshot means the course has never been
     // published, so there is nothing for this person to open.
-    return published
-      .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null)
-      .map((snapshot) => withLearnerDueDate(redactCourse(snapshot), enrolment));
+    //
+    // Narrowed to their branches here as well as on the course itself, and not
+    // only for tidiness: this is what the Learning page counts progress out of,
+    // and a directed course measured against every branch would tell somebody
+    // they were a third of the way through a course they had in fact finished.
+    return Promise.all(
+      published
+        .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null)
+        .map(async (snapshot) =>
+          withLearnerDueDate(
+            redactCourse(await withDirectedPath(snapshot, user?.id ?? null)),
+            enrolment,
+          ),
+        ),
+    );
   }
 
   /**
@@ -218,7 +260,12 @@ export default class CurriculumService {
     if (!enrolment.courseIds.has(courseId)) return null;
 
     const snapshot = await PublicationService.getLiveSnapshot(courseId);
-    return snapshot ? withLearnerDueDate(redactCourse(snapshot), enrolment) : null;
+    if (!snapshot) return null;
+
+    const user = await AuthService.getUserByEmail(email);
+    const directed = await withDirectedPath(snapshot, user?.id ?? null);
+
+    return withLearnerDueDate(redactCourse(directed), enrolment);
   }
 
   /**

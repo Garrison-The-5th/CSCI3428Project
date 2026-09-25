@@ -28,13 +28,17 @@ Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | 
         ├─ Instructor         (many-to-many, credited on the course page)
         ├─ Assignment         (PLATFORM enrolment or a tokenized LINK)
         ├─ createdBy          (the User who made it, and so owns it)
-        └─ contributors       (other Users allowed to edit this one course)
+        ├─ contributors       (other Users allowed to edit this one course)
+        └─ CourseMapNode ──── CourseMapItem ─── Section   (directed learning only)
+              └─ CourseMapEdge  (parent → child, and the quiz option offering it)
 ```
 
-17 Prisma models in total. Beyond the tree above: `SectionProgress` and
-`ElementProgress` (what a learner has opened), `QuizAttempt` and `QuizSession`
-(results and the server-anchored clock on a timed quiz), `CourseCompletion`
-(stamped at 100%), `Note`, and `User`.
+25 Prisma models in total. Beyond the tree above: `SectionProgress` and
+`ElementProgress` (what a learner has opened), `QuizAttempt`, `QuizAnswer` and
+`QuizSession` (results, the frozen paper, and the server-anchored clock on a
+timed quiz), `CourseCompletion` (stamped at 100%), `EditLease` (who has a module
+open), `Note`, `User`, and the three remaining directed-learning tables —
+`CourseMapImport`, `DirectedLayerQuiz` and `DirectedChoice`.
 
 - A **Course** is what the UI calls a "lesson". Created by name, then edited.
 - A **Module** is a named group of sections and supplies the first digit of every
@@ -51,6 +55,41 @@ Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | 
   (finer grained, so a sequential course can unlock item by item), `QuizAttempt`,
   `QuizSession` (the deadline on a timed quiz, stored server-side), and
   `CourseCompletion` (stamped at 100%, used to detect new content later).
+
+### Directed learning
+
+Opt-in per lesson, through `Course.directedLearning`, and off on everything that
+predates it. When it is on the course is no longer read straight through: its
+sections are arranged into **CourseMapNode** boxes on a 2D canvas, connected by
+**CourseMapEdge** rows, and each layer of the resulting tree gets a generated
+`DIRECTED` quiz (**DirectedLayerQuiz**) asking the learner which branches apply.
+Their answer is kept in **DirectedChoice**, keyed on the node rather than the
+quiz option so it survives the author redrawing a connection.
+
+Three rules carry the design:
+
+- The **root** is where every learner starts. One per map, never deletable, and
+  it can never be given a parent.
+- **Depth is one more than the shallowest parent**, so a node reachable by a
+  short route is offered as soon as that route allows. A node may have several
+  parents — shared training belongs under every project that needs it — and
+  ticking any one of them brings it in.
+- A section of *this* course must be on the map before the course may be
+  published. Sections imported from another course (**CourseMapImport**) need
+  not be: taking three of a course's four sections is the point of importing.
+
+The learner never sees any of this. `directed-path.ts` projects the published
+snapshot down to the branches they picked and rewrites it into ordinary modules
+and sections in map order — depth top to bottom, canvas `x` left to right — so
+the player, the progress sums and the dashboard all read a normal course. Section
+ids are never reminted, which is what lets somebody drop a branch and take it
+back with their progress intact.
+
+A layer quiz is generated per depth but **served per learner**. It is put in
+front of somebody only when a route into that depth starts at a node they can
+already see, and it then offers only those routes. A branch that simply ends
+therefore ends: picking it does not produce a further question whose every answer
+leads somewhere unreachable.
 
 ### Versioned publishing
 

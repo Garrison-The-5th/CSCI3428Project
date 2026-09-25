@@ -54,6 +54,8 @@ model User {
   editedElements    Element[]           @relation("ElementEditor")
   editedQuizzes     Quiz[]              @relation("QuizEditor")
   editedQuestions   Question[]          @relation("QuestionEditor")
+  /// Which branches of a directed course this person picked, per layer.
+  directedChoices   DirectedChoice[]
 }
 
 /// What kind of thing a Course is.
@@ -113,6 +115,27 @@ model Course {
   /// a choice, and quietly opening every existing course would be a change
   /// nobody asked for.
   lockAfterDue     Boolean    @default(true)
+  /// Whether this course's path is built from a map rather than read straight
+  /// through.
+  ///
+  /// Off is the ordinary course, and off is what every course that existed
+  /// before this column is: the mapping tab is hidden, the staging step does not
+  /// apply, and publishing asks nothing new. On, and the sections authored in
+  /// the Modules tab are delivered through `mapNodes` instead — each learner
+  /// gets the branches they picked at the generated quizzes, so two people on
+  /// the same course can read entirely different content.
+  ///
+  /// Only meaningful on a LESSON. A quiz set has one module and a section per
+  /// quiz; there is no path through it to direct.
+  directedLearning Boolean    @default(false)
+  /// When the content was last staged to the map, or null if never.
+  ///
+  /// Staging is the soft publish between writing content and mapping it: it
+  /// settles the root node, refreshes the layer quizzes from the map as it
+  /// stands, and is what puts newly written sections in front of the person
+  /// doing the mapping. Nothing about it reaches a learner — that is still
+  /// `publish`.
+  stagedAt         DateTime?
   publishedAt      DateTime? // stamped the first time it is published
   /// Which CoursePublication learners are currently served. 0 means the course
   /// has never been published, so there is nothing for a learner to read.
@@ -147,17 +170,26 @@ model Course {
   createdById      Int?
   createdBy        User?      @relation("CourseAuthor", fields: [createdById], references: [id], onDelete: SetNull)
 
-  modules      Module[]
-  sections     Section[]
-  completions  CourseCompletion[]
+  modules         Module[]
+  sections        Section[]
+  completions     CourseCompletion[]
   /// People allowed to edit this one course without being global authors.
-  contributors User[]              @relation("CourseContributors")
-  instructors  Instructor[]
-  notes        Note[]
-  assignments  Assignment[]
-  publications CoursePublication[]
+  contributors    User[]              @relation("CourseContributors")
+  instructors     Instructor[]
+  notes           Note[]
+  assignments     Assignment[]
+  publications    CoursePublication[]
   /// Who currently has a module or a question in this course open.
-  editLeases   EditLease[]
+  editLeases      EditLease[]
+  /// The directed-learning map: its nodes, the connections between them, and the
+  /// quiz generated for each layer. Empty on every course that is not directed.
+  mapNodes        CourseMapNode[]
+  mapEdges        CourseMapEdge[]
+  mapImports      CourseMapImport[]   @relation("MapImportOwner")
+  /// Maps that offer this course's sections as importable content.
+  mapImportedBy   CourseMapImport[]   @relation("MapImportSource")
+  layerQuizzes    DirectedLayerQuiz[]
+  directedChoices DirectedChoice[]
 
   @@index([kind])
   @@index([createdById])
@@ -342,9 +374,9 @@ model Note {
 /// the section its inner one, so module 2's third section is "2.3". `number` is the
 /// module's 1-based place in the course, which the author sets directly.
 model Module {
-  id             String    @id @default(uuid())
+  id             String             @id @default(uuid())
   courseId       String
-  course         Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course         Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
   number         Int
   title          String
   /// Hex tint the author picked, e.g. "#c7d9f0". Used at low opacity behind the
@@ -360,8 +392,11 @@ model Module {
   /// the marks up would tag every course forever.
   lastEditedById Int?
   lastEditedAt   DateTime?
-  lastEditedBy   User?     @relation("ModuleEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  lastEditedBy   User?              @relation("ModuleEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   sections       Section[]
+  /// Set when this module is the auto-managed home of a layer quiz. Such a
+  /// module is written by the map and is read-only in the structure editor.
+  layer          DirectedLayerQuiz?
 
   @@unique([courseId, number])
   @@index([courseId, number])
@@ -403,6 +438,9 @@ model Section {
   elements         Element[]
   quizzes          Quiz[]
   views            SectionProgress[]
+  /// Where this section sits on a course map — its own course's, or another
+  /// course's that imported it.
+  mapPlacements    CourseMapItem[]
 
   @@unique([courseId, number])
   @@index([courseId, sortKey])
@@ -527,6 +565,16 @@ enum QuizType {
   /// Sent as a one-off link. One attempt, then it disappears — and it is never
   /// listed on the Quizzes tab even for someone signed in with that address.
   ONE_TIME
+  /// The layer quiz of a directed course, asking which branches apply to this
+  /// learner. Generated from the course map and never chosen by an author — it
+  /// is the one kind that cannot be created, retyped or deleted by hand, because
+  /// the map is what it is made of.
+  ///
+  /// Never timed and never scored: "which of these apply to you" has no right
+  /// answer, so the mark is meaningless and what is kept is the choice itself,
+  /// in DirectedChoice. Always retakeable, because changing your mind about what
+  /// you need to learn is the whole point of asking.
+  DIRECTED
 }
 
 // Quizzes are multiple choice or multiple answer: each Question has N Options and
@@ -536,20 +584,20 @@ enum QuizType {
 // alone. A ONE_TIME quiz always stands alone, because it is only ever reached
 // through its link.
 model Quiz {
-  id                    String        @id @default(uuid())
+  id                    String             @id @default(uuid())
   title                 String
   description           String?
-  type                  QuizType      @default(EXAM)
+  type                  QuizType           @default(EXAM)
   sectionId             String?
-  section               Section?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section               Section?           @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   /// Position within the section, sharing one sequence with Element.order so a
   /// quiz can sit between two pieces of content.
-  order                 Int           @default(0)
-  published             Boolean       @default(false) // hidden from learners until published
+  order                 Int                @default(0)
+  published             Boolean            @default(false) // hidden from learners until published
   /// Show the score screen — the ring and the percentage — after submitting.
   /// Off means the learner is moved straight on without being told how they did.
-  showResults           Boolean       @default(true)
-  showAnswers           Boolean       @default(false) // admin toggle: reveal correct answers after an attempt
+  showResults           Boolean            @default(true)
+  showAnswers           Boolean            @default(false) // admin toggle: reveal correct answers after an attempt
   /// Whether an EXAM may be sat more than once.
   ///
   /// Off by default, which is what an exam means unless the author says
@@ -559,7 +607,7 @@ model Quiz {
   /// Meaningless on the other two kinds and ignored there. A LEARNING_CHECK is
   /// always retakeable — it keeps no mark, so there is nothing to protect — and
   /// a ONE_TIME quiz never is, which is the whole of what it is for.
-  allowMultipleAttempts Boolean       @default(false)
+  allowMultipleAttempts Boolean            @default(false)
   dueDate               DateTime? // falls back to the course due date when not set
   /// Days the learner gets once this quiz is handed to them. Same idea as
   /// Course.daysRemaining, and read the same way when an assignment is made.
@@ -576,18 +624,20 @@ model Quiz {
   /// a one-time link afterwards leaves it sitting there — listed, reachable, and
   /// the one thing a one-time link must never be. Publishing is the moment the
   /// choice stops being the author's alone, so it is the moment it is fixed.
-  typeLocked            Boolean       @default(false)
+  typeLocked            Boolean            @default(false)
   /// When the quiz was added, for the same reason as Section.createdAt.
-  createdAt             DateTime      @default(now())
+  createdAt             DateTime           @default(now())
   deletedAt             DateTime? // soft delete: recoverable from the admin dashboard
   /// Who last changed this as a draft, and when. See Module.lastEditedById.
   lastEditedById        Int?
   lastEditedAt          DateTime?
-  lastEditedBy          User?         @relation("QuizEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  lastEditedBy          User?              @relation("QuizEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   questions             Question[]
   attempts              QuizAttempt[]
   sessions              QuizSession[]
   assignments           Assignment[]
+  /// Set only on a DIRECTED quiz: the map layer it was generated for.
+  layer                 DirectedLayerQuiz?
 
   @@index([sectionId])
   @@index([type])
@@ -634,12 +684,15 @@ model Question {
 }
 
 model Option {
-  id         String   @id @default(uuid())
+  id         String         @id @default(uuid())
   questionId String
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question   Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   order      Int // position within the question
   text       String
-  isCorrect  Boolean  @default(false)
+  isCorrect  Boolean        @default(false)
+  /// Set only inside a layer quiz: the connection this option offers. Ticking it
+  /// is what selects that child node for this learner.
+  mapEdge    CourseMapEdge?
 
   @@index([questionId])
 }
@@ -683,4 +736,164 @@ model EditLease {
   @@unique([scope, targetId])
   @@index([courseId, renewedAt])
   @@index([userId])
+}
+
+/// One box on a directed course's map.
+///
+/// A node is a container the author makes and names, holding an ordered list of
+/// sections — its own course's, or ones imported from another course they may
+/// edit. It is not a piece of content itself: the content is `items`, and what
+/// the node contributes is the *question of whether a learner needs them*.
+///
+/// The root is the one node every mapped course has and nobody makes. It has no
+/// parents and can never be given any, which is what makes it the place every
+/// learner starts, and it is not deletable.
+model CourseMapNode {
+  id       String  @id @default(uuid())
+  courseId String
+  course   Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title    String
+  /// Where the box sits on the canvas.
+  ///
+  /// Not decoration. `x` is also the learner's reading order among everything at
+  /// the same depth — the course runs left to right and top to bottom of the
+  /// tree exactly as it is drawn — so moving a box is an edit to the course, not
+  /// to the picture of it.
+  x        Int
+  y        Int
+  /// Jumps from the root, and so which layer quiz offers this node.
+  ///
+  /// One more than its *shallowest* parent, because a node reachable by a short
+  /// path should be offered as soon as that path allows rather than held back
+  /// for a longer one. Derived from the edges and stored: ordering the whole
+  /// course reads it on every page load, and walking the graph each time to
+  /// re-derive it would cost the same read many times over.
+  depth    Int     @default(0)
+  /// True on the one node the map starts from. See the note above.
+  isRoot   Boolean @default(false)
+
+  /// Connections into this node, and out of it.
+  parents  CourseMapEdge[] @relation("EdgeChild")
+  children CourseMapEdge[] @relation("EdgeParent")
+  items    CourseMapItem[]
+
+  @@index([courseId, depth])
+}
+
+/// One parent-to-child connection, and the quiz option that offers it.
+///
+/// A separate row rather than a `parentId` column because a node may hang off
+/// more than one parent — site safety training belongs under every project that
+/// happens on site, and duplicating it would split one person's progress across
+/// two copies. The option lives here rather than on the node for the same
+/// reason: a node with two parents is offered twice in its layer quiz, once per
+/// route in, and ticking either is what brings it in.
+model CourseMapEdge {
+  id       String        @id @default(uuid())
+  courseId String
+  course   Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  parentId String
+  parent   CourseMapNode @relation("EdgeParent", fields: [parentId], references: [id], onDelete: Cascade)
+  childId  String
+  child    CourseMapNode @relation("EdgeChild", fields: [childId], references: [id], onDelete: Cascade)
+  /// The option in the child's layer quiz that selects it through this route.
+  /// Rewritten by the generator; null only between an edge being drawn and the
+  /// quizzes being regenerated.
+  optionId String?       @unique
+  option   Option?       @relation(fields: [optionId], references: [id], onDelete: SetNull)
+
+  @@unique([parentId, childId])
+  @@index([courseId])
+  @@index([childId])
+}
+
+/// One section pinned to a node, in order.
+///
+/// `sourceCourseId` is what tells an imported section from one of the course's
+/// own, which the publish gate needs: every section of *this* course must be on
+/// the map before it may go out, while an imported course is a shelf to take
+/// three sections off and leave the fourth.
+model CourseMapItem {
+  id             String        @id @default(uuid())
+  nodeId         String
+  node           CourseMapNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  order          Int
+  sectionId      String
+  section        Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  sourceCourseId String
+
+  @@unique([nodeId, sectionId])
+  @@index([sectionId])
+  @@index([sourceCourseId])
+}
+
+/// Another course whose sections this map may draw on.
+///
+/// Importing is how a course reuses training that already exists somewhere else
+/// rather than copying it in: the sections stay owned and edited by their own
+/// course, and this map only places them. Only courses the importer created or
+/// is named on can be added, and the imported course stays read-only here — it
+/// is edited in its own editor or not at all.
+model CourseMapImport {
+  id             String @id @default(uuid())
+  courseId       String
+  course         Course @relation("MapImportOwner", fields: [courseId], references: [id], onDelete: Cascade)
+  sourceCourseId String
+  sourceCourse   Course @relation("MapImportSource", fields: [sourceCourseId], references: [id], onDelete: Cascade)
+  /// Where this course sits in the staging manager, under the importing course's
+  /// own content.
+  order          Int    @default(0)
+
+  @@unique([courseId, sourceCourseId])
+  @@index([sourceCourseId])
+}
+
+/// The generated quiz for one layer of a map, and the module it lives in.
+///
+/// One per depth rather than one per parent: everything the same number of jumps
+/// from the root is asked about together, in a single question, so a learner
+/// answers "what applies to me at this level" once instead of once per branch
+/// they happen to have taken.
+model DirectedLayerQuiz {
+  id       String @id @default(uuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  /// The depth this quiz asks about — the depth of the nodes it offers, so the
+  /// module reads "Directed learning quiz 1" for the root's children.
+  depth    Int
+  quizId   String @unique
+  quiz     Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  /// The auto-managed module the quiz sits in. Written by the map generator and
+  /// read-only in the structure editor.
+  moduleId String @unique
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, depth])
+}
+
+/// Which branches one learner picked at one layer quiz.
+///
+/// Kept apart from QuizAnswer, which freezes what somebody was asked and what
+/// they said and is never rewritten. This is not a record of a sitting: it is
+/// the learner's current path, overwritten every time they retake, and read on
+/// every load of the course to decide what they are served.
+///
+/// Deselecting removes content from their course and touches no progress row, so
+/// someone who drops a branch and later takes it back finds their training
+/// exactly where they left it.
+model DirectedChoice {
+  id            String   @id @default(uuid())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId      String
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  depth         Int
+  /// The nodes they ticked, by id. Node ids rather than option ids because a
+  /// node offered by two parents has two options and either one means the same
+  /// thing, and because an edge redrawn by the author must not lose an answer.
+  chosenNodeIds String[] @default([])
+  answeredAt    DateTime @default(now())
+
+  @@unique([userId, courseId, depth])
+  @@index([courseId])
 }

@@ -3,7 +3,7 @@
  * Description: Client for the quiz, question and attempt endpoints.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 import HttpHelper from '@/utils/http-helper';
 
@@ -37,12 +37,22 @@ export interface QuizQuestion {
  *                  was sent to. May stand alone or be the whole of a quiz set;
  *                  never in a lesson section.
  */
-export type QuizType = 'LEARNING_CHECK' | 'EXAM' | 'ONE_TIME';
+export type QuizType = 'LEARNING_CHECK' | 'EXAM' | 'ONE_TIME' | 'DIRECTED';
+
+/**
+ * The kinds an author may pick from.
+ *
+ * DIRECTED is missing on purpose: a layer quiz is generated from a course map,
+ * its options are the map's connections, and it is rewritten every time a node
+ * moves. The editor never offers it, and the server refuses it if asked.
+ */
+export const AUTHORABLE_QUIZ_TYPES: QuizType[] = ['LEARNING_CHECK', 'EXAM', 'ONE_TIME'];
 
 export const QUIZ_TYPE_LABELS: Record<QuizType, string> = {
   LEARNING_CHECK: 'Learning check',
   EXAM: 'Exam',
   ONE_TIME: 'One-time link',
+  DIRECTED: 'Directed learning quiz',
 };
 
 export const QUIZ_TYPE_HINTS: Record<QuizType, string> = {
@@ -53,6 +63,9 @@ export const QUIZ_TYPE_HINTS: Record<QuizType, string> = {
   ONE_TIME:
     'Sent as a link. One attempt only, then it disappears — and it never shows on the Quizzes ' +
     'tab, only asscessable with the link.',
+  DIRECTED:
+    'Generated from the course map. Asks the learner which branches apply to them, and what ' +
+    'they tick is what unlocks the next layer. Never timed, never scored, always retakeable.',
 };
 
 /**
@@ -89,7 +102,7 @@ export interface Quiz {
   showAnswers: boolean;
   /**
    * Whether an exam may be sat again. Off is what an exam means unless the
-   * author says otherwise, and it is what decides whether Try again appears on
+   * author says otherwise, and it is what decides whether Restart Quiz appears on
    * the result screen.
    *
    * Ignored on the other two kinds: a learning check is always retakeable and a

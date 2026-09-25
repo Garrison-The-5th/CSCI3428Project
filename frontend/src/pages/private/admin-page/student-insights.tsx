@@ -3,7 +3,7 @@
  * Description: Student insights — who has been given learning, and how they are getting on.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Student insights — who has been given learning, and how they are getting on.
@@ -197,8 +197,70 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
     );
   }
 
+  /**
+   * One card under a learner's name. The same card whichever list it is in —
+   * what a lesson and a quiz set differ in is the heading they are filed under,
+   * not what is worth reporting about them.
+   */
+  const learnerCard = (course: LearnerCourseProgress) => {
+    const cover = imageSrc(course.imageData, course.imageType);
+
+    return (
+      <Card
+        key={course.courseId}
+        onClick={() => setOpenCourseId(course.courseId)}
+        className="flex cursor-pointer flex-col gap-0 overflow-hidden bg-light-gray p-0 shadow-sm
+          transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+      >
+        <div className="flex h-24 items-center justify-center overflow-hidden bg-navy/10">
+          {cover ? (
+            <img src={cover} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-sm text-dark-gray">No photo</span>
+          )}
+        </div>
+
+        <CardHeader className="p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="break-words text-base text-dark-gray">{course.title}</CardTitle>
+            {course.revoked && <Badge className="bg-gray-400 px-2 text-white">Turned off</Badge>}
+          </div>
+
+          <span className="mt-2 block h-2 overflow-hidden rounded-full bg-gray-300">
+            <span
+              className="block h-full rounded-full bg-[#5b9748]"
+              style={{ width: `${course.percentComplete}%` }}
+            />
+          </span>
+          <p className="mt-1 text-xs text-dark-gray">
+            {course.percentComplete}% · {course.completedSections}/{course.totalSections} sections
+          </p>
+        </CardHeader>
+
+        <CardContent
+          className="flex items-center justify-between border-t border-gray-300 p-4 text-xs
+            font-medium text-dark-gray"
+        >
+          <span className="flex items-center gap-1">
+            <ClockIcon className="w-4 h-4" />
+            {lastSeen(course.lastActivityAt)}
+          </span>
+          <span>{course.averageScore === null ? 'No marks' : `${course.averageScore}% avg`}</span>
+        </CardContent>
+      </Card>
+    );
+  };
+
   // ---- One learner, their courses as cards ----
   if (openLearner) {
+    /*
+      Filed apart, for the reason in the comment on the two grids below. Anything
+      with no kind at all is a course: that is what every course was before quiz
+      sets existed, and it is what an older payload means.
+    */
+    const learnerLessons = openLearner.courses.filter((course) => course.kind !== 'QUIZ_SET');
+    const learnerQuizzes = openLearner.courses.filter((course) => course.kind === 'QUIZ_SET');
+
     return (
       <div className="flex flex-col gap-6">
         <Button
@@ -225,8 +287,9 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
             )}
             <div className="mt-1 flex flex-wrap gap-2">
               <Badge className="bg-navy px-2 text-white">
-                {openLearner.courses.length} course
-                {openLearner.courses.length === 1 ? '' : 's'}
+                {learnerLessons.length} course{learnerLessons.length === 1 ? '' : 's'}
+                {learnerQuizzes.length > 0 &&
+                  ` · ${learnerQuizzes.length} quiz${learnerQuizzes.length === 1 ? '' : 'zes'}`}
               </Badge>
               <Badge className="bg-[#5b9748] px-2 text-white">
                 {openLearner.overallPercent}% overall
@@ -245,62 +308,39 @@ const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
-            {openLearner.courses.map((course) => {
-              const cover = imageSrc(course.imageData, course.imageType);
+          <div className="flex flex-col gap-8">
+            {/*
+    Courses above, quizzes below.
 
-              return (
-                <Card
-                  key={course.courseId}
-                  onClick={() => setOpenCourseId(course.courseId)}
-                  className="flex cursor-pointer flex-col gap-0 overflow-hidden bg-light-gray p-0
-                    shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-                >
-                  <div className="flex h-24 items-center justify-center overflow-hidden bg-navy/10">
-                    {cover ? (
-                      <img src={cover} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="text-sm text-dark-gray">No photo</span>
-                    )}
-                  </div>
+    A learner holds both through the same kind of assignment, which is
+    why they arrive in one list — but a quiz set has no sections to be
+    part way through, so its bar and its "3/8 sections" are measuring
+    the authoring rows rather than any journey. Side by side with a
+    lesson's they invite a comparison that is not there to be made.
+    Anything with no kind is filed as a course: that is what every
+    course was before quiz sets existed.
+  */}
+            {learnerLessons.length > 0 && (
+              <section>
+                <h3 className="mb-3 text-lg font-bold text-dark-gray">
+                  Courses{` (${learnerLessons.length})`}
+                </h3>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
+                  {learnerLessons.map(learnerCard)}
+                </div>
+              </section>
+            )}
 
-                  <CardHeader className="p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="break-words text-base text-dark-gray">
-                        {course.title}
-                      </CardTitle>
-                      {course.revoked && (
-                        <Badge className="bg-gray-400 px-2 text-white">Turned off</Badge>
-                      )}
-                    </div>
-
-                    <span className="mt-2 block h-2 overflow-hidden rounded-full bg-gray-300">
-                      <span
-                        className="block h-full rounded-full bg-[#5b9748]"
-                        style={{ width: `${course.percentComplete}%` }}
-                      />
-                    </span>
-                    <p className="mt-1 text-xs text-dark-gray">
-                      {course.percentComplete}% · {course.completedSections}/{course.totalSections}{' '}
-                      sections
-                    </p>
-                  </CardHeader>
-
-                  <CardContent
-                    className="flex items-center justify-between border-t border-gray-300 p-4
-                      text-xs font-medium text-dark-gray"
-                  >
-                    <span className="flex items-center gap-1">
-                      <ClockIcon className="w-4 h-4" />
-                      {lastSeen(course.lastActivityAt)}
-                    </span>
-                    <span>
-                      {course.averageScore === null ? 'No marks' : `${course.averageScore}% avg`}
-                    </span>
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {learnerQuizzes.length > 0 && (
+              <section>
+                <h3 className="mb-3 text-lg font-bold text-dark-gray">
+                  Quizzes{` (${learnerQuizzes.length})`}
+                </h3>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
+                  {learnerQuizzes.map(learnerCard)}
+                </div>
+              </section>
+            )}
           </div>
         )}
 

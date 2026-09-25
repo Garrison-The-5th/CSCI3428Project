@@ -10,6 +10,7 @@ import 'dotenv/config'; // Load environment variables from .env file
 // import these to ensure controllers are registered
 import '@/controllers/assignment-controller/assignment-controller';
 import '@/controllers/auth-controller/auth-controller';
+import '@/controllers/course-map-controller/course-map-controller';
 import '@/controllers/curriculum-controller/curriculum-controller';
 import '@/controllers/privacy-controller/privacy-controller';
 import '@/controllers/public-controller/public-assignment-controller';

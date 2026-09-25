@@ -16,7 +16,7 @@
     "test:coverage": "jest --selectProjects unit --coverage && jest --selectProjects integration --runInBand",
     "test:watch": "jest --selectProjects unit --watch",
     "check": "npm run typecheck && npm run test && npm run test:smoke",
-    "test:smoke": "for s in gridcheck assigncheck timercheck overhaulcheck publishcheck; do echo \"--- $s\"; out=$(npx ts-node -r tsconfig-paths/register scripts/$s.ts) || { echo \"$out\" | tail -20; exit 1; }; echo \"$out\" | grep -E \"ALL PASSED|FAILED\"; done",
+    "test:smoke": "for s in gridcheck assigncheck timercheck overhaulcheck publishcheck previewcheck; do echo \"--- $s\"; out=$(npx ts-node -r tsconfig-paths/register scripts/$s.ts) || { echo \"$out\" | tail -20; exit 1; }; echo \"$out\" | grep -E \"ALL PASSED|FAILED\"; done",
     "start": "node src/index.js",
     "prisma:generate": "npx prisma generate --config prisma/prisma.config.ts",
     "db:setup": "npx prisma migrate deploy --config prisma/prisma.config.ts && npx prisma generate --config prisma/prisma.config.ts",

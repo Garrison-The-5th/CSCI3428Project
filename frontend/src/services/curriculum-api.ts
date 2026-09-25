@@ -118,6 +118,14 @@ export interface Note {
   updatedAt: string;
 }
 
+/** One layer quiz, and the content a learner must see before it opens. */
+export interface DirectedLock {
+  quizId: string;
+  sectionId: string;
+  depth: number;
+  requires: string[];
+}
+
 export interface Course {
   id: string;
   title: string;
@@ -164,6 +172,29 @@ export interface Course {
    * on and finish. Absent on older payloads, which all locked.
    */
   lockAfterDue?: boolean;
+  /**
+   * Whether this course's path is built from a map rather than read straight
+   * through.
+   *
+   * Absent on everything that predates directed learning, which reads as off.
+   * On the learner side it is only a fact about how the course was built — what
+   * they actually receive has already been narrowed to their branches by the
+   * server, so nothing on the player has to branch on it.
+   */
+  directedLearning?: boolean;
+  /** When the author last staged this course to its map. Author payloads only. */
+  stagedAt?: string | null;
+  /**
+   * Which layer quizzes are still shut, and what each is waiting for.
+   *
+   * A layer quiz is the end of the layer above it — read that content, then say
+   * what applies to you next — so it stays closed until that content has been
+   * seen. Sent as plain section ids rather than as a rule, because the player
+   * already knows how to ask whether a section has been viewed.
+   *
+   * Only present on a directed course.
+   */
+  directedLocks?: DirectedLock[];
   publishedAt: string | null;
   /** Which version learners are served. 0 means never published. */
   publishedVersion?: number;

@@ -3,7 +3,7 @@
  * Description: Assigned learning — who has been given what, and how far they have got.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Assigned learning — who has been given what, and how far they have got.
@@ -125,6 +125,22 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
     if (!query) return courses;
     return courses.filter((course) => course.title.toLowerCase().includes(query));
   }, [courses, search]);
+
+  /*
+    Lessons above, quiz sets below.
+
+    They arrive in one list because they are handed out and chased the same way,
+    but they do not read the same way. A quiz set's sections are authoring
+    furniture — one row per quiz — so "Sections: 4" beside a quiz set is a number
+    about the plumbing, and mixed into a grid of lessons it invites the reader to
+    compare it with a lesson's four chapters. Splitting is cheaper than teaching
+    every figure on the card to mean two things.
+
+    Anything with no kind at all is filed as a lesson: that is what every course
+    was before quiz sets existed, and it is what an older payload means.
+  */
+  const lessonCards = visibleCourses.filter((course) => course.kind !== 'QUIZ_SET');
+  const quizCards = visibleCourses.filter((course) => course.kind === 'QUIZ_SET');
 
   // ---- One course's roster ----
   if (openCourse) {
@@ -251,6 +267,69 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
     );
   }
 
+  /** One row of the two grids below. Identical for a lesson and a quiz set —
+      what differs is the heading it is filed under. */
+  const card = (course: AssignedCourse) => {
+    const cover = imageSrc(course.imageData, course.imageType);
+    const percent =
+      course.assignedCount === 0
+        ? 0
+        : Math.round((course.completedCount / course.assignedCount) * 100);
+
+    return (
+      <Card
+        key={course.courseId}
+        onClick={() => setOpenCourseId(course.courseId)}
+        className="flex cursor-pointer flex-col gap-0 overflow-hidden bg-light-gray p-0 shadow-sm
+          transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+      >
+        <div className="flex h-28 items-center justify-center overflow-hidden bg-navy/10">
+          {cover ? (
+            <img src={cover} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-sm text-dark-gray">No photo</span>
+          )}
+        </div>
+
+        <CardHeader className="p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="break-words text-lg text-dark-gray">{course.title}</CardTitle>
+            {!course.published && <Badge className="bg-gray-400 px-2 text-white">Draft</Badge>}
+            {course.overdueCount > 0 && (
+              <Badge className="bg-danger px-2 text-white">{course.overdueCount} overdue</Badge>
+            )}
+          </div>
+
+          <p className="mt-2 text-sm text-dark-gray">
+            {course.assignedCount === 0
+              ? 'Not handed to anyone yet'
+              : `${course.completedCount} of ${course.assignedCount} finished`}
+          </p>
+          <span className="mt-1 block h-2 overflow-hidden rounded-full bg-gray-300">
+            <span
+              className="block h-full rounded-full bg-[#5b9748]"
+              style={{ width: `${percent}%` }}
+            />
+          </span>
+        </CardHeader>
+
+        <CardContent
+          className="flex items-center justify-between border-t border-gray-300 p-4 text-sm
+            font-medium text-dark-gray"
+        >
+          <span>Assigned: {course.assignedCount}</span>
+          {/* A quiz set stores one section per quiz, so the same figure is a
+                count of quizzes there and of chapters on a lesson. Naming it
+                for what it counts is the difference between the number meaning
+                something and the reader having to know the schema. */}
+          <span>
+            {course.kind === 'QUIZ_SET' ? 'Quizzes' : 'Sections'}: {course.totalSections}
+          </span>
+        </CardContent>
+      </Card>
+    );
+  };
+
   // ---- Card grid ----
   if (loading) {
     return <p className="py-8 text-center text-dark-gray">Loading assigned learning...</p>;
@@ -278,67 +357,31 @@ const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
-          {visibleCourses.map((course) => {
-            const cover = imageSrc(course.imageData, course.imageType);
-            const percent =
-              course.assignedCount === 0
-                ? 0
-                : Math.round((course.completedCount / course.assignedCount) * 100);
+        <div className="flex flex-col gap-8">
+          {/* Lessons first, quiz sets under them. Each section is drawn only
+      when it has something in it, so an author who writes only lessons
+      never sees an empty Quizzes heading. */}
+          {lessonCards.length > 0 && (
+            <section>
+              <h2 className="mb-3 text-xl font-bold text-dark-gray">
+                Courses{` (${lessonCards.length})`}
+              </h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
+                {lessonCards.map(card)}
+              </div>
+            </section>
+          )}
 
-            return (
-              <Card
-                key={course.courseId}
-                onClick={() => setOpenCourseId(course.courseId)}
-                className="flex cursor-pointer flex-col gap-0 overflow-hidden bg-light-gray p-0
-                  shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              >
-                <div className="flex h-28 items-center justify-center overflow-hidden bg-navy/10">
-                  {cover ? (
-                    <img src={cover} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-sm text-dark-gray">No photo</span>
-                  )}
-                </div>
-
-                <CardHeader className="p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle className="break-words text-lg text-dark-gray">
-                      {course.title}
-                    </CardTitle>
-                    {!course.published && (
-                      <Badge className="bg-gray-400 px-2 text-white">Draft</Badge>
-                    )}
-                    {course.overdueCount > 0 && (
-                      <Badge className="bg-danger px-2 text-white">
-                        {course.overdueCount} overdue
-                      </Badge>
-                    )}
-                  </div>
-
-                  <p className="mt-2 text-sm text-dark-gray">
-                    {course.assignedCount === 0
-                      ? 'Not handed to anyone yet'
-                      : `${course.completedCount} of ${course.assignedCount} finished`}
-                  </p>
-                  <span className="mt-1 block h-2 overflow-hidden rounded-full bg-gray-300">
-                    <span
-                      className="block h-full rounded-full bg-[#5b9748]"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </span>
-                </CardHeader>
-
-                <CardContent
-                  className="flex items-center justify-between border-t border-gray-300 p-4 text-sm
-                    font-medium text-dark-gray"
-                >
-                  <span>Assigned: {course.assignedCount}</span>
-                  <span>Sections: {course.totalSections}</span>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {quizCards.length > 0 && (
+            <section>
+              <h2 className="mb-3 text-xl font-bold text-dark-gray">
+                Quizzes{` (${quizCards.length})`}
+              </h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-6">
+                {quizCards.map(card)}
+              </div>
+            </section>
+          )}
         </div>
       )}
     </div>
