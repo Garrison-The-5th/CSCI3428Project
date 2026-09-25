@@ -13,15 +13,15 @@ Satisfies TTG Technology Standards §1.1.3, §5.1 (core testing strategy), §5.2
 Unit → Integration → E2E → Security → Performance
 ```
 
-| Layer | Tool | Where | Count | Needs a database? |
-|---|---|---|---|---|
-| Backend unit | Jest + ts-jest | `backend/tests/unit/` | 324 | No — a unit test that touches Prisma fails loudly |
-| Backend integration | Jest + Supertest | `backend/tests/integration/` | 38 | Yes |
-| Database | Jest + Prisma | `backend/tests/integration/schema.test.ts` | included above | Yes |
-| Frontend unit/component | Jest + React Testing Library | `frontend/tests/` | 30 | No |
-| E2E | Playwright | `frontend/e2e/` | 16 | Yes, plus both servers |
-| Security | CodeQL + `npm audit` | CI only | — | No |
-| Performance | not implemented (§5.4 recommends, does not require) | — | — | — |
+| Layer                   | Tool                                                | Where                                      | Count          | Needs a database?                                 |
+| ----------------------- | --------------------------------------------------- | ------------------------------------------ | -------------- | ------------------------------------------------- |
+| Backend unit            | Jest + ts-jest                                      | `backend/tests/unit/`                      | 562            | No — a unit test that touches Prisma fails loudly |
+| Backend integration     | Jest + Supertest                                    | `backend/tests/integration/`               | 38             | Yes                                               |
+| Database                | Jest + Prisma                                       | `backend/tests/integration/schema.test.ts` | included above | Yes                                               |
+| Frontend unit/component | Jest + React Testing Library                        | `frontend/tests/`                          | 110            | No                                                |
+| E2E                     | Playwright                                          | `frontend/e2e/`                            | 16             | Yes, plus both servers                            |
+| Security                | CodeQL + `npm audit`                                | CI only                                    | —              | No                                                |
+| Performance             | not implemented (§5.4 recommends, does not require) | —                                          | —              | —                                                 |
 
 ---
 
@@ -86,7 +86,7 @@ a test that reaches for the database fails with a message telling you to move it
 to `tests/integration` rather than quietly opening a connection pool.
 
 **Integration.** The real Express stack through Supertest, and the real database
-through Prisma. These check that middleware is *wired in* and in the right
+through Prisma. These check that middleware is _wired in_ and in the right
 order — the failure mode unit tests cannot see. Also the §5.5 database tests:
 migration state and ordering, schema and uniqueness validation, and foreign-key
 and cascade integrity.
@@ -107,14 +107,14 @@ report.
 `.github/workflows/pr-checks.yml` runs on every pull request and on every push
 to `main` or `dev`. Nothing merges without all of it passing:
 
-| Job | What fails it |
-|---|---|
-| Lint and format | Any ESLint error **or warning**; any Prettier difference |
-| Type check | Any type error in backend src, scripts, tests or frontend |
-| Backend tests | Any failing test, or coverage below threshold |
-| Frontend tests | Any failing test, or coverage below threshold |
-| Build verification | A failed build, or a missing artifact |
-| E2E | Any failing flow (runs after the cheap jobs pass) |
+| Job                | What fails it                                             |
+| ------------------ | --------------------------------------------------------- |
+| Lint and format    | Any ESLint error **or warning**; any Prettier difference  |
+| Type check         | Any type error in backend src, scripts, tests or frontend |
+| Backend tests      | Any failing test, or coverage below threshold             |
+| Frontend tests     | Any failing test, or coverage below threshold             |
+| Build verification | A failed build, or a missing artifact                     |
+| E2E                | Any failing flow (runs after the cheap jobs pass)         |
 
 `.github/workflows/security.yml` adds CodeQL, `npm audit` at high severity, and
 SBOM generation, on the same triggers plus weekly.
@@ -144,7 +144,7 @@ floor, move the floor.
 ## Writing a new test
 
 - **Name the behaviour, not the function.** `it('refuses a quiz that is not
-  assigned to them')` reads as a specification; `it('tests submitAttempt')` does
+assigned to them')` reads as a specification; `it('tests submitAttempt')` does
   not.
 - **Comment the ones whose reason is not obvious.** Several tests here exist
   because of a specific bug or a specific standards clause. Say which — the next
@@ -158,8 +158,24 @@ floor, move the floor.
 
 `backend/scripts/*.ts` predate this suite and still run via
 `npm run test:smoke`. They exercise real end-to-end scenarios against a live
-database and print their findings rather than asserting.
+database. They do assert — each counts its failures and exits non-zero — and
+`npm run check --prefix backend` runs them after the Jest suites, so they gate
+that command even though CI does not run them.
 
-They are kept because they still catch things, but they are **not** a substitute
-for the Jest suites and are not part of the merge gate. Converting each into
+**Point them at a throwaway database.** They have no equivalent of
+`setup-test-db.ts`'s guard: they use `DATABASE_URL` as they find it, and they
+create and delete rows in whatever that names. They tidy up after themselves, so
+this is less drastic than the integration suite's truncation, but a crashed run
+leaves its fixtures behind and the next run then fails on them.
+
+```bash
+docker compose exec postgres createdb -U <user> learning_test
+DATABASE_URL="postgresql://…/learning_test" npm run test:smoke --prefix backend
+```
+
+They are kept because they still catch things — three of them were red for a
+while, each because the behaviour they described had deliberately changed under
+them, and `previewcheck.ts` exists because the authoring preview and the real
+learner path can disagree in ways neither one looks wrong on its own. They are
+not a substitute for the Jest suites. Converting each into
 real integration tests is worthwhile, and would retire the script directory.

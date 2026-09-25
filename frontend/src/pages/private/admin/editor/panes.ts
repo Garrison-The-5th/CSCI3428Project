@@ -18,6 +18,7 @@ export {
   type PendingVersion,
 } from '@/pages/private/admin/editor/archive-pane';
 export { default as CourseAccess } from '@/pages/private/admin/editor/course-access';
+export { default as CourseMapPane } from '@/pages/private/admin/editor/course-map/course-map-pane';
 export { default as LandingPageEditor } from '@/pages/private/admin/editor/landing-page-editor';
 export { default as QuizPane } from '@/pages/private/admin/editor/quiz-pane';
 export { default as StructureEditor } from '@/pages/private/admin/editor/structure-editor';

@@ -3,7 +3,7 @@
  * Description: Exercises the two kinds of assignment: that a link opens exactly its own item.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Exercises the two kinds of assignment: that a link opens exactly its own item
@@ -21,6 +21,7 @@ import CurriculumService from '@/services/curriculum-service/curriculum-service'
 import PublicationService from '@/services/publication-service/publication-service';
 import QuizService from '@/services/quiz-service/quiz-service';
 
+import { CourseKind } from '../generated/prisma';
 import { prisma } from '../prisma/prisma-client';
 
 let failures = 0;
@@ -37,8 +38,8 @@ function check(label: string, actual: unknown, expected: unknown) {
 }
 
 /** A published course with one section, ready to assign, owned by `authorId`. */
-async function makeCourse(title: string, authorId: number) {
-  const course = await CurriculumService.createCourse(title, undefined, authorId);
+async function makeCourse(title: string, authorId: number, kind: CourseKind = CourseKind.LESSON) {
+  const course = await CurriculumService.createCourse(title, kind, authorId);
   const [module] = await CurriculumGateway.getModules(course!.id);
   await CurriculumService.createSection(course!.id, { moduleId: module.id, title: 'Only' });
   // Going live takes a snapshot, so this is the publish path rather than a
@@ -121,14 +122,29 @@ async function main() {
   const now = await CurriculumService.getCoursesForLearner(other);
   check('two courses', new Set(now.map((c) => c.id)), new Set([alpha, charlie]) as unknown);
 
-  console.log('\na quiz inside an enrolled course is reachable; one outside is not');
-  const [sectionOfBravo] = (await CurriculumGateway.getCourseById(bravo))!.sections;
-  const hidden = await QuizService.createQuiz({ title: 'Hidden', sectionId: sectionOfBravo.id });
-  await QuizService.updateQuiz(hidden.id, { published: true });
+  console.log('\na quiz inside an enrolled quiz set is reachable; one outside is not');
+  /*
+    Both quizzes live in quiz sets, not in lessons.
 
-  const [sectionOfAlpha] = (await CurriculumGateway.getCourseById(alpha))!.sections;
-  const visible = await QuizService.createQuiz({ title: 'Visible', sectionId: sectionOfAlpha.id });
-  await QuizService.updateQuiz(visible.id, { published: true });
+    The Quizzes tab lists what was built on the Create a quiz side. A lesson's
+    quizzes belong to the lesson around them and are taken in place, from the
+    Learning tab — `QuizService.getQuizzesForLearner` filters to `QUIZ_SET` for
+    exactly that reason. This scenario is about enrolment deciding reach, so it
+    is asked of the kind of course the tab actually lists; asking it of a lesson
+    only proved that lessons are absent from it, which is a different fact.
+  */
+  const outside = await makeCourse('ASSIGN TEST Delta — safe to delete', author.id, 'QUIZ_SET');
+  const inside = await makeCourse('ASSIGN TEST Echo — safe to delete', author.id, 'QUIZ_SET');
+  await AssignmentService.assign({ email: other, type: 'PLATFORM', courseId: inside });
+
+  const [sectionOfOutside] = (await CurriculumGateway.getCourseById(outside))!.sections;
+  const hidden = await QuizService.createQuiz({
+    title: 'Hidden',
+    sectionId: sectionOfOutside.id,
+  });
+
+  const [sectionOfInside] = (await CurriculumGateway.getCourseById(inside))!.sections;
+  const visible = await QuizService.createQuiz({ title: 'Visible', sectionId: sectionOfInside.id });
 
   /*
    * A question, so the redaction checks below have an answer key to redact.
@@ -155,8 +171,8 @@ async function main() {
     [],
   );
 
-  await PublicationService.publish(alpha, null);
-  await PublicationService.publish(bravo, null);
+  await PublicationService.publish(inside, null);
+  await PublicationService.publish(outside, null);
 
   const reachable = await QuizService.getQuizzesForLearner(other);
   check(

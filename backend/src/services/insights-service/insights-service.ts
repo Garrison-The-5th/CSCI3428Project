@@ -3,14 +3,17 @@
  * Description: Per-learner progress reporting for authors and admins.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-25
  */
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
+import CourseMapService from '@/services/course-map-service/course-map-service';
 import PublicationService from '@/services/publication-service/publication-service';
 import QuizService from '@/services/quiz-service/quiz-service';
+
+import { CourseKind } from '../../../generated/prisma';
 
 /**
  * How the people who have been given learning are actually getting on.
@@ -27,6 +30,15 @@ export interface LearnerCourseProgress {
   title: string;
   imageData: string | null;
   imageType: string | null;
+  /**
+   * Lesson or quiz set.
+   *
+   * The dashboard files the two apart under a learner's name. They are held the
+   * same way — one assignment row each — but they are not read the same way: a
+   * quiz set has no sections to be part way through, so "3/8 sections" beside a
+   * quiz is a number about the plumbing rather than about the learner.
+   */
+  kind: CourseKind;
   dueDate: string | null;
   totalSections: number;
   completedSections: number;
@@ -135,12 +147,22 @@ export default class InsightsService {
         .filter((assignment) => assignment.courseId !== null)
         .map(async (assignment): Promise<LearnerCourseProgress | null> => {
           const courseId = assignment.courseId!;
-          const [snapshot, row] = await Promise.all([
+          const [published, row] = await Promise.all([
             PublicationService.getLiveSnapshot(courseId),
             CurriculumGateway.getCourseById(courseId),
           ]);
           // Assigned but never published, or since deleted: nothing to measure.
-          if (!snapshot || !row) return null;
+          if (!published || !row) return null;
+
+          /*
+            Measured against this learner's own path, not the whole map.
+
+            A directed course's snapshot carries every branch; this person was
+            only ever offered the ones they picked. Counting the rest put an
+            author's roster permanently at odds with what the learner's own
+            dashboard told them, and made somebody who had finished look stuck.
+          */
+          const snapshot = await CourseMapService.forLearner(published, user?.id ?? null);
 
           const sectionIds = snapshot.sections.map((section) => section.id);
           const quizIds = snapshot.sections.flatMap((section) =>
@@ -168,6 +190,7 @@ export default class InsightsService {
           return {
             courseId,
             title: snapshot.title,
+            kind: row.kind,
             imageData: snapshot.imageData,
             imageType: snapshot.imageType,
             dueDate: assignment.dueDate

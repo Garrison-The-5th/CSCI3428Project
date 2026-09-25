@@ -3,7 +3,7 @@
  * Description: The lesson library.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * AdminLearning - the lesson library.
@@ -38,13 +38,22 @@ type Toast = { show: boolean; message: string; type: 'success' | 'error' };
  * picks Drafts is saying "stop showing me the published ones", and a page that
  * answered by merging both into one grid would have ignored them.
  */
-type Filter = 'all' | 'published' | 'drafts' | 'required';
+type Filter = 'all' | 'published' | 'drafts';
 
+/*
+  Published and draft, and nothing else.
+
+  There was a Required option here too. It never narrowed this page in the way
+  the other two do — required is not a state a lesson is *instead of* published
+  or draft, so picking it left both sections standing and only thinned the cards
+  inside them — and the Required badge on each card already says the same thing
+  without a mode to be in. Whether a lesson is required is set on its own landing
+  page, which is where an author changes it.
+*/
 const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
   { key: 'all', label: 'Everything', hint: 'Every lesson, published and draft' },
   { key: 'published', label: 'Published', hint: 'Live, and reachable by whoever holds them' },
   { key: 'drafts', label: 'Drafts', hint: 'Not published, so no learner can reach them yet' },
-  { key: 'required', label: 'Required', hint: 'Marked as required learning' },
 ];
 
 const inputClass = 'bg-white text-dark-gray';
@@ -125,31 +134,23 @@ const AdminLearning = () => {
   const matching = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return lessons
-      .filter((course) => (filter === 'required' ? course.required : true))
-      .filter((course) => {
-        if (!query) return true;
-        return [
-          course.title,
-          course.shortDescription ?? '',
-          ...course.tags,
-          ...course.sections.map((section) => `${section.number} ${section.title}`),
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(query);
-      });
+    return lessons.filter((course) => {
+      if (!query) return true;
+      return [
+        course.title,
+        course.shortDescription ?? '',
+        ...course.tags,
+        ...course.sections.map((section) => `${section.number} ${section.title}`),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
   }, [lessons, search, filter]);
 
-  /**
-   * Which of the two sections to draw.
-   *
-   * Required is not a third state — a required lesson is still published or
-   * still a draft — so it narrows the cards above and leaves both sections
-   * standing. The other two hide the section they are not about.
-   */
-  const showPublished = filter === 'all' || filter === 'published' || filter === 'required';
-  const showDrafts = filter === 'all' || filter === 'drafts' || filter === 'required';
+  /** Which of the two sections to draw. Each filter hides the one it is not about. */
+  const showPublished = filter === 'all' || filter === 'published';
+  const showDrafts = filter === 'all' || filter === 'drafts';
 
   const published = matching.filter((course) => course.published);
   const drafts = matching.filter((course) => !course.published);
@@ -315,11 +316,7 @@ const AdminLearning = () => {
               <p className="mb-4 text-sm text-dark-gray">Visible to learners now.</p>
               {published.length === 0 ? (
                 <p className="text-dark-gray">
-                  {search.trim()
-                    ? 'No published lesson matches that.'
-                    : filter === 'required'
-                      ? 'No published lesson is marked required.'
-                      : 'Nothing published yet.'}
+                  {search.trim() ? 'No published lesson matches that.' : 'Nothing published yet.'}
                 </p>
               ) : (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">
@@ -337,11 +334,7 @@ const AdminLearning = () => {
               <p className="mb-4 text-sm text-dark-gray">Hidden from learners until published.</p>
               {drafts.length === 0 ? (
                 <p className="text-dark-gray">
-                  {search.trim()
-                    ? 'No draft matches that.'
-                    : filter === 'required'
-                      ? 'No draft is marked required.'
-                      : 'No drafts.'}
+                  {search.trim() ? 'No draft matches that.' : 'No drafts.'}
                 </p>
               ) : (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-6">

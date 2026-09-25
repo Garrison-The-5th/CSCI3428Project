@@ -4,9 +4,10 @@
  *   validation and timed sessions.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
+import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import EnrolmentService from '@/services/enrolment-service/enrolment-service';
@@ -15,6 +16,7 @@ import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service
 
 jest.mock('@/gateways/quiz-gateway/quiz-gateway');
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
+jest.mock('@/gateways/course-map-gateway/course-map-gateway');
 jest.mock('@/gateways/assignment-gateway/assignment-gateway');
 jest.mock('@/services/publication-service/publication-service');
 jest.mock('@/services/enrolment-service/enrolment-service');
@@ -24,6 +26,7 @@ const mockCurriculum = CurriculumGateway as jest.Mocked<typeof CurriculumGateway
 const mockPublication = PublicationService as jest.Mocked<typeof PublicationService>;
 const mockEnrolment = EnrolmentService as jest.Mocked<typeof EnrolmentService>;
 const mockAssignments = AssignmentGateway as jest.Mocked<typeof AssignmentGateway>;
+const mockCourseMap = CourseMapGateway as jest.Mocked<typeof CourseMapGateway>;
 
 /** A published quiz with a known answer key: option `a2` is correct. */
 function quizFixture(overrides: Record<string, unknown> = {}) {
@@ -205,13 +208,35 @@ describe('submitAttempt — grading', () => {
 
   it('falls back to the live row for a quiz assigned on its own', async () => {
     mockPublication.findPublishedQuiz.mockResolvedValue(null);
-    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture() as never);
+    // Sectionless, which is what "on its own" means: there is no course behind
+    // it and so no snapshot it could have been found in. The fixture used to
+    // carry a section here, which made this test say one thing and check
+    // another — and hid the gap the case below now covers.
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ sectionId: null }) as never);
 
     const result = await QuizService.submitAttempt(1, 'quiz-1', { q1: 'a2', q2: 'b1' });
 
-    // `live: true` is what keeps a draft or recycled quiz unsubmittable.
+    // `live: true` is what keeps a recycled quiz unsubmittable.
     expect(mockQuizGateway.getQuizById).toHaveBeenCalledWith('quiz-1', true);
     expect(result.score).toBe(2);
+  });
+
+  /**
+   * A quiz inside a course is served from that course's published snapshot or
+   * not at all.
+   *
+   * The `published` column cannot answer this any more: every quiz is written
+   * with it already true, because the course's publication is what gates a quiz
+   * now. So a quiz whose course has never been published, or one added since the
+   * last publish, is absent from every snapshot — and absent is the answer,
+   * rather than falling through to the live row and being gradeable by anyone
+   * who knows the id.
+   */
+  it('refuses a quiz that belongs to a course but is in no published version', async () => {
+    mockPublication.findPublishedQuiz.mockResolvedValue(null);
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ sectionId: 'section-1' }) as never);
+
+    await expect(QuizService.submitAttempt(1, 'quiz-1', { q1: 'a2' })).rejects.toThrow(/not found/);
   });
 
   it('refuses a quiz that cannot be reached at all', async () => {
@@ -1085,5 +1110,91 @@ describe('assertNotPastDue', () => {
 
     await expect(QuizService.assertNotPastDue(1, 'quiz-1')).resolves.toBeUndefined();
     expect(mockCurriculum.getCourseById).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The layer quiz of a directed course belongs to the course map, not to whoever
+ * is looking at the quiz editor. It is generated, it is rewritten whenever a
+ * node moves, and every hand-operated door into it is shut.
+ */
+describe('directed learning quizzes are the map’s, not an author’s', () => {
+  beforeEach(() => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+    } as never);
+    mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'LESSON' } as never);
+    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
+    mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
+  });
+
+  it('refuses to create one by hand', async () => {
+    await expect(QuizService.createQuiz({ title: 'Mine', type: 'DIRECTED' })).rejects.toThrow(
+      /generated from the course map/i,
+    );
+    expect(mockQuizGateway.createQuiz).not.toHaveBeenCalled();
+  });
+
+  it('refuses to turn an ordinary quiz into one', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ type: 'EXAM', typeLocked: false }) as never,
+    );
+
+    await expect(QuizService.updateQuiz('quiz-1', { type: 'DIRECTED' })).rejects.toThrow(
+      /generated from the course map/i,
+    );
+  });
+
+  it('refuses to turn one into an ordinary quiz, published or not', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(
+      quizFixture({ type: 'DIRECTED', typeLocked: false }) as never,
+    );
+
+    await expect(QuizService.updateQuiz('quiz-1', { type: 'EXAM' })).rejects.toThrow(
+      /belongs to the course map/i,
+    );
+  });
+
+  it('refuses to delete one — the way to be rid of it is to redraw the map', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ type: 'DIRECTED' }) as never);
+
+    await expect(QuizService.deleteQuiz('quiz-1')).rejects.toThrow(/disconnect the nodes/i);
+    expect(mockQuizGateway.softDeleteQuiz).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A mark would be a number about nothing. There is no right answer to "which
+   * of these apply to you", and reporting 0% would tell somebody they had got
+   * their own job description wrong.
+   */
+  it('keeps no mark, and records the branches instead', async () => {
+    mockPublication.findPublishedQuiz.mockResolvedValue(quizFixture({ type: 'DIRECTED' }) as never);
+    mockQuizGateway.recordAttempt.mockResolvedValue({ id: 'attempt-1' } as never);
+    mockQuizGateway.recordAnswers.mockResolvedValue({} as never);
+    mockQuizGateway.findOpenSession.mockResolvedValue(null as never);
+    mockCurriculum.recordSectionView.mockResolvedValue({} as never);
+    mockEnrolment.forEmail.mockResolvedValue({
+      courseIds: new Set(['course-1']),
+      dueByCourseId: new Map(),
+    } as never);
+    mockCourseMap.layerForQuiz.mockResolvedValue({
+      id: 'layer-1',
+      courseId: 'course-1',
+      depth: 1,
+      quizId: 'quiz-1',
+      moduleId: 'module-1',
+    } as never);
+    mockCourseMap.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'course-1', parentId: 'root', childId: 'bees', optionId: 'a2' },
+    ] as never);
+    mockCourseMap.saveChoice.mockResolvedValue({} as never);
+
+    await QuizService.submitAttempt(7, 'quiz-1', { q1: ['a2'] });
+
+    expect(mockQuizGateway.recordAttempt).toHaveBeenCalledWith(7, 'quiz-1', 0, 0);
+    // Option a2 is the route to the beekeeping branch, so that is the branch
+    // this person's course grows.
+    expect(mockCourseMap.saveChoice).toHaveBeenCalledWith(7, 'course-1', 1, ['bees']);
   });
 });

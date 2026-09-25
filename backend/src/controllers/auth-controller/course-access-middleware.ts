@@ -12,6 +12,7 @@ import { logger, logSecurityEvent } from '@/config/logger';
 import { AuthenticatedRequest } from '@/controllers/auth-controller/auth-middleware';
 import { AUTHOR_ROLES } from '@/controllers/auth-controller/authorization-middleware';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
+import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
 import EditAttributionService, {
@@ -55,6 +56,12 @@ export const fromElementParam =
   (name = 'id'): CourseResolver =>
   (req) =>
     CurriculumGateway.courseIdFromElement(param(req, name));
+
+/** A map node back to the course whose map it is on. */
+export const fromNodeParam =
+  (name = 'id'): CourseResolver =>
+  (req) =>
+    CourseMapGateway.courseIdFromNode(param(req, name));
 
 export const fromQuizParam =
   (name = 'id'): CourseResolver =>

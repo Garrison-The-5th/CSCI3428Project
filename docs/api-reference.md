@@ -1,6 +1,6 @@
 # API Reference
 
-Every HTTP endpoint the backend exposes: **96 routes** across seven controllers.
+Every HTTP endpoint the backend exposes: **108 routes** across eight controllers.
 
 TTG Technology Standards §1.8 requires "detailed documentation covering all
 endpoints, parameters, request/response formats, and error codes".
@@ -92,6 +92,32 @@ Defined in `backend/src/controllers/**/auth-controller.ts`.
 | `GET` | `/auth/search` | signed in, author/admin | Type-ahead for pickers that name a person — assigning contributors or students |
 | `POST` | `/auth/subscribe` | public | Public by design — anyone may put their address down |
 | `POST` | `/auth/send-email-to-subscribers` | signed in, admin | Public by design — anyone may put their address down |
+
+### `/course-map`
+
+Defined in `backend/src/controllers/**/course-map-controller.ts`.
+
+The directed-learning map: the tree of nodes a lesson's sections are arranged
+into, and the quizzes generated from it. Every route is gated the same way as
+editing the course itself — a map decides what a learner is served, so drawing
+one is an edit to the course.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/course-map/:courseId` | signed in, can edit this course | The map: nodes, connections, the staging pool and what is blocking a publish |
+| `PUT` | `/course-map/:courseId/directed` | signed in, can edit this course | Turns directed learning on or off for this course |
+| `POST` | `/course-map/:courseId/stage` | signed in, can edit this course | The soft publish: settles the root and rebuilds the layer quizzes |
+| `POST` | `/course-map/:courseId/preview` | signed in, can edit this course | The course as this map would deliver it, for the answers in the body. Writes nothing |
+| `PUT` | `/course-map/:courseId/layout` | signed in, can edit this course | Every node's position at once, from Align layers |
+| `POST` | `/course-map/:courseId/nodes` | signed in, can edit this course | Adds a node to the map |
+| `PUT` | `/course-map/nodes/:id` | signed in, can edit this course | Renames a node, or moves it on the canvas |
+| `DELETE` | `/course-map/nodes/:id` | signed in, can edit this course | Removes a node, returning its content to staging |
+| `PUT` | `/course-map/nodes/:id/items` | signed in, can edit this course | A node's whole content list, in its new order |
+| `POST` | `/course-map/nodes/:id/children` | signed in, can edit this course | Connects this node to a child |
+| `DELETE` | `/course-map/nodes/:id/children/:childId` | signed in, can edit this course | Cuts one connection |
+| `GET` | `/course-map/:courseId/available` | signed in, can edit this course | Courses this person may add to staging, minus what is already there |
+| `POST` | `/course-map/:courseId/imports` | signed in, can edit this course | Adds another course's sections to this map's staging |
+| `DELETE` | `/course-map/:courseId/imports/:sourceCourseId` | signed in, can edit this course | Removes an imported course, and anything of its that was placed |
 
 ### `/curriculum`
 

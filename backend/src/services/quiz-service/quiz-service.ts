@@ -3,7 +3,7 @@
  * Description: Quiz grading, answer redaction, question validation and timed sessions.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 import {
   endOfDueDay,
@@ -17,6 +17,7 @@ import { ConflictError, NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
+import CourseMapService from '@/services/course-map-service/course-map-service';
 import EnrolmentService, { dueFor } from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 
@@ -110,6 +111,15 @@ function chosenIds(answer: string | string[] | undefined): string[] {
 const QUIZ_TYPES = Object.values(QuizType) as string[];
 
 /**
+ * The kinds an author may actually pick. DIRECTED is missing on purpose — it is
+ * generated from a course map and belongs to the map, not to whoever is looking
+ * at the quiz editor.
+ */
+export const AUTHORABLE_QUIZ_TYPES: string[] = QUIZ_TYPES.filter(
+  (type) => type !== QuizType.DIRECTED,
+);
+
+/**
  * Reads a quiz kind off a request body, defaulting to EXAM.
  *
  * Absent means EXAM rather than an error, because "a quiz" with nothing said
@@ -121,8 +131,22 @@ const QUIZ_TYPES = Object.values(QuizType) as string[];
 export function parseQuizType(value: unknown): QuizType {
   if (value === undefined || value === null || value === '') return QuizType.EXAM;
   if (!QUIZ_TYPES.includes(value as string)) {
-    throw new Error(`type must be one of ${QUIZ_TYPES.join(', ')}`);
+    throw new Error(`type must be one of ${AUTHORABLE_QUIZ_TYPES.join(', ')}`);
   }
+
+  // The one kind nobody may ask for.
+  //
+  // A layer quiz is made of the course map — its questions are the map's
+  // connections, and its options are minted and rewritten by the generator every
+  // time a box moves. A hand-made one would have no map behind it and nothing to
+  // regenerate it from, so it would sit there asking a question that unlocks
+  // nothing. The editor never offers it either; this is the door.
+  if (value === QuizType.DIRECTED) {
+    throw new Error(
+      'a directed learning quiz is generated from the course map and cannot be created by hand',
+    );
+  }
+
   return value as QuizType;
 }
 
@@ -144,6 +168,16 @@ function enforceTypeRules(
   timeLimitMinutes: number | null,
   sectionKind: CourseKind | null,
 ): { sectionId: string | null; timeLimitMinutes: number | null } {
+  if (type === QuizType.DIRECTED) {
+    // Reached only by the generator, which always supplies its own section.
+    // Never timed: "which of these apply to you" is a fact about the learner,
+    // and putting a clock on it would make answering it honestly harder.
+    if (!sectionId) {
+      throw new Error('a directed learning quiz lives in the section its map layer made for it');
+    }
+    return { sectionId, timeLimitMinutes: null };
+  }
+
   if (type === QuizType.LEARNING_CHECK) {
     if (!sectionId) {
       throw new Error('a learning check lives inside a section — pick one for it');
@@ -566,6 +600,16 @@ export default class QuizService {
         'this quiz has been published, so what kind of quiz it is can no longer be changed — copy it into a new quiz instead',
       );
     }
+
+    // A layer quiz is not an editable quiz that happens to be generated: it *is*
+    // the map, rendered as questions. Retyping it would strand the map layer
+    // that owns it, and turning something else into one would mint a layer quiz
+    // with no layer. Both directions are refused, published or not.
+    if (type !== quiz.type && (type === QuizType.DIRECTED || quiz.type === QuizType.DIRECTED)) {
+      throw new Error(
+        'a directed learning quiz belongs to the course map — change the map, not the quiz',
+      );
+    }
     const daysRemaining = parseDaysRemaining(data.daysRemaining);
     const sectionId =
       data.sectionId !== undefined ? data.sectionId || null : (quiz.sectionId ?? null);
@@ -633,6 +677,16 @@ export default class QuizService {
     if (!quiz) {
       throw new NotFoundError(`Quiz with ID ${id} not found`);
     }
+
+    // The generator would put it straight back, and in the meantime the map
+    // layer would point at a recycled quiz. The way to be rid of one is to
+    // remove the connections that called for it.
+    if (quiz.type === QuizType.DIRECTED) {
+      throw new Error(
+        'this quiz is generated from the course map — disconnect the nodes it asks about instead',
+      );
+    }
+
     return QuizGateway.softDeleteQuiz(id);
   }
 
@@ -760,15 +814,32 @@ export default class QuizService {
    * The quiz a run is opened against: the published version, so the clock matches
    * the time limit the learner was shown rather than one an author has changed
    * since. Falls back to the live row for a quiz assigned on its own, which has
-   * no course snapshot behind it; `live` there keeps the guarantee that a draft
-   * or recycled quiz cannot be started from a known id.
+   * no course snapshot to be found in.
+   *
+   * THE FALLBACK IS ONLY FOR QUIZZES WITH NO COURSE, AND THAT MATTERS.
+   *
+   * It used to apply to any quiz, with `live` — the `published` column — left to
+   * keep a draft from being started by anyone who knew its id. That guarantee
+   * quietly stopped holding when a quiz stopped having a publish state of its
+   * own: `createQuiz` now writes `published: true` on every quiz it makes,
+   * because the course's publication is what gates it. So the column said yes to
+   * everything, the fallback let it through, and a quiz whose course had never
+   * been published — or one added since the last publish — could be started and
+   * submitted from a known id. Nothing in the app links to one, so it took
+   * guessing a uuid, but it also meant the two halves of the system disagreed:
+   * `getQuizzesForLearner` reads snapshots and would not list it.
+   *
+   * A quiz inside a course is now served from that course's published snapshot
+   * or not at all, which is the same rule every other piece of course content
+   * follows.
    */
   private static async quizForRun(quizId: string) {
-    const quiz =
-      (await PublicationService.findPublishedQuiz(quizId)) ??
-      (await QuizGateway.getQuizById(quizId, true));
-    if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
-    return quiz;
+    const published = await PublicationService.findPublishedQuiz(quizId);
+    if (published) return published;
+
+    const live = await QuizGateway.getQuizById(quizId, true);
+    if (!live || live.sectionId) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+    return live;
   }
 
   /**
@@ -1027,18 +1098,20 @@ export default class QuizService {
     quizId: string,
     answers: Record<string, string | string[]>,
   ) {
-    // Graded against the published version, which is the one they answered.
-    //
-    // Reading the Quiz rows here would apply an author's unpublished answer key
-    // to the questions actually on screen — marking someone wrong for correctly
-    // answering what they were shown. Falling back to the live row covers a quiz
-    // assigned on its own, which has no course snapshot behind it; `live` there
-    // keeps the old guarantee that a draft or recycled quiz cannot be submitted
-    // against.
-    const quiz =
-      (await PublicationService.findPublishedQuiz(quizId)) ??
-      (await QuizGateway.getQuizById(quizId, true));
-    if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+    /*
+      Graded against the published version, which is the one they answered.
+
+      Reading the Quiz rows here would apply an author's unpublished answer key
+      to the questions actually on screen — marking someone wrong for correctly
+      answering what they were shown.
+
+      Through `quizForRun` rather than repeating its lookup, which is what this
+      used to do. The two copies drifted exactly as duplicated rules do: the
+      guarantee that a quiz nobody has published cannot be reached was tightened
+      in one of them and left behind in the other, so a quiz could be refused a
+      clock and still accept a paper. One expression, one answer.
+    */
+    const quiz = await QuizService.quizForRun(quizId);
 
     const type = quiz.type ?? QuizType.EXAM;
 
@@ -1081,13 +1154,33 @@ export default class QuizService {
     const score = marked.filter((entry) => entry.correct).length;
 
     // A learning check's mark is deliberately not kept: what the dashboard needs
-    // from it is that an attempt happened at all, which is the row itself.
+    // from it is that an attempt happened at all, which is the row itself. A
+    // directed learning quiz keeps none either, for a stronger reason — there is
+    // no right answer to "which of these apply to you", so a score would be a
+    // number about nothing, and reporting it would tell a learner they had got
+    // their own circumstances wrong.
+    const unmarked = type === QuizType.LEARNING_CHECK || type === QuizType.DIRECTED;
     const attempt = await QuizGateway.recordAttempt(
       userId,
       quizId,
-      type === QuizType.LEARNING_CHECK ? 0 : score,
-      type === QuizType.LEARNING_CHECK ? 0 : total,
+      unmarked ? 0 : score,
+      unmarked ? 0 : total,
     );
+
+    // What they ticked *is* the answer here: it is the branch of the course map
+    // they have just asked for. Recorded before the section view below, so a
+    // refetch triggered by either one already has the new path behind it.
+    //
+    // Retaking overwrites rather than appends, and nothing about progress is
+    // touched — someone who drops a branch and later takes it back finds their
+    // training exactly where they left it.
+    if (type === QuizType.DIRECTED) {
+      await CourseMapService.recordChoice(
+        userId,
+        quizId,
+        marked.flatMap((entry) => entry.chosenIds),
+      );
+    }
 
     // Handing a quiz in credits the section it sits in.
     //

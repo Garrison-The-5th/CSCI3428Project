@@ -3,7 +3,8 @@
  * Description: Component tests for the two phases of a quiz — the details panel
  *   in front of it, and the show-results / show-answers matrix behind it.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-17
+ * Modified by: Jacob Matthews
+ * Date: 2026-09-22
  */
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -473,12 +474,12 @@ describe('returning to a quiz already completed', () => {
   });
 
   /** A learning check keeps no mark, so another go spoils nothing. */
-  it('offers Try again on a learning check', async () => {
+  it('offers Restart Quiz on a learning check', async () => {
     finished({ type: 'LEARNING_CHECK', showResults: true });
 
     render(<QuizRunner quiz={quizOf({ type: 'LEARNING_CHECK' })} onFinished={jest.fn()} />);
 
-    expect(await screen.findByRole('button', { name: /try again/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /restart quiz/i })).toBeInTheDocument();
   });
 
   /** One sitting and one mark is what an exam means until the author says otherwise. */
@@ -489,27 +490,27 @@ describe('returning to a quiz already completed', () => {
 
     expect(await screen.findByText(/already completed this quiz/i)).toBeInTheDocument();
     expect(screen.getByText(/single attempt/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /restart quiz/i })).not.toBeInTheDocument();
   });
 
-  it('offers Try again on an exam that allows multiple attempts', async () => {
+  it('offers Restart Quiz on an exam that allows multiple attempts', async () => {
     finished({ showResults: true });
 
     render(<QuizRunner quiz={quizOf({ allowMultipleAttempts: true })} onFinished={jest.fn()} />);
 
-    expect(await screen.findByRole('button', { name: /try again/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /restart quiz/i })).toBeInTheDocument();
     expect(screen.queryByText(/already completed this quiz/i)).not.toBeInTheDocument();
   });
 
   /** Pressing it opens a fresh run and puts the questions back. */
-  it('starts a new run when Try again is pressed', async () => {
+  it('starts a new run when Restart Quiz is pressed', async () => {
     const user = userEvent.setup();
     finished({ showResults: true });
     startQuiz.mockResolvedValue(unopened({ started: true }));
 
     render(<QuizRunner quiz={quizOf({ allowMultipleAttempts: true })} onFinished={jest.fn()} />);
 
-    await user.click(await screen.findByRole('button', { name: /try again/i }));
+    await user.click(await screen.findByRole('button', { name: /restart quiz/i }));
 
     expect(startQuiz).toHaveBeenCalledWith('q1');
     expect(screen.getByText(/where is the assembly point/i)).toBeInTheDocument();
@@ -517,12 +518,12 @@ describe('returning to a quiz already completed', () => {
   });
 
   /** A one-time link is the one kind that never reopens. */
-  it('never offers Try again on a one-time link', async () => {
+  it('never offers Restart Quiz on a one-time link', async () => {
     finished({ type: 'ONE_TIME', showResults: true }, true);
 
     render(<QuizRunner quiz={quizOf({ type: 'ONE_TIME' })} onFinished={jest.fn()} />);
 
     expect(await screen.findByText(/only be taken once/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /restart quiz/i })).not.toBeInTheDocument();
   });
 });

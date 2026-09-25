@@ -56,7 +56,10 @@ in which app they load.
        └──────────────────────────┘  └──────────────────────────────┘
 
                         ┌──────────────┐
-   always available ───▶│ /contact     │  contact details, subscribe,
+   always available ───▶│ /contact     │  contact details, subscribe
+                        └──────────────┘
+                        ┌──────────────┐
+   always available ───▶│ /profile     │  name, email, user id,
                         │              │  privacy notice + data export
                         └──────────────┘
 ```

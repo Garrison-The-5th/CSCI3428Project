@@ -95,6 +95,17 @@ const CONTENT_PLACEHOLDER: Record<NewContentType, string> = {
 /** What is being dragged, so a section is never dropped onto a module list. */
 type Drag = { kind: 'section'; id: string } | { kind: 'module'; id: string } | null;
 
+/**
+ * Whether a module was generated for a course map's layer quiz.
+ *
+ * Recognised by its name, which the generator owns and an author cannot reach —
+ * the module is locked below, and a hand-made module of the same name would be
+ * locked with it, which is the safe way round to be wrong.
+ */
+function isLayerModule(title: string): boolean {
+  return /^Directed learning quiz \d+$/.test(title);
+}
+
 const StructureEditor = ({
   course,
   selectedSectionId,
@@ -506,6 +517,14 @@ const StructureEditor = ({
                 const minutes = group.sections.reduce((sum, m) => sum + m.estimatedMinutes, 0);
 
                 const lockedBy = lockedModules[group.module.id];
+                /*
+                  A layer quiz's module is written by the course map, not by
+                  hand: its title, its section and the quiz inside it are all
+                  regenerated whenever a node moves. Editing it would be undone
+                  on the next change, so it goes under the same sheet that
+                  somebody else's edit lease uses — visible, and not editable.
+                */
+                const generated = isLayerModule(group.module.title);
 
                 return (
                   /*
@@ -516,8 +535,14 @@ const StructureEditor = ({
                   */
                   <LockOverlay
                     key={group.module.id}
-                    locked={Boolean(lockedBy)}
-                    reason={lockedBy ? `${lockedBy} is editing this module` : undefined}
+                    locked={Boolean(lockedBy) || generated}
+                    reason={
+                      lockedBy
+                        ? `${lockedBy} is editing this module`
+                        : generated
+                          ? 'Built from the course map — edit it on the Course mapping tab'
+                          : undefined
+                    }
                   >
                     <div className="flex flex-col gap-1">
                       {/* Module heading — drag it to move the whole module */}

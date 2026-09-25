@@ -3,7 +3,7 @@
  * Description: Navbar for the learning platform.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 import '@/components/navbar/navbar.css';
 
@@ -50,11 +50,18 @@ const NavItem = ({
   item,
   onClick,
   showDot = false,
+  exact = false,
 }: {
   item: Page;
   onClick?: () => void;
   /** Puts an unread mark on the item — used for new course content. */
   showDot?: boolean;
+  /**
+   * Light only on this exact path, rather than on everything beneath it.
+   *
+   * Set for an item that has another item nested under it — see `isPrefixOfAnother`.
+   */
+  exact?: boolean;
 }) => {
   const Icon = item.Icon;
 
@@ -85,7 +92,7 @@ const NavItem = ({
     <li>
       <NavLink
         to={item.path ?? '/'}
-        end
+        end={exact}
         className={({ isActive }) =>
           `group ${baseClass}
           ${isActive ? 'text-green bg-green/20 cursor-default' : 'text-text-secondary hover:bg-white/10'}`
@@ -102,6 +109,24 @@ const NavItem = ({
     </li>
   );
 };
+
+/**
+ * Whether another item in the rail sits underneath this one.
+ *
+ * A tab has to stay lit while the user is inside what it led them to: opening a
+ * course from Home lands on /learning/:courseId, and a tab that only matched its
+ * own path went dark exactly when the learner was most plainly in their
+ * learning. So an item lights for its whole subtree — unless another tab lives
+ * in that subtree, because then the deeper tab is the honest answer and lighting
+ * both would say the user is in two places. "/" is the prefix of everything, so
+ * Home is always exact by this rule, and so is /admin while /admin/users exists.
+ */
+function isPrefixOfAnother(path: string, pages: Page[]): boolean {
+  if (path === '/') return true;
+  return pages.some(
+    (other) => (other.path ?? '') !== path && (other.path ?? '').startsWith(`${path}/`),
+  );
+}
 
 const Navbar: React.FC<NavbarProps> = ({
   isDarkMode,
@@ -171,6 +196,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 // New content always lives inside a course, so Learning is the
                 // one tab the mark can point at without being vague.
                 showDot={page.path === '/learning' && hasNewContent}
+                exact={isPrefixOfAnother(page.path ?? '/', pages)}
               />
             ))}
           </ul>

@@ -1,9 +1,9 @@
 /**
  * File: publishcheck.ts
- * Description: Exercises versioned publishing: that a learner reads the snapshot rather than.
+ * Description: Exercises versioned publishing — a learner reads the snapshot, not the draft.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-09-22
  */
 /**
  * Exercises versioned publishing: that a learner reads the snapshot rather than
@@ -24,6 +24,25 @@ import QuizService from '@/services/quiz-service/quiz-service';
 import { prisma } from '../prisma/prisma-client';
 
 let failures = 0;
+
+/**
+ * Checks that something is refused, and refused for the stated reason.
+ *
+ * Matching the message as well as the throw, because "it threw" is satisfied by
+ * a typo in the script just as well as by the guard being in place.
+ */
+async function refused(action: () => Promise<unknown>, label: string, reason: RegExp) {
+  try {
+    await action();
+    failures += 1;
+    console.log(`  FAIL ${label}\n         expected a refusal, and nothing was refused`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (reason.test(message)) return console.log(`  ok   ${label} is refused`);
+    failures += 1;
+    console.log(`  FAIL ${label}\n         refused, but for the wrong reason: ${message}`);
+  }
+}
 
 function check(label: string, actual: unknown, expected: unknown) {
   const a = JSON.stringify(actual);
@@ -54,13 +73,30 @@ async function main() {
 
   const user = await AuthService.getOrCreateUser(email);
 
-  console.log('an unpublished course is invisible to a learner');
-  await AssignmentService.assign({ email, type: 'PLATFORM', courseId });
+  console.log('an unpublished course cannot even be handed out');
+  /*
+    Assigning now comes *after* publishing, because it is refused before it.
+
+    This script used to enrol somebody on the draft and then check they could
+    read nothing, which was the honest test while an assignment was only a row.
+    It is not any more: `AssignmentService.assertSendable` refuses a course with
+    no published version at all, on the grounds that handing somebody work that
+    opens an empty catalogue looks like it worked and is worse than a refusal.
+    So the refusal is what is checked here, and the "reads nothing" half is
+    asked of a learner with no assignment, which is the same question one step
+    further back.
+  */
+  await refused(
+    () => AssignmentService.assign({ email, type: 'PLATFORM', courseId }),
+    'assigning a draft',
+    /still a draft/i,
+  );
   check('nothing to read', await CurriculumService.getCourseForLearner(email, courseId), null);
   check('not in their list', (await CurriculumService.getCoursesForLearner(email)).length, 0);
 
   console.log('\npublishing puts version 1 live');
   const first = await PublicationService.publish(courseId, user.id);
+  await AssignmentService.assign({ email, type: 'PLATFORM', courseId });
   check('version 1', first.version, 1);
   check('a first publish marks nothing new', first.hasNewContent, false);
 
@@ -258,7 +294,11 @@ async function main() {
   // ---- Quizzes are graded against what was shown ----
   console.log('\na quiz is graded against the published version, not the draft');
   const quiz = await QuizService.createQuiz({ title: 'Marking', sectionId: sectionA!.id });
-  await QuizService.updateQuiz(quiz.id, { published: true });
+  // Retakes allowed, because this scenario sits the same quiz three times to
+  // watch what it is marked against. An exam is one sitting unless its author
+  // says otherwise — see Quiz.allowMultipleAttempts — so without this the second
+  // submission is refused and the marking is never examined at all.
+  await QuizService.updateQuiz(quiz.id, { published: true, allowMultipleAttempts: true });
   const question = await QuizService.addQuestion(quiz.id, {
     prompt: 'Pick the right one',
     options: [
