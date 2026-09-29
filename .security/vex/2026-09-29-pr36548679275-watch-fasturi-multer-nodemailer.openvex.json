@@ -1,0 +1,93 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-09-29-pr36548679275-watch-fasturi-multer-nodemailer.openvex.json",
+  "version": 1,
+  "timestamp": "2026-09-29T09:35:30.613Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "36548679275"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84292",
+        "description": "fast-uri: Authority Injection via Unvalidated Port Serialization"
+      },
+      "products": [{ "@id": "pkg:npm/fast-uri@3.1.6" }],
+      "status": "fixed",
+      "fixed_in_version": "3.1.8",
+      "action_reference": "backend/package.json overrides: fast-uri ^3.1.7 (installed 3.1.8)",
+      "impact_statement": "fast-uri arrives transitively through ajv@8.20.0, itself a devOptional dependency of @prisma/streams-local. It is not imported by our source (grep of backend/src and frontend/src returns zero matches). Even so, added an npm override forcing fast-uri to ^3.1.7 so the tree carries a patched build (3.1.8) rather than 3.1.6. Full backend test suite (574/574) and build pass.",
+      "confidence": 92,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-84292",
+        "https://access.redhat.com/security/cve/CVE-2026-84292"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84394",
+        "description": "fast-uri: Host confusion via unbalanced URI brackets can bypass security policies"
+      },
+      "products": [{ "@id": "pkg:npm/fast-uri@3.1.6" }],
+      "status": "fixed",
+      "fixed_in_version": "3.1.8",
+      "action_reference": "backend/package.json overrides: fast-uri ^3.1.7 (installed 3.1.8)",
+      "impact_statement": "Same package and same fix as CVE-2026-84292 — transitively via ajv (devOptional) under @prisma/streams-local; no direct import in our source. Override in backend/package.json pins fast-uri >=3.1.7, resolved to 3.1.8. Verified with the full backend test suite (574/574) and build.",
+      "confidence": 92,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-84394",
+        "https://access.redhat.com/security/cve/CVE-2026-84394"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-88932",
+        "description": "multer: Denial of Service via orphaned disk writes on aborted uploads"
+      },
+      "products": [{ "@id": "pkg:npm/multer@2.3.0" }],
+      "status": "fixed",
+      "fixed_in_version": "2.4.0",
+      "action_reference": "backend/package.json: multer ^2.3.0 -> ^2.4.0",
+      "impact_statement": "Multer is used from backend/src/config/media-upload.ts with multer.memoryStorage(); the vulnerable disk-write path is not on our execute path. Bumped to 2.4.0 anyway (patch bump within the same major, low risk) so the advisory is closed in the tree. Full backend test suite (574/574) and build pass.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-88932",
+        "https://access.redhat.com/security/cve/CVE-2026-88932"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-6vj9-mwq6-2f5v",
+        "description": "Nodemailer: Process-global DNS cache reuses TLS servername across transports, enabling cross-tenant SMTP credential disclosure"
+      },
+      "products": [{ "@id": "pkg:npm/nodemailer@9.1.1" }],
+      "status": "fixed",
+      "fixed_in_version": "10.0.12",
+      "action_reference": "backend/package.json: nodemailer ^9.1.1 -> ^10.0.2 (installed 10.0.12)",
+      "impact_statement": "Nodemailer is used from backend/src/services/email-service/email-service.ts against a single operator-supplied SMTP host (EMAIL_USER app-password to smtp.gmail.com by default), so the multi-tenant cross-transport reuse pattern the advisory describes does not arise in our usage. Even so, bumped nodemailer to 10.x to close the finding cleanly; the API we use (createTransport with host/port/secure/pool/tls/auth, sendMail, verify, close) is unchanged across the major version. Full backend test suite (574/574) and build pass.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-6vj9-mwq6-2f5v",
+        "https://github.com/nodemailer/nodemailer/releases/tag/v10.0.2"
+      ]
+    }
+  ]
+}
