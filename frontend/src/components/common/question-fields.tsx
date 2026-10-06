@@ -115,6 +115,12 @@ interface QuestionFieldsProps {
   onTooFewOptions: () => void;
   /** Save/Cancel buttons, rendered beside "Add Option". */
   actions: ReactNode;
+  /**
+   * Shows the options without letting them be changed — no ticks, no removing,
+   * no adding. For a directed learning quiz, whose options are the course map's
+   * connections and so are edited on the map rather than here.
+   */
+  fixedOptions?: boolean;
 }
 
 const inputClass = 'bg-white text-dark-gray';
@@ -125,6 +131,7 @@ const QuestionFields = ({
   onChange,
   onTooFewOptions,
   actions,
+  fixedOptions = false,
 }: QuestionFieldsProps) => {
   const correct = new Set(draft.correctIndexes);
   const multi = correct.size > 1;
@@ -169,72 +176,98 @@ const QuestionFields = ({
         className={`${inputClass} mb-3`}
       />
 
-      <p className="mb-1 text-sm font-medium text-dark-gray">Options — tick every correct answer</p>
-      <p className="mb-2 text-xs text-dark-gray">
-        {multi
-          ? `${correct.size} correct answers: the learner sees checkboxes and must pick ` +
-            'all of them.'
-          : 'One correct answer: the learner sees radio buttons. Tick a second to make it a ' +
-            'multiple-answer question.'}
-      </p>
-      <div className="flex flex-col gap-2">
-        {draft.options.map((option, index) => (
-          <div key={index} className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              name={`${radioName}-${index}`}
-              checked={correct.has(index)}
-              onChange={() => toggle(index)}
-              aria-label={`Mark option ${index + 1} correct`}
-              className="h-4 w-4 shrink-0 accent-[#5b9748]"
-            />
-            <Input
-              value={option}
-              onChange={(e) => {
-                const options = [...draft.options];
-                options[index] = e.target.value;
-                onChange({ options });
-              }}
-              placeholder={`Option ${index + 1}`}
-              className={`${inputClass} flex-1`}
-            />
-            <Button
-              onClick={() => {
-                if (draft.options.length <= 2) return onTooFewOptions();
-                const options = draft.options.filter((_, i) => i !== index);
-                // Every mark after the removed option shifts down with it, so the
-                // ticks stay on the options they were actually put on.
-                const shifted = [...correct]
-                  .filter((mark) => mark !== index)
-                  .map((mark) => (mark > index ? mark - 1 : mark));
-                onChange({
-                  options,
-                  // Removing the only correct option would leave the question
-                  // unanswerable, so the first option inherits the mark.
-                  correctIndexes: shifted.length > 0 ? shifted : [0],
-                });
-              }}
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 hover:text-danger-hover"
-              title="Remove option"
-            >
-              <TrashIcon className="w-4 h-4" />
-            </Button>
+      {fixedOptions ? (
+        <>
+          <p className="mb-1 text-sm font-medium text-dark-gray">Options</p>
+          <p className="mb-2 text-xs text-dark-gray">
+            Set by the course map — one per branch the learner can pick. Change them on the Course
+            mapping tab.
+          </p>
+          <ul className="flex flex-col gap-2">
+            {draft.options.map((option, index) => (
+              <li
+                key={index}
+                className="rounded-md border border-gray-300 bg-gray-100 px-3 py-2 text-sm
+                  text-dark-gray"
+              >
+                {option}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-3">{actions}</div>
+        </>
+      ) : (
+        <>
+          <p className="mb-1 text-sm font-medium text-dark-gray">
+            Options — tick every correct answer
+          </p>
+          <p className="mb-2 text-xs text-dark-gray">
+            {multi
+              ? `${correct.size} correct answers: the learner sees checkboxes and must pick ` +
+                'all of them.'
+              : 'One correct answer: the learner sees radio buttons. Tick a second to make it a ' +
+                'multiple-answer question.'}
+          </p>
+          <div className="flex flex-col gap-2">
+            {draft.options.map((option, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  name={`${radioName}-${index}`}
+                  checked={correct.has(index)}
+                  onChange={() => toggle(index)}
+                  aria-label={`Mark option ${index + 1} correct`}
+                  className="h-4 w-4 shrink-0 accent-[#5b9748]"
+                />
+                <Input
+                  value={option}
+                  onChange={(e) => {
+                    const options = [...draft.options];
+                    options[index] = e.target.value;
+                    onChange({ options });
+                  }}
+                  placeholder={`Option ${index + 1}`}
+                  className={`${inputClass} flex-1`}
+                />
+                <Button
+                  onClick={() => {
+                    if (draft.options.length <= 2) return onTooFewOptions();
+                    const options = draft.options.filter((_, i) => i !== index);
+                    // Every mark after the removed option shifts down with it, so the
+                    // ticks stay on the options they were actually put on.
+                    const shifted = [...correct]
+                      .filter((mark) => mark !== index)
+                      .map((mark) => (mark > index ? mark - 1 : mark));
+                    onChange({
+                      options,
+                      // Removing the only correct option would leave the question
+                      // unanswerable, so the first option inherits the mark.
+                      correctIndexes: shifted.length > 0 ? shifted : [0],
+                    });
+                  }}
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 hover:text-danger-hover"
+                  title="Remove option"
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className="mt-4 flex flex-wrap gap-3">
-        <Button
-          onClick={() => onChange({ options: [...draft.options, ''] })}
-          variant="outline"
-          className="bg-white text-dark-gray hover:bg-light-gray"
-        >
-          Add Option
-        </Button>
-        {actions}
-      </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button
+              onClick={() => onChange({ options: [...draft.options, ''] })}
+              variant="outline"
+              className="bg-white text-dark-gray hover:bg-light-gray"
+            >
+              Add Option
+            </Button>
+            {actions}
+          </div>
+        </>
+      )}
     </>
   );
 };

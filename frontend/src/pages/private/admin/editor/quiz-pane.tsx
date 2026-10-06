@@ -74,6 +74,8 @@ const QuizPane = ({
 
   const groups = moduleGroups(course);
   const selectedSection = course.sections.find((s) => s.id === selectedSectionId) ?? null;
+  /** A layer quiz's section holds that quiz alone — see structure-editor. */
+  const layerSection = selectedSection?.quizzes.some((quiz) => quiz.type === 'DIRECTED') ?? false;
 
   // Keep a section selected so the editor pane is never blank on arrival.
   useEffect(() => {
@@ -198,30 +200,32 @@ const QuizPane = ({
                 </p>
               </CardHeader>
 
-              <CardContent>
-                <div
-                  className="flex flex-wrap items-center gap-3 rounded-lg border-2 border-dashed
-                    border-navy/30 p-4"
-                >
-                  {typePicker(selectedSection.id)}
-                  <Input
-                    value={draftFor(selectedSection.id).title}
-                    onChange={(e) => setDraft(selectedSection.id, { title: e.target.value })}
-                    onKeyDown={(e) => e.key === 'Enter' && createInSection(selectedSection.id)}
-                    placeholder={`New quiz for ${selectedSection.number} ${selectedSection.title}`}
-                    className={`${inputClass} min-w-60 flex-1`}
-                  />
-                  <Button
-                    onClick={() => createInSection(selectedSection.id)}
-                    className={primaryBtn}
+              {!layerSection && (
+                <CardContent>
+                  <div
+                    className="flex flex-wrap items-center gap-3 rounded-lg border-2 border-dashed
+                      border-navy/30 p-4"
                   >
-                    <PlusIcon className="w-5 h-5 stroke-2" /> Add Quiz
-                  </Button>
-                  <p className="w-full text-xs text-dark-gray">
-                    {QUIZ_TYPE_HINTS[draftFor(selectedSection.id).type]}
-                  </p>
-                </div>
-              </CardContent>
+                    {typePicker(selectedSection.id)}
+                    <Input
+                      value={draftFor(selectedSection.id).title}
+                      onChange={(e) => setDraft(selectedSection.id, { title: e.target.value })}
+                      onKeyDown={(e) => e.key === 'Enter' && createInSection(selectedSection.id)}
+                      placeholder={`New quiz for ${selectedSection.number} ${selectedSection.title}`}
+                      className={`${inputClass} min-w-60 flex-1`}
+                    />
+                    <Button
+                      onClick={() => createInSection(selectedSection.id)}
+                      className={primaryBtn}
+                    >
+                      <PlusIcon className="w-5 h-5 stroke-2" /> Add Quiz
+                    </Button>
+                    <p className="w-full text-xs text-dark-gray">
+                      {QUIZ_TYPE_HINTS[draftFor(selectedSection.id).type]}
+                    </p>
+                  </div>
+                </CardContent>
+              )}
             </Card>
 
             {selectedSection.quizzes.length === 0 ? (
@@ -240,15 +244,17 @@ const QuizPane = ({
                     <CardTitle className="min-w-0 truncate text-base text-dark-gray">
                       {quiz.title}
                     </CardTitle>
-                    <Button
-                      onClick={() => onDelete({ kind: 'quiz', id: quiz.id, label: quiz.title })}
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 hover:text-danger-hover"
-                      title="Delete quiz"
-                    >
-                      <TrashIcon className="w-5 h-5" />
-                    </Button>
+                    {quiz.type !== 'DIRECTED' && (
+                      <Button
+                        onClick={() => onDelete({ kind: 'quiz', id: quiz.id, label: quiz.title })}
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 hover:text-danger-hover"
+                        title="Delete quiz"
+                      >
+                        <TrashIcon className="w-5 h-5" />
+                      </Button>
+                    )}
                   </CardHeader>
                   <CardContent className="p-4">
                     <QuizEditor quiz={quiz} onChanged={onRefresh} onNotify={onNotify} />

@@ -274,7 +274,10 @@ describe('CourseMapService.syncQuizzes', () => {
     map.getLayers.mockResolvedValue([
       { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
     ] as never);
-    quiz.getQuizById.mockResolvedValue({ id: 'quiz-1', questions: [{ id: 'qn-1' }] } as never);
+    quiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      questions: [{ id: 'qn-1', options: [] }],
+    } as never);
     quiz.updateQuestion.mockResolvedValue({
       id: 'qn-1',
       options: [{ id: 'opt-1' }, { id: 'opt-2' }],
@@ -315,7 +318,8 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', moduleId: 'mod-2' },
     ] as never);
     quiz.getQuizById.mockImplementation(
-      (id: string) => Promise.resolve({ id, questions: [{ id: `qn-${id}` }] }) as never,
+      (id: string) =>
+        Promise.resolve({ id, questions: [{ id: `qn-${id}`, options: [] }] }) as never,
     );
     quiz.updateQuestion.mockResolvedValue({
       id: 'qn',
@@ -410,6 +414,42 @@ describe('CourseMapService.syncQuizzes', () => {
     await CourseMapService.syncQuizzes('c1');
 
     expect(quiz.updateQuestion).toHaveBeenCalled();
+  });
+
+  /**
+   * The title, prompt and hint are the author's to word. The map rewrites the
+   * options when it changes, and must leave the wording exactly as it was.
+   */
+  it("keeps the author's title, prompt and hint when the options change", async () => {
+    map.getNodes.mockResolvedValue([
+      node('root'),
+      node('bees', { isRoot: false, title: 'Bee keeping', x: 100 }),
+    ] as never);
+    map.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'bees', optionId: null },
+    ] as never);
+    map.getLayers.mockResolvedValue([
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+    ] as never);
+    quiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Where do you volunteer?',
+      questions: [
+        {
+          id: 'qn-1',
+          prompt: 'Which projects are you part of?',
+          hint: 'Pick every one',
+          options: [{ id: 'opt-old', text: 'Woodlands' }],
+        },
+      ],
+    } as never);
+    quiz.updateQuestion.mockResolvedValue({ id: 'qn-1', options: [{ id: 'opt-1' }] } as never);
+
+    await CourseMapService.syncQuizzes('c1');
+
+    const written = quiz.updateQuestion.mock.calls[0][1];
+    expect(written).toEqual({ options: [{ text: 'Bee keeping', isCorrect: false }] });
+    expect(quiz.updateQuiz).not.toHaveBeenCalled();
   });
 
   it('removes the module and quiz of a layer the map no longer has', async () => {

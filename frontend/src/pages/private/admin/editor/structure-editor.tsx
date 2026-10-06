@@ -190,6 +190,12 @@ const StructureEditor = ({
   }, [openModuleId, claim]);
 
   const selectedSection = course.sections.find((m) => m.id === selectedSectionId) ?? null;
+  /**
+   * The section a layer quiz sits in. The map owns it — its name, its place and
+   * what is in it — so only the quiz inside opens, and that keeps all but its
+   * wording fixed.
+   */
+  const layerSection = selectedSection?.quizzes.some((quiz) => quiz.type === 'DIRECTED') ?? false;
 
   const [sectionDraft, setSectionDraft] = useState({ title: '', estimatedMinutes: '' });
 
@@ -402,6 +408,9 @@ const StructureEditor = ({
     const dragged = drag;
     setDrag(null);
     if (dragged?.kind !== 'section' || dragged.id === targetSectionId) return;
+    // A layer quiz's module holds its own section and nothing else.
+    const into = groups.find((group) => group.module.id === moduleId);
+    if (into && isLayerModule(into.module.title)) return;
 
     const next = groups.map((group) => ({
       ...group,
@@ -519,10 +528,11 @@ const StructureEditor = ({
                 const lockedBy = lockedModules[group.module.id];
                 /*
                   A layer quiz's module is written by the course map, not by
-                  hand: its title, its section and the quiz inside it are all
-                  regenerated whenever a node moves. Editing it would be undone
-                  on the next change, so it goes under the same sheet that
-                  somebody else's edit lease uses — visible, and not editable.
+                  hand: its name, its place and its section are regenerated
+                  whenever a node moves, so the heading goes under the same sheet
+                  somebody else's edit lease uses. The quiz inside is still
+                  reachable — its wording is the author's to change, and the quiz
+                  editor keeps everything else fixed.
                 */
                 const generated = isLayerModule(group.module.title);
 
@@ -535,122 +545,122 @@ const StructureEditor = ({
                   */
                   <LockOverlay
                     key={group.module.id}
-                    locked={Boolean(lockedBy) || generated}
-                    reason={
-                      lockedBy
-                        ? `${lockedBy} is editing this module`
-                        : generated
-                          ? 'Built from the course map — edit it on the Course mapping tab'
-                          : undefined
-                    }
+                    locked={Boolean(lockedBy)}
+                    reason={lockedBy ? `${lockedBy} is editing this module` : undefined}
                   >
                     <div className="flex flex-col gap-1">
                       {/* Module heading — drag it to move the whole module */}
-                      <div
-                        draggable
-                        onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => handleModuleDrop(group.module.id)}
-                        onDragEnd={() => setDrag(null)}
-                        className={`flex cursor-grab items-center gap-1 rounded-md border px-2 py-2
-                          ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
-                          ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
-                        // The tint the learner will see, previewed where it is set.
-                        style={moduleTint(group.module.color)}
+                      <LockOverlay
+                        locked={generated}
+                        compact
+                        reason="Built from the course map — open its quiz below to reword it"
                       >
-                        <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+                        <div
+                          draggable
+                          onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => handleModuleDrop(group.module.id)}
+                          onDragEnd={() => setDrag(null)}
+                          className={`flex cursor-grab items-center gap-1 rounded-md border px-2
+                            py-2 ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
+                            ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
+                          // The tint the learner will see, previewed where it is set.
+                          style={moduleTint(group.module.color)}
+                        >
+                          <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
 
-                        {editingModule?.id === group.module.id ? (
-                          // Renaming takes over the row: the drag handle and the
-                          // collapse toggle would both fight a text field.
-                          <Input
-                            autoFocus
-                            value={editingModule.title}
-                            onChange={(e) =>
-                              setEditingModule({ id: group.module.id, title: e.target.value })
-                            }
-                            onBlur={saveModuleTitle}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') saveModuleTitle();
-                              if (e.key === 'Escape') setEditingModule(null);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Module title"
-                            className={`${inputClass} h-8 min-w-0 flex-1`}
-                          />
-                        ) : (
-                          <button
-                            onClick={() => toggleModule(group.module.id)}
-                            aria-expanded={!collapsed}
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                          >
-                            <ChevronDownIcon
-                              className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
-                                duration-200 ${collapsed ? '-rotate-90' : ''}`}
-                            />
-                            <span className="min-w-0 flex-1 text-sm text-dark-gray">
-                              <span className="flex flex-wrap items-center gap-2">
-                                <span className="break-words font-semibold">
-                                  {group.module.number}. {group.module.title}
-                                </span>
-                                {isNew.module(group.module.id) && <NewBadge />}
-                                <EditedTag mark={marks.modules[group.module.id]} />
-                              </span>
-                              <span className="block text-xs">
-                                {group.sections.length} section
-                                {group.sections.length === 1 ? '' : 's'}
-                                {minutes > 0 && ` · ${minutes} min`}
-                              </span>
-                            </span>
-                          </button>
-                        )}
-
-                        {group.module.id !== 'unmoduleed' && (
-                          <>
-                            <ModuleColorPicker
-                              color={group.module.color}
-                              label={group.module.title}
-                              onSelect={(color) =>
-                                run(
-                                  () => curriculumApi.updateModule(group.module.id, { color }),
-                                  color ? 'Module colour set' : 'Module colour cleared',
-                                  'Failed to change the module colour',
-                                )
+                          {editingModule?.id === group.module.id ? (
+                            // Renaming takes over the row: the drag handle and the
+                            // collapse toggle would both fight a text field.
+                            <Input
+                              autoFocus
+                              value={editingModule.title}
+                              onChange={(e) =>
+                                setEditingModule({ id: group.module.id, title: e.target.value })
                               }
-                            />
-                            <Button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingModule({
-                                  id: group.module.id,
-                                  title: group.module.title,
-                                });
+                              onBlur={saveModuleTitle}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveModuleTitle();
+                                if (e.key === 'Escape') setEditingModule(null);
                               }}
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0 hover:text-green-hover"
-                              title="Rename module"
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label="Module title"
+                              className={`${inputClass} h-8 min-w-0 flex-1`}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => toggleModule(group.module.id)}
+                              aria-expanded={!collapsed}
+                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
                             >
-                              <PencilSquareIcon className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              onClick={() =>
-                                onDelete({
-                                  kind: 'module',
-                                  id: group.module.id,
-                                  label: `${group.module.number}. ${group.module.title}`,
-                                })
-                              }
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0 hover:text-danger-hover"
-                              title="Delete module"
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
+                              <ChevronDownIcon
+                                className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
+                                  duration-200 ${collapsed ? '-rotate-90' : ''}`}
+                              />
+                              <span className="min-w-0 flex-1 text-sm text-dark-gray">
+                                <span className="flex flex-wrap items-center gap-2">
+                                  <span className="break-words font-semibold">
+                                    {group.module.number}. {group.module.title}
+                                  </span>
+                                  {isNew.module(group.module.id) && <NewBadge />}
+                                  <EditedTag mark={marks.modules[group.module.id]} />
+                                </span>
+                                <span className="block text-xs">
+                                  {group.sections.length} section
+                                  {group.sections.length === 1 ? '' : 's'}
+                                  {minutes > 0 && ` · ${minutes} min`}
+                                </span>
+                              </span>
+                            </button>
+                          )}
+
+                          {group.module.id !== 'unmoduleed' && (
+                            <>
+                              <ModuleColorPicker
+                                color={group.module.color}
+                                label={group.module.title}
+                                onSelect={(color) =>
+                                  run(
+                                    () => curriculumApi.updateModule(group.module.id, { color }),
+                                    color ? 'Module colour set' : 'Module colour cleared',
+                                    'Failed to change the module colour',
+                                  )
+                                }
+                              />
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingModule({
+                                    id: group.module.id,
+                                    title: group.module.title,
+                                  });
+                                }}
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 hover:text-green-hover"
+                                title="Rename module"
+                              >
+                                <PencilSquareIcon className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                onClick={() =>
+                                  onDelete({
+                                    kind: 'module',
+                                    id: group.module.id,
+                                    label: `${group.module.number}. ${group.module.title}`,
+                                  })
+                                }
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 hover:text-danger-hover"
+                                title="Delete module"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </LockOverlay>
 
                       {!collapsed && (
                         <div
@@ -668,7 +678,7 @@ const StructureEditor = ({
                             group.sections.map((section: CourseSection) => (
                               <div
                                 key={section.id}
-                                draggable
+                                draggable={!generated}
                                 onDragStart={() => setDrag({ kind: 'section', id: section.id })}
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => {
@@ -755,7 +765,8 @@ const StructureEditor = ({
                   <Input
                     value={sectionDraft.title}
                     onChange={(e) => setSectionDraft({ ...sectionDraft, title: e.target.value })}
-                    className={inputClass}
+                    disabled={layerSection}
+                    className={`${inputClass} disabled:cursor-not-allowed disabled:bg-gray-100`}
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
@@ -765,7 +776,9 @@ const StructureEditor = ({
                     onChange={(e) =>
                       setSectionDraft({ ...sectionDraft, estimatedMinutes: e.target.value })
                     }
-                    className={`${inputClass} max-w-28`}
+                    disabled={layerSection}
+                    className={`${inputClass} max-w-28 disabled:cursor-not-allowed
+                      disabled:bg-gray-100`}
                   />
                 </label>
               </div>
@@ -784,121 +797,131 @@ const StructureEditor = ({
                 >
                   <CheckIcon className="w-6 h-6" />
                 </Button>
-                <Button
-                  onClick={() =>
-                    onDelete({
-                      kind: 'section',
-                      id: selectedSection.id,
-                      label: `${selectedSection.number} ${selectedSection.title}`,
-                    })
-                  }
-                  variant="ghost"
-                  size="icon"
-                  className="hover:text-danger-hover"
-                  title="Delete section"
-                >
-                  <TrashIcon className="w-6 h-6" />
-                </Button>
+                {!layerSection && (
+                  <Button
+                    onClick={() =>
+                      onDelete({
+                        kind: 'section',
+                        id: selectedSection.id,
+                        label: `${selectedSection.number} ${selectedSection.title}`,
+                      })
+                    }
+                    variant="ghost"
+                    size="icon"
+                    className="hover:text-danger-hover"
+                    title="Delete section"
+                  >
+                    <TrashIcon className="w-6 h-6" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
 
             <CardContent className="flex flex-col gap-4">
               <hr className="h-px border-t-0 bg-gray-300" />
 
-              {/* Add content stays at the top */}
-              <div
-                className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-navy/30 p-3"
-              >
-                <p className="text-sm font-semibold text-dark-gray">Add content</p>
+              {/* Add content stays at the top — except in a layer quiz's
+                  section, which holds its quiz and nothing else. */}
+              {layerSection ? (
+                <p className="text-sm text-dark-gray">
+                  Generated from the course map. Open the quiz to reword its title, prompt and hint.
+                </p>
+              ) : (
+                <div
+                  className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-navy/30
+                    p-3"
+                >
+                  <p className="text-sm font-semibold text-dark-gray">Add content</p>
 
-                <div className="flex flex-wrap items-start gap-3">
-                  <select
-                    value={newElement.type}
-                    onChange={(e) =>
-                      setNewElement({ type: e.target.value as NewContentType, value: '' })
-                    }
-                    className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm
-                      text-dark-gray"
-                  >
-                    {CONTENT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-
-                  {newElement.type === 'TEXT' ? (
-                    <Textarea
-                      value={newElement.value}
-                      onChange={(e) => setNewElement({ ...newElement, value: e.target.value })}
-                      onBlur={addElement}
-                      placeholder={CONTENT_PLACEHOLDER.TEXT}
-                      rows={2}
-                      className={`${inputClass} min-w-60 flex-1 resize-none`}
-                    />
-                  ) : (
-                    <Input
-                      value={newElement.value}
-                      onChange={(e) => setNewElement({ ...newElement, value: e.target.value })}
-                      onBlur={addElement}
-                      onKeyDown={(e) => e.key === 'Enter' && addElement()}
-                      placeholder={CONTENT_PLACEHOLDER[newElement.type]}
-                      className={`${inputClass} min-w-60 flex-1`}
-                    />
-                  )}
-
-                  <input
-                    ref={uploadRef}
-                    type="file"
-                    accept={UPLOAD_ACCEPT}
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      // Cleared before the await, so picking the same file again
-                      // after a failure still fires a change event.
-                      e.target.value = '';
-                      if (!file) return;
-
-                      const sectionId = selectedSection.id;
-                      setUploadingSectionId(sectionId);
-                      try {
-                        // `run` refreshes the course before it resolves, so the
-                        // placeholder is replaced by the real thing rather than
-                        // clearing a moment before it appears.
-                        await run(
-                          () => curriculumApi.uploadSectionImage(sectionId, file),
-                          'File added',
-                          'Failed to upload',
-                        );
-                      } finally {
-                        setUploadingSectionId((current) =>
-                          current === sectionId ? null : current,
-                        );
+                  <div className="flex flex-wrap items-start gap-3">
+                    <select
+                      value={newElement.type}
+                      onChange={(e) =>
+                        setNewElement({ type: e.target.value as NewContentType, value: '' })
                       }
-                    }}
-                  />
-                  <Button
-                    onClick={() => uploadRef.current?.click()}
-                    disabled={uploadingSectionId === selectedSection.id}
-                    variant="outline"
-                    className="bg-white text-dark-gray hover:bg-light-gray"
-                  >
-                    {uploadingSectionId === selectedSection.id ? (
-                      <>
-                        <Spinner className="w-5 h-5" /> Uploading…
-                      </>
-                    ) : (
-                      <>
-                        <ArrowUpTrayIcon className="w-5 h-5" /> Upload
-                      </>
-                    )}
-                  </Button>
+                      className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm
+                        text-dark-gray"
+                    >
+                      {CONTENT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
 
-                  <Button onClick={addElement} className={primaryBtn}>
-                    <PlusIcon className="w-5 h-5 stroke-2" /> Add
-                  </Button>
+                    {newElement.type === 'TEXT' ? (
+                      <Textarea
+                        value={newElement.value}
+                        onChange={(e) => setNewElement({ ...newElement, value: e.target.value })}
+                        onBlur={addElement}
+                        placeholder={CONTENT_PLACEHOLDER.TEXT}
+                        rows={2}
+                        className={`${inputClass} min-w-60 flex-1 resize-none`}
+                      />
+                    ) : (
+                      <Input
+                        value={newElement.value}
+                        onChange={(e) => setNewElement({ ...newElement, value: e.target.value })}
+                        onBlur={addElement}
+                        onKeyDown={(e) => e.key === 'Enter' && addElement()}
+                        placeholder={CONTENT_PLACEHOLDER[newElement.type]}
+                        className={`${inputClass} min-w-60 flex-1`}
+                      />
+                    )}
+
+                    <input
+                      ref={uploadRef}
+                      type="file"
+                      accept={UPLOAD_ACCEPT}
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        // Cleared before the await, so picking the same file again
+                        // after a failure still fires a change event.
+                        e.target.value = '';
+                        if (!file) return;
+
+                        const sectionId = selectedSection.id;
+                        setUploadingSectionId(sectionId);
+                        try {
+                          // `run` refreshes the course before it resolves, so the
+                          // placeholder is replaced by the real thing rather than
+                          // clearing a moment before it appears.
+                          await run(
+                            () => curriculumApi.uploadSectionImage(sectionId, file),
+                            'File added',
+                            'Failed to upload',
+                          );
+                        } finally {
+                          setUploadingSectionId((current) =>
+                            current === sectionId ? null : current,
+                          );
+                        }
+                      }}
+                    />
+                    <Button
+                      onClick={() => uploadRef.current?.click()}
+                      disabled={uploadingSectionId === selectedSection.id}
+                      variant="outline"
+                      className="bg-white text-dark-gray hover:bg-light-gray"
+                    >
+                      {uploadingSectionId === selectedSection.id ? (
+                        <>
+                          <Spinner className="w-5 h-5" /> Uploading…
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUpTrayIcon className="w-5 h-5" /> Upload
+                        </>
+                      )}
+                    </Button>
+
+                    <Button onClick={addElement} className={primaryBtn}>
+                      <PlusIcon className="w-5 h-5 stroke-2" /> Add
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Existing content, draggable */}
               {sectionContent(selectedSection).length === 0 ? (
@@ -937,17 +960,19 @@ const StructureEditor = ({
                     >
                       <div className="flex items-center gap-2 px-3 py-2">
                         {/* Only the handle drags, so the editor inside stays usable */}
-                        <div
-                          draggable
-                          onDragStart={() => setContentDragId(item.id)}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={() => handleContentDrop(item.id)}
-                          onDragEnd={() => setContentDragId(null)}
-                          className="cursor-grab p-1"
-                          title="Drag to reorder"
-                        >
-                          <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
-                        </div>
+                        {!layerSection && (
+                          <div
+                            draggable
+                            onDragStart={() => setContentDragId(item.id)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={() => handleContentDrop(item.id)}
+                            onDragEnd={() => setContentDragId(null)}
+                            className="cursor-grab p-1"
+                            title="Drag to reorder"
+                          >
+                            <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+                          </div>
+                        )}
 
                         <button
                           onClick={() =>
@@ -979,17 +1004,19 @@ const StructureEditor = ({
                             inside the editor: it belongs with the other things
                             done *to* a quiz, not among the fields that describe
                             one. */}
-                        <Button
-                          onClick={() =>
-                            onDelete({ kind: 'quiz', id: item.quiz.id, label: item.quiz.title })
-                          }
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 hover:text-danger-hover"
-                          title="Delete quiz"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </Button>
+                        {item.quiz.type !== 'DIRECTED' && (
+                          <Button
+                            onClick={() =>
+                              onDelete({ kind: 'quiz', id: item.quiz.id, label: item.quiz.title })
+                            }
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 hover:text-danger-hover"
+                            title="Delete quiz"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </Button>
+                        )}
                       </div>
 
                       {openQuizId === item.quiz.id && (
