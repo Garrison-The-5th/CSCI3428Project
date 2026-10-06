@@ -6,7 +6,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import ElementView, { plainPreview, toYouTubeEmbedUrl } from '@/components/common/element-view';
 import type { SectionElement } from '@/services/curriculum-api';
@@ -76,6 +76,26 @@ describe('toYouTubeEmbedUrl', () => {
 });
 
 describe('ElementView — text', () => {
+  /**
+   * A link that replaced the page would take the learner out of the course and
+   * lose their place — including links saved before the server started marking
+   * them, which carry no target of their own.
+   */
+  it('opens a link in a new tab, even one saved without a target', () => {
+    const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+    render(
+      <ElementView
+        element={element({ textContent: '<p><a href="https://example.com/">Read more</a></p>' })}
+      />,
+    );
+
+    const clicked = fireEvent.click(screen.getByText('Read more'));
+
+    expect(clicked).toBe(false); // default navigation prevented
+    expect(open).toHaveBeenCalledWith('https://example.com/', '_blank', 'noopener,noreferrer');
+    open.mockRestore();
+  });
+
   it('renders sanitised author markup', () => {
     render(<ElementView element={element({ type: 'TEXT', textContent: '<p>Hello there</p>' })} />);
     expect(screen.getByText('Hello there')).toBeInTheDocument();

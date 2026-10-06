@@ -856,10 +856,12 @@ export default class CourseMapService {
       Both halves are compared: the text, and which connection each option is
       already pointed at. Text alone is not enough — two nodes swapping names
       leaves the list identical and the routes crossed.
+
+      The prompt is not compared, and nor is the title: both are the author's to
+      word once the layer exists, and the map only ever writes them at birth.
     */
     const settled =
       question !== undefined &&
-      question.prompt === LAYER_PROMPT &&
       question.options.length === options.length &&
       options.every(
         (option, index) =>
@@ -867,14 +869,13 @@ export default class CourseMapService {
           edgeOptionIds.get(option.edgeId) === question.options[index]?.id,
       );
 
-    if (settled) {
-      if (existing) await QuizGateway.updateQuiz(quizId, { title });
-      return;
-    }
+    if (settled) return;
 
     const written = question
       ? await QuizGateway.updateQuestion(question.id, {
-          prompt: LAYER_PROMPT,
+          // The prompt and hint are left as the author worded them; only the
+          // options belong to the map.
+          //
           // Nothing here is right or wrong — the answer is a fact about the
           // learner, not a thing to be marked — so every option is `false` and
           // the mark is discarded at submission.
@@ -900,8 +901,6 @@ export default class CourseMapService {
           : Promise.resolve(),
       ),
     );
-
-    if (existing) await QuizGateway.updateQuiz(quizId, { title });
   }
 
   /**

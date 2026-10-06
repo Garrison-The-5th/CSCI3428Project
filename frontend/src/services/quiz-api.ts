@@ -320,8 +320,11 @@ export const quizApi = {
   addQuestion: (quizId: string, question: QuestionInput) =>
     HttpHelper.post(`quizzes/${quizId}/questions`, question),
 
-  /** Replaces the prompt and the whole option set for an existing question. */
-  updateQuestion: (questionId: string, question: QuestionInput) =>
+  /**
+   * Updates an existing question. Options left out are kept — which is the only
+   * way a directed learning quiz may be saved, since its options are the map's.
+   */
+  updateQuestion: (questionId: string, question: Partial<QuestionInput>) =>
     HttpHelper.put(`quizzes/questions/${questionId}`, question),
 
   deleteQuestion: (questionId: string) => HttpHelper.delete(`quizzes/questions/${questionId}`),

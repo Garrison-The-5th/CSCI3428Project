@@ -1163,6 +1163,59 @@ describe('directed learning quizzes are the map’s, not an author’s', () => {
     expect(mockQuizGateway.softDeleteQuiz).not.toHaveBeenCalled();
   });
 
+  it('lets the author reword its title, and nothing else about the quiz', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ type: 'DIRECTED' }) as never);
+    mockQuizGateway.updateQuiz.mockResolvedValue({} as never);
+
+    await expect(QuizService.updateQuiz('quiz-1', { title: 'Your role' })).resolves.toBeDefined();
+    await expect(QuizService.updateQuiz('quiz-1', { showResults: false })).rejects.toThrow(
+      /only its title/i,
+    );
+    await expect(QuizService.updateQuiz('quiz-1', { timeLimitMinutes: 5 })).rejects.toThrow(
+      /only its title/i,
+    );
+  });
+
+  it('refuses a second question, and refuses to remove or reorder its one', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ type: 'DIRECTED' }) as never);
+    mockQuizGateway.getQuestionById.mockResolvedValue({ id: 'qn-1', quizId: 'quiz-1' } as never);
+    const options = [
+      { text: 'A', isCorrect: true },
+      { text: 'B', isCorrect: false },
+    ];
+
+    await expect(QuizService.addQuestion('quiz-1', { prompt: 'Q', options })).rejects.toThrow(
+      /no more can be added/i,
+    );
+    await expect(QuizService.deleteQuestion('qn-1')).rejects.toThrow(/cannot be removed/i);
+    expect(mockQuizGateway.deleteQuestion).not.toHaveBeenCalled();
+    await expect(QuizService.reorderQuestions('quiz-1', ['qn-1'])).rejects.toThrow(
+      /cannot be reordered/i,
+    );
+  });
+
+  it("lets the prompt and hint change, but never the map's options", async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ type: 'DIRECTED' }) as never);
+    mockQuizGateway.getQuestionById.mockResolvedValue({ id: 'qn-1', quizId: 'quiz-1' } as never);
+    mockQuizGateway.updateQuestion.mockResolvedValue({} as never);
+
+    await QuizService.updateQuestion('qn-1', { prompt: 'Where do you work?', hint: 'Tick all' });
+    expect(mockQuizGateway.updateQuestion).toHaveBeenCalledWith('qn-1', {
+      prompt: 'Where do you work?',
+      hint: 'Tick all',
+    });
+
+    await expect(
+      QuizService.updateQuestion('qn-1', {
+        prompt: 'Q',
+        options: [
+          { text: 'A', isCorrect: true },
+          { text: 'B', isCorrect: false },
+        ],
+      }),
+    ).rejects.toThrow(/only the prompt and hint/i);
+  });
+
   /**
    * A mark would be a number about nothing. There is no right answer to "which
    * of these apply to you", and reporting 0% would tell somebody they had got
