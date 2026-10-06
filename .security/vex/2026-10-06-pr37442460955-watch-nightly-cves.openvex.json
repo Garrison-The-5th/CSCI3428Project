@@ -1,0 +1,63 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-10-06-pr37442460955-watch-nightly-cves.openvex.json",
+  "version": 1,
+  "timestamp": "2026-10-06T09:28:01.945Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "37442460955"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-90711",
+        "aliases": [],
+        "description": "proxy-addr is a Node.js module that determines a request's client addr ..."
+      },
+      "products": [{ "@id": "pkg:npm/proxy-addr@2.0.7" }],
+      "status": "fixed",
+      "fixed_in_version": "2.0.8",
+      "action_reference": "watch run=37442460955 on bot-sec/security",
+      "impact_statement": "Transitive dep of express ^5.1.0 in backend. Bumped proxy-addr 2.0.7 -> 2.0.8 via `npm update proxy-addr` in backend/ (patch bump; backend/package-lock.json only). Backend test suite, lint, build, and backend tsc --noEmit all passed.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-90711",
+        "https://cna.openjsf.org/security-advisories.html",
+        "https://github.com/jshttp/proxy-addr",
+        "https://github.com/jshttp/proxy-addr/commit/780911d84d18e2c5fa008ed0c0d387631ec11965"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-93749",
+        "aliases": [],
+        "description": "source-map-js: source-map-js: Denial of Service via malformed indexed source maps"
+      },
+      "products": [{ "@id": "pkg:npm/source-map-js@1.2.1" }],
+      "status": "fixed",
+      "fixed_in_version": "1.2.2",
+      "action_reference": "watch run=37442460955 on bot-sec/security",
+      "impact_statement": "Transitive dep of postcss in backend and frontend. Bumped source-map-js 1.2.1 -> 1.2.2 via `npm update source-map-js` in backend/ and frontend/ (patch bump). Backend tests, lint, build, and backend tsc --noEmit all passed; frontend lockfile change is isolated to source-map-js version + benign libc-metadata normalization.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-93749",
+        "https://access.redhat.com/security/cve/CVE-2026-93749",
+        "https://github.com/7rulnik/source-map-js",
+        "https://github.com/7rulnik/source-map-js/blob/c1cd8904bb7bd0c7fb5879fcda48134d82a27934/lib/source-node.js#L115-L118"
+      ]
+    }
+  ]
+}
