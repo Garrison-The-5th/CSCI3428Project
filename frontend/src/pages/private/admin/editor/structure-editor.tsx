@@ -31,12 +31,12 @@ import EditedTag from '@/components/common/edited-tag';
 import ElementEditor from '@/components/common/element-editor';
 import { NewBadge, newMarkers } from '@/components/common/new-badge';
 import QuizEditor from '@/components/common/quiz-editor';
+import RichTextEditor from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import LockOverlay from '@/components/ui/lock-overlay';
 import Spinner from '@/components/ui/spinner';
-import { Textarea } from '@/components/ui/textarea';
 import { useEditLocks } from '@/contexts/edit-locks-context';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
 import ModuleColorPicker from '@/pages/private/admin/editor/module-color-picker';
@@ -88,9 +88,20 @@ const CONTENT_TYPES: NewContentType[] = ['TEXT', 'YOUTUBE', 'IMAGE', 'QUIZ'];
 const CONTENT_PLACEHOLDER: Record<NewContentType, string> = {
   TEXT: 'Start typing to add a text block...',
   YOUTUBE: 'Paste a YouTube link',
-  IMAGE: 'Image URL',
+  IMAGE: 'Paste an image URL, or upload one',
   QUIZ: 'New quiz title',
 };
+
+/** Whether rich text HTML has nothing a learner would see. */
+function isBlankHtml(html: string): boolean {
+  if (/<(img|table|hr)\b/i.test(html)) return false;
+  return (
+    html
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, '')
+      .trim() === ''
+  );
+}
 
 /** What is being dragged, so a section is never dropped onto a module list. */
 type Drag = { kind: 'section'; id: string } | { kind: 'module'; id: string } | null;
@@ -307,6 +318,9 @@ const StructureEditor = ({
   const addElement = async () => {
     const value = newElement.value.trim();
     if (!selectedSection || !value || addingRef.current) return;
+    // The rich text editor leaves markup behind when emptied — a stray <br>, an
+    // empty paragraph — which is not content worth a block of its own.
+    if (newElement.type === 'TEXT' && isBlankHtml(value)) return;
 
     addingRef.current = true;
     try {
@@ -849,15 +863,20 @@ const StructureEditor = ({
                       ))}
                     </select>
 
+                    {/*
+                      Text gets the same full editor an existing block opens in,
+                      on a row of its own, and is added with the Add button only:
+                      clicking its toolbar moves focus out of the text, so adding
+                      on blur would add half a paragraph at the first bold.
+                    */}
                     {newElement.type === 'TEXT' ? (
-                      <Textarea
-                        value={newElement.value}
-                        onChange={(e) => setNewElement({ ...newElement, value: e.target.value })}
-                        onBlur={addElement}
-                        placeholder={CONTENT_PLACEHOLDER.TEXT}
-                        rows={2}
-                        className={`${inputClass} min-w-60 flex-1 resize-none`}
-                      />
+                      <div className="order-last w-full">
+                        <RichTextEditor
+                          value={newElement.value}
+                          onChange={(html) => setNewElement((prev) => ({ ...prev, value: html }))}
+                          placeholder={CONTENT_PLACEHOLDER.TEXT}
+                        />
+                      </div>
                     ) : (
                       <Input
                         value={newElement.value}
@@ -899,9 +918,18 @@ const StructureEditor = ({
                         }
                       }}
                     />
+                    {/* Only an image is uploaded; text is written and a video is
+                        linked, so the button is off for everything else. */}
                     <Button
                       onClick={() => uploadRef.current?.click()}
-                      disabled={uploadingSectionId === selectedSection.id}
+                      disabled={
+                        newElement.type !== 'IMAGE' || uploadingSectionId === selectedSection.id
+                      }
+                      title={
+                        newElement.type === 'IMAGE'
+                          ? 'Upload an image from your computer'
+                          : 'Pick IMAGE to upload a file'
+                      }
                       variant="outline"
                       className="bg-white text-dark-gray hover:bg-light-gray"
                     >
