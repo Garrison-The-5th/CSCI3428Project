@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-10-06-pr37519237076-element-view-reeval-sanitizer-still-in-place.sast.json",
+  "version": 1,
+  "timestamp": "2026-10-06T19:31:51.342Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "37519237076"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:ad1daf9f0a2c",
+        "location": {
+          "file": "frontend/src/components/common/element-view.tsx",
+          "start_line": 311,
+          "end_line": 311,
+          "commit_sha": "fe2d85bd88b3a047be191b6ed3a214cc41741d0d"
+        }
+      },
+      "status": "not_affected",
+      "justification": "inline_mitigations_already_exist",
+      "impact_statement": "REEVALUATE (touched): commit 3b7a618 added an openLinksInNewTab click handler and the full-tree scan reopened the finding. The dangerouslySetInnerHTML sink itself at element-view.tsx:311 is unchanged — the delta only intercepts anchor clicks and reopens them via window.open with 'noopener,noreferrer', which neither constructs HTML nor widens attacker control. The inline mitigation that justified the prior disposition still holds: lesson text passes through sanitizeRichText (backend/src/config/rich-text.ts) on write — a strict sanitize-html allowlist with no script/iframe/event-handler tags, no javascript: scheme, and a tight style-attribute whitelist — called from curriculum-service.ts:1226 and :1306 before the content is ever stored. Re-confirmed not_affected with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-01-04",
+      "references": [
+        "https://semgrep.dev/r/typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml"
+      ]
+    }
+  ]
+}

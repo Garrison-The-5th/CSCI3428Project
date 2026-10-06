@@ -2,13 +2,11 @@
 
 | Source | Finding | Status | Confidence | Action |
 |---|---|---|---:|---|
-| Trivy (fs) | CVE-2026-90711 — proxy-addr 2.0.7 (CRITICAL, transitive via express) | fixed | 95 | bumped backend proxy-addr -> 2.0.8 |
-| Trivy (fs) | CVE-2026-93749 — source-map-js 1.2.1 (HIGH, transitive via postcss) | fixed | 95 | bumped backend + frontend source-map-js -> 1.2.2 |
+| Semgrep | typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml — frontend/src/components/common/element-view.tsx:311 (REEVALUATE touched) | not_affected | 90 | re-confirmed inline_mitigations_already_exist; wrote fresh dated statement with reevaluate_after 2027-01-04 |
 
 ## Auto-fixed
 
-- `backend/package-lock.json`: proxy-addr 2.0.7 -> 2.0.8 (fixes CVE-2026-90711) and source-map-js 1.2.1 -> 1.2.2 (fixes CVE-2026-93749) via `npm update` (patch bumps, no package.json range change needed).
-- `frontend/package-lock.json`: source-map-js 1.2.1 -> 1.2.2 via `npm update` (patch bump; also normalized some `libc` metadata entries npm emits).
+- none
 
 ## Tests updated (stale assertions from fixes)
 
@@ -20,4 +18,4 @@
 
 ## Outcome
 
-DONE — Both NEW nightly CVEs (CRITICAL proxy-addr, HIGH source-map-js) were patch-level bumps on transitive deps. Backend test suite, lint, build, and `tsc --noEmit -p backend/tsconfig.json` all passed on the fixed tree. Frontend's `npm test` fails on `jest.config.ts` requiring an unlisted `ts-node` — verified pre-existing on the baseline (fails identically with changes stashed), unrelated to this triage. Preflight rebucket shows NEW=0; REGRESSION=2 is the expected artifact of reconciling against the pre-fix Trivy snapshot and will clear on the next scan.
+DONE — Full-tree reconciliation produced 0 NEW, 0 RESOLVED, 0 REGRESSION, 4 PERSISTENT and 1 REEVALUATE (touched). The reevaluate hit `element-view.tsx` because commit 3b7a618 added an `openLinksInNewTab` click handler nearby; the `dangerouslySetInnerHTML` sink on line 311 is unchanged, and the inline mitigation that justified the prior disposition — server-side `sanitizeRichText` (`backend/src/config/rich-text.ts`, invoked at `curriculum-service.ts:1226,1306`) using sanitize-html with a strict allowlist (no script/iframe/event-handlers, javascript: scheme blocked, tight style whitelist) — still holds. Re-confirmed not_affected / inline_mitigations_already_exist, fresh 90-day window. Pre-flight on the merged tree: lint, backend+frontend tests, `npm run build`, and `tsc --noEmit -p backend/tsconfig.json` all green.
