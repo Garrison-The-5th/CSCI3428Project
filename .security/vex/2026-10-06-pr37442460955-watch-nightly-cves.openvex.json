@@ -11,10 +11,10 @@
     "invocation_id": "37442460955"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "Jacob.Matthews@ttgteams.com",
+    "reviewed_at": "2026-10-06T19:16:54Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -23,7 +23,11 @@
         "aliases": [],
         "description": "proxy-addr is a Node.js module that determines a request's client addr ..."
       },
-      "products": [{ "@id": "pkg:npm/proxy-addr@2.0.7" }],
+      "products": [
+        {
+          "@id": "pkg:npm/proxy-addr@2.0.7"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.0.8",
       "action_reference": "watch run=37442460955 on bot-sec/security",
@@ -44,7 +48,11 @@
         "aliases": [],
         "description": "source-map-js: source-map-js: Denial of Service via malformed indexed source maps"
       },
-      "products": [{ "@id": "pkg:npm/source-map-js@1.2.1" }],
+      "products": [
+        {
+          "@id": "pkg:npm/source-map-js@1.2.1"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "1.2.2",
       "action_reference": "watch run=37442460955 on bot-sec/security",
