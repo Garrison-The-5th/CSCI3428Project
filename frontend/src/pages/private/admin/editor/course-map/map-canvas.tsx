@@ -54,6 +54,7 @@ import {
   centreOn,
   clampOffset,
   clampZoom,
+  CONNECT_REACH,
   contentBounds,
   fitView,
   gridStep,
@@ -77,7 +78,13 @@ import type { MapEdge, MapNode } from '@/services/course-map-api';
 /** Which gesture currently owns the pointer, and what it needs to remember. */
 type Gesture =
   | { kind: 'pan'; from: Point; offset: Point }
-  | { kind: 'node'; nodeId: string; from: Point; origin: Point }
+  | {
+      kind: 'node';
+      nodeId: string;
+      origin: Point;
+      /** Where on the node it was picked up, so it stays under the pointer as the view moves. */
+      grab: Point;
+    }
   | { kind: 'string'; parentId: string; to: Point }
   | null;
 
@@ -89,6 +96,29 @@ type Gesture =
  * state of that node. The node is also selected, and that highlight stays.
  */
 const FOUND_MS = 2500;
+
+/**
+ * Dragging a node this close to the frame's edge, in screen pixels, scrolls the
+ * map along with it — so a node can be carried somewhere that was off screen
+ * when the drag began, and the view keeps the node in sight on the way.
+ */
+const EDGE_ZONE = 48;
+/**
+ * The most the view moves per pointer event, reached only right at the edge.
+ *
+ * Ramped rather than constant: pointer events arrive sixty-plus times a second,
+ * so a flat 18px a step sent the map flying the moment the node touched the
+ * zone. Easing in from nothing at the zone's inner edge lets the author nudge
+ * the view a little or carry it further by pushing closer.
+ */
+const EDGE_SPEED = 6;
+
+/** How far to scroll along one axis for a pointer `at` pixels into a frame `size` wide. */
+function edgePush(at: number, size: number): number {
+  if (at < EDGE_ZONE) return EDGE_SPEED * (1 - Math.max(at, 0) / EDGE_ZONE);
+  if (at > size - EDGE_ZONE) return -EDGE_SPEED * (1 - Math.max(size - at, 0) / EDGE_ZONE);
+  return 0;
+}
 
 interface MapCanvasProps {
   nodes: MapNode[];
@@ -161,8 +191,21 @@ const MapCanvas = ({
    * data afterwards.
    */
   const [dragged, setDragged] = useState<Record<string, Point>>({});
+  /**
+   * The newest pan, readable inside a pointer handler that has just changed it.
+   * Edge-scrolling moves the view and the node in the same event, and the node
+   * has to be placed against the view as it now is, not as the last render saw it.
+   */
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
   /** The node the cursor is over while a string or a section is being dragged. */
   const [hovered, setHovered] = useState<string | null>(null);
+  /**
+   * The connection the pointer is resting on, which is what shows its cut
+   * button. The button alone is a 20px target in the middle of a long string,
+   * and finding it by sweeping the cursor about was the complaint.
+   */
+  const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   /** The node the last search landed on, briefly ringed. See `FOUND_MS`. */
   const [foundId, setFoundId] = useState<string | null>(null);
@@ -182,7 +225,14 @@ const MapCanvas = ({
    */
   const [zoomDraft, setZoomDraft] = useState<string | null>(null);
 
-  const bounds = contentBounds(nodes);
+  const positionOf = (node: MapNode): Point => dragged[node.id] ?? { x: node.x, y: node.y };
+
+  /**
+   * The extent of the map as it is drawn right now, the node being dragged
+   * included. Measured from stored positions alone, the frame lagged behind a
+   * moved node: carry one past the edge and the map would not pan out to it.
+   */
+  const bounds = contentBounds(nodes.map((node) => ({ ...node, ...positionOf(node) })));
   /** The same bounds in screen pixels, which is what the offset is measured in. */
   const panBounds = useMemo(
     () => scaleBounds(bounds, scale),
@@ -202,9 +252,13 @@ const MapCanvas = ({
 
   // Kept inside the bounds whenever they change under it — a node deleted from
   // the edge of the map shrinks the world, and the view has to come back with it.
+  // Not while a node is being carried: the bounds move with it, and re-fitting
+  // the view under the pointer mid-drag would shake the whole map. It settles
+  // once the node is let go.
   useEffect(() => {
+    if (gesture?.kind === 'node') return;
     setOffset((current) => clampOffset(current, panBounds, viewport));
-  }, [panBounds, viewport.x, viewport.y]);
+  }, [panBounds, viewport.x, viewport.y, gesture?.kind]);
 
   // The found ring is a moment, not a state. Cleared on a timer, and on the next
   // search, so two searches in a row never leave two nodes ringed.
@@ -223,8 +277,6 @@ const MapCanvas = ({
     },
     [offset, scale],
   );
-
-  const positionOf = (node: MapNode): Point => dragged[node.id] ?? { x: node.x, y: node.y };
 
   // ---- Toolbar ----
 
@@ -327,12 +379,16 @@ const MapCanvas = ({
    * can come before it — and neither is the node the string came from.
    */
   const dropTarget = (parentId: string, at: Point): MapNode | null => {
-    const target = nodeAtPoint(
-      nodes.map((node) => ({ ...node, ...positionOf(node) })),
-      at,
-    );
-    if (!target || target.isRoot || target.id === parentId) return null;
-    return target;
+    // Only nodes that could accept the string are asked, so the extra reach
+    // around each box never lands on one that would refuse it. A linked map can
+    // be led into at its root's copy only; the rest of it is fixed.
+    const candidates = nodes
+      .filter(
+        (node) =>
+          !node.isRoot && node.id !== parentId && (!node.linked || node.linked.entry === true),
+      )
+      .map((node) => ({ ...node, ...positionOf(node) }));
+    return nodeAtPoint(candidates, at, CONNECT_REACH / scale);
   };
 
   const onPointerMove = (event: React.PointerEvent) => {
@@ -349,13 +405,31 @@ const MapCanvas = ({
     }
 
     if (gesture.kind === 'node') {
+      const box = frame.current?.getBoundingClientRect();
+      if (!box) return;
+      const screen = { x: event.clientX - box.left, y: event.clientY - box.top };
+
+      // Near an edge, the view scrolls towards it so the node can be carried
+      // past what was on screen when the drag began.
+      const push = {
+        x: edgePush(screen.x, box.width),
+        y: edgePush(screen.y, box.height),
+      };
+      let view = offsetRef.current;
+      if (push.x !== 0 || push.y !== 0) {
+        view = { x: view.x + push.x, y: view.y + push.y };
+        offsetRef.current = view;
+        setOffset(view);
+      }
+
+      // Placed against the view as it now stands, at the point it was picked up
+      // by, so the node stays under the pointer however the map has moved.
+      const at = toCanvas(screen, view, scale);
       setDragged((current) => ({
         ...current,
         [gesture.nodeId]: {
-          // Divided by the zoom: the pointer has moved this many screen pixels,
-          // and the node has to move that far in canvas units to stay under it.
-          x: Math.round(gesture.origin.x + (event.clientX - gesture.from.x) / scale),
-          y: Math.round(gesture.origin.y + (event.clientY - gesture.from.y) / scale),
+          x: Math.round(at.x - gesture.grab.x),
+          y: Math.round(at.y - gesture.grab.y),
         },
       }));
       return;
@@ -399,6 +473,11 @@ const MapCanvas = ({
 
   const edgeKey = (edge: MapEdge) => `${edge.parentId}->${edge.childId}`;
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  /**
+   * Linked nodes the source's map already leads on from. Those are fixed; a
+   * linked node at the end of its map may lead on to this course's own nodes.
+   */
+  const branchingLinked = new Set(edges.filter((edge) => edge.locked).map((edge) => edge.parentId));
 
   /** One toolbar button. Uniform, so the strip reads as one control. */
   const tool = (label: string, Icon: typeof PlusIcon, onClick: () => void, extra?: string) => (
@@ -663,16 +742,48 @@ const MapCanvas = ({
               const child = nodeById.get(edge.childId);
               if (!parent || !child) return null;
 
+              const key = edgeKey(edge);
+              const d = stringPath(outputPort(positionOf(parent)), inputPort(positionOf(child)));
+              const lit = hoveredEdge === key;
+
+              // A linked map's connections are red: fixed, and owned elsewhere.
               return (
-                <path
-                  key={edgeKey(edge)}
-                  d={stringPath(outputPort(positionOf(parent)), inputPort(positionOf(child)))}
-                  fill="none"
-                  stroke="#1f3a5f"
-                  strokeOpacity={0.55}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
+                <g key={key}>
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke={edge.locked ? '#dc2626' : '#1f3a5f'}
+                    strokeOpacity={edge.locked ? 0.85 : lit ? 0.9 : 0.55}
+                    strokeWidth={edge.locked ? 2.5 : lit ? 3 : 2}
+                    strokeLinecap="round"
+                  />
+                  {/* A wide, invisible band along the string that picks up the
+                      hover, so the whole length of it reveals the cut button.
+                      It still pans like the background when dragged, so the
+                      strip it covers is not lost to moving the view. Locked
+                      connections cannot be cut and so get no band. */}
+                  {!edge.locked && (
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={14}
+                      pointerEvents="stroke"
+                      onPointerEnter={() => setHoveredEdge(key)}
+                      onPointerLeave={() =>
+                        setHoveredEdge((current) => (current === key ? null : current))
+                      }
+                      onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        beginGesture({
+                          kind: 'pan',
+                          from: { x: event.clientX, y: event.clientY },
+                          offset,
+                        });
+                      }}
+                    />
+                  )}
+                </g>
               );
             })}
 
@@ -698,20 +809,27 @@ const MapCanvas = ({
           {edges.map((edge) => {
             const parent = nodeById.get(edge.parentId);
             const child = nodeById.get(edge.childId);
-            if (!parent || !child) return null;
+            // A linked map's connections cannot be cut, so they get no button.
+            if (!parent || !child || edge.locked) return null;
 
             const from = outputPort(positionOf(parent));
             const to = inputPort(positionOf(child));
+            const key = edgeKey(edge);
 
             return (
               <button
-                key={`cut-${edgeKey(edge)}`}
+                key={`cut-${key}`}
                 onClick={() => onDisconnect(edge.parentId, edge.childId)}
+                // Keeps the string lit while the pointer crosses from it onto here.
+                onPointerEnter={() => setHoveredEdge(key)}
+                onPointerLeave={() =>
+                  setHoveredEdge((current) => (current === key ? null : current))
+                }
                 title={`Disconnect ${parent.title} → ${child.title}`}
-                className="absolute z-10 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2
-                  place-items-center rounded-full border border-navy/30 bg-white text-xs
-                  text-dark-gray opacity-0 transition-opacity hover:opacity-100
-                  focus-visible:opacity-100"
+                className={`absolute z-10 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2
+                place-items-center rounded-full border border-navy/30 bg-white text-xs
+                text-dark-gray transition-opacity hover:opacity-100 focus-visible:opacity-100
+                ${hoveredEdge === key ? 'opacity-100' : 'opacity-0'}`}
                 style={{
                   left: (from.x + to.x) / 2,
                   // Nudged down to meet the string, which sags between the ports.
@@ -748,11 +866,12 @@ const MapCanvas = ({
                   event.stopPropagation();
                   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
                   onSelect(node.id);
+                  const pointer = pointAt(event);
                   beginGesture({
                     kind: 'node',
                     nodeId: node.id,
-                    from: { x: event.clientX, y: event.clientY },
                     origin: { x: node.x, y: node.y },
+                    grab: { x: pointer.x - node.x, y: pointer.y - node.y },
                   });
                 }}
                 onPointerMove={onPointerMove}
@@ -776,7 +895,8 @@ const MapCanvas = ({
                 className={`absolute flex touch-none flex-col rounded-lg border-2 bg-white px-3 py-2
                 text-left shadow-sm transition-colors
                 ${gesture?.kind === 'node' && gesture.nodeId === node.id ? 'cursor-grabbing' : 'cursor-grab'}
-                ${selected ? 'border-navy ring-2 ring-navy/20' : 'border-navy/30'}
+                ${selected ? 'ring-2 ring-navy/20' : ''}
+                ${node.linked ? 'border-danger' : selected ? 'border-navy' : 'border-navy/30'}
                 ${found ? 'border-navy ring-4 ring-navy/50' : ''}
                 ${target ? 'border-[#5b9748] bg-[#5b9748]/5' : ''}`}
               >
@@ -804,6 +924,12 @@ const MapCanvas = ({
                   {node.items.length} item{node.items.length === 1 ? '' : 's'}
                 </span>
 
+                {node.linked && (
+                  <span className="mt-0.5 truncate text-xs font-semibold text-danger">
+                    Linked from {node.linked.sourceTitle}
+                  </span>
+                )}
+
                 {/*
                   The root has no input dot at all, rather than a disabled one.
                   It is where every learner starts, so there is nothing that
@@ -813,29 +939,34 @@ const MapCanvas = ({
                   <span
                     aria-hidden="true"
                     data-testid={`input-port-${node.id}`}
-                    className={`absolute top-1/2 -left-1.5 h-3 w-3 -translate-y-1/2 rounded-full
-                    border-2 border-navy bg-white ${target ? 'scale-150 bg-[#5b9748]' : ''}
-                    transition-transform`}
+                    className={`absolute top-1/2 -left-2 h-4 w-4 -translate-y-1/2 rounded-full
+                    border-2 bg-white ${node.linked ? 'border-danger' : 'border-navy'}
+                    ${target ? 'scale-150 bg-[#5b9748]' : ''} transition-transform`}
                   />
                 )}
 
-                <button
-                  aria-label={`Connect from ${node.title}`}
-                  title="Pull a string to another node"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-                    beginGesture({
-                      kind: 'string',
-                      parentId: node.id,
-                      to: outputPort({ x: node.x, y: node.y }),
-                    });
-                  }}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={endGesture}
-                  className="absolute top-1/2 -right-2.5 h-5 w-5 -translate-y-1/2 cursor-crosshair
-                    rounded-full border-2 border-navy bg-white transition-transform hover:scale-125"
-                />
+                {/* A linked node that already leads on within its map is fixed, so
+                    it has nothing to pull. One at the end of it may carry on. */}
+                {!(node.linked && branchingLinked.has(node.id)) && (
+                  <button
+                    aria-label={`Connect from ${node.title}`}
+                    title="Pull a string to another node"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+                      beginGesture({
+                        kind: 'string',
+                        parentId: node.id,
+                        to: outputPort({ x: node.x, y: node.y }),
+                      });
+                    }}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={endGesture}
+                    className="absolute top-1/2 -right-3 h-6 w-6 -translate-y-1/2 cursor-crosshair
+                      rounded-full border-2 border-navy bg-white transition-transform
+                      hover:scale-125"
+                  />
+                )}
               </div>
             );
           })}

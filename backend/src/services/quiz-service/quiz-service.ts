@@ -108,6 +108,25 @@ function chosenIds(answer: string | string[] | undefined): string[] {
   return [...new Set(answer.filter((id): id is string => typeof id === 'string' && id !== ''))];
 }
 
+/**
+ * Refusing anything on a directed learning quiz beyond its wording.
+ *
+ * The title, the question's prompt and its hint are the author's — they are how
+ * the question is put to a learner, and the map does not care how it is
+ * phrased. Everything else is the map's: there is exactly one question, its
+ * options are the connections out of the layer, and none of them is right or
+ * wrong. Changing any of that by hand would be undone by the next change to the
+ * map, or worse, would point an option at the wrong branch until it was.
+ */
+const DIRECTED_FIXED = 'a directed learning quiz is built from the course map';
+
+async function assertNotDirected(quizId: string, what: string) {
+  const quiz = await QuizGateway.getQuizById(quizId);
+  if (quiz?.type === QuizType.DIRECTED) {
+    throw new Error(`${DIRECTED_FIXED} — ${what}`);
+  }
+}
+
 const QUIZ_TYPES = Object.values(QuizType) as string[];
 
 /**
@@ -610,6 +629,28 @@ export default class QuizService {
         'a directed learning quiz belongs to the course map — change the map, not the quiz',
       );
     }
+
+    // Only its title is the author's. Its timing, marking and placement are
+    // fixed by what it is — see `assertNotDirected`.
+    if (quiz.type === QuizType.DIRECTED) {
+      const fixed = (
+        [
+          'description',
+          'sectionId',
+          'published',
+          'showResults',
+          'showAnswers',
+          'allowMultipleAttempts',
+          'dueDate',
+          'daysRemaining',
+          'timeLimitMinutes',
+        ] as const
+      ).filter((key) => data[key] !== undefined);
+      if (fixed.length > 0) {
+        throw new Error(`${DIRECTED_FIXED} — only its title can be changed`);
+      }
+    }
+
     const daysRemaining = parseDaysRemaining(data.daysRemaining);
     const sectionId =
       data.sectionId !== undefined ? data.sectionId || null : (quiz.sectionId ?? null);
@@ -730,6 +771,9 @@ export default class QuizService {
     if (!quiz) {
       throw new NotFoundError(`Quiz with ID ${quizId} not found`);
     }
+    if (quiz.type === QuizType.DIRECTED) {
+      throw new Error(`${DIRECTED_FIXED} — it has one question, and no more can be added`);
+    }
 
     const options = validateOptions(data.options ?? []);
     const fields = {
@@ -765,6 +809,9 @@ export default class QuizService {
   static async reorderQuestions(quizId: string, orderedIds: string[]) {
     const quiz = await QuizGateway.getQuizById(quizId);
     if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+    if (quiz.type === QuizType.DIRECTED) {
+      throw new Error(`${DIRECTED_FIXED} — its question cannot be reordered`);
+    }
 
     const existing = quiz.questions.map((question) => question.id);
     const given = new Set(orderedIds);
@@ -783,6 +830,14 @@ export default class QuizService {
     const question = await QuizGateway.getQuestionById(id);
     if (!question) {
       throw new NotFoundError(`Question with ID ${id} not found`);
+    }
+
+    // The prompt and hint are the author's; the options are the map's.
+    if (data.options !== undefined || data.hintSectionNumber !== undefined) {
+      await assertNotDirected(
+        question.quizId,
+        'only the prompt and hint of its question can be changed',
+      );
     }
 
     const nextPrompt =
@@ -805,6 +860,7 @@ export default class QuizService {
     if (!question) {
       throw new NotFoundError(`Question with ID ${id} not found`);
     }
+    await assertNotDirected(question.quizId, 'its one question cannot be removed');
     return QuizGateway.deleteQuestion(id);
   }
 

@@ -93,10 +93,23 @@ describe('CourseMapService.reaches', () => {
   });
 });
 
+/** A course staged with everything it holds, so mapping is allowed. */
+const stagedCourse = (overrides: Record<string, unknown> = {}) => ({
+  id: 'c1',
+  directedLearning: true,
+  stagedAt: new Date('2026-10-01'),
+  stagedContentIds: ['m1', 's1'],
+  modules: [{ id: 'm1' }],
+  sections: [{ id: 's1', title: 'Intro' }],
+  ...overrides,
+});
+
 describe('CourseMapService.connect', () => {
   beforeEach(() => {
     map.getNodeById.mockImplementation((id: string) => Promise.resolve(node(id)) as never);
     map.getEdges.mockResolvedValue([]);
+    map.getLayers.mockResolvedValue([]);
+    curriculum.getCourseById.mockResolvedValue(stagedCourse() as never);
   });
 
   it('refuses to give the root a parent', async () => {
@@ -113,7 +126,7 @@ describe('CourseMapService.connect', () => {
 
   it('refuses a connection that would close a loop', async () => {
     map.getEdges.mockResolvedValue([
-      { id: 'e1', courseId: 'c1', parentId: 'a', childId: 'b', optionId: null },
+      { id: 'e1', courseId: 'c1', parentId: 'a', childId: 'b', optionId: null, subgraphId: null },
     ]);
 
     await expect(CourseMapService.connect('b', 'a')).rejects.toThrow(/loop/i);
@@ -125,6 +138,78 @@ describe('CourseMapService.connect', () => {
     );
 
     await expect(CourseMapService.connect('a', 'b')).rejects.toThrow(/different maps/i);
+  });
+
+  it('refuses while something has been added since the course was last staged', async () => {
+    curriculum.getCourseById.mockResolvedValue(
+      stagedCourse({
+        sections: [
+          { id: 's1', title: 'Intro' },
+          { id: 's2', title: 'New' },
+        ],
+      }) as never,
+    );
+
+    await expect(CourseMapService.connect('a', 'b')).rejects.toThrow(/stage the course/i);
+    expect(map.createEdge).not.toHaveBeenCalled();
+  });
+
+  it('refuses to lead into the middle of a linked map', async () => {
+    map.getNodeById.mockImplementation(
+      (id: string) => Promise.resolve(node(id, id === 'b' ? { subgraphId: 'g1' } : {})) as never,
+    );
+    // Something inside the linked map already leads into `b`, so it is not its root.
+    map.getEdges.mockResolvedValue([
+      { id: 'e0', courseId: 'c1', parentId: 'x', childId: 'b', optionId: null, subgraphId: 'g1' },
+    ]);
+
+    await expect(CourseMapService.connect('a', 'b')).rejects.toThrow(/first node/i);
+  });
+});
+
+describe('CourseMapService.disconnect', () => {
+  it('refuses to cut a connection a linked map owns', async () => {
+    map.getNodeById.mockImplementation((id: string) => Promise.resolve(node(id)) as never);
+    map.getLayers.mockResolvedValue([]);
+    curriculum.getCourseById.mockResolvedValue(stagedCourse() as never);
+    map.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'c1', parentId: 'a', childId: 'b', optionId: null, subgraphId: 'g1' },
+    ]);
+    map.getSubgraphById.mockResolvedValue({ id: 'g1', sourceCourseId: 'c2' } as never);
+
+    await expect(CourseMapService.disconnect('a', 'b')).rejects.toThrow(/linked in from/i);
+    expect(map.deleteEdge).not.toHaveBeenCalled();
+  });
+});
+
+describe('CourseMapService.needsStaging', () => {
+  it('is true for a course never staged', () => {
+    expect(CourseMapService.needsStaging(stagedCourse({ stagedAt: null }), [])).toBe(true);
+  });
+
+  it('is false when nothing has been added since the stage', () => {
+    expect(CourseMapService.needsStaging(stagedCourse(), [])).toBe(false);
+  });
+
+  it('is true once a module is added', () => {
+    const course = stagedCourse({ modules: [{ id: 'm1' }, { id: 'm2' }] });
+    expect(CourseMapService.needsStaging(course, [])).toBe(true);
+  });
+
+  it('ignores the map’s own layer modules and sections', () => {
+    const course = stagedCourse({
+      modules: [{ id: 'm1' }, { id: 'layer-mod' }],
+      sections: [
+        { id: 's1', title: 'Intro' },
+        { id: 'layer-sec', title: 'Directed learning quiz 1' },
+      ],
+    });
+    expect(CourseMapService.needsStaging(course, [{ moduleId: 'layer-mod' }])).toBe(false);
+  });
+
+  it('does not ask for a stage just because something was deleted', () => {
+    const course = stagedCourse({ sections: [] });
+    expect(CourseMapService.needsStaging(course, [])).toBe(false);
   });
 });
 
@@ -250,6 +335,7 @@ describe('CourseMapService.syncQuizzes', () => {
     map.setDepths.mockResolvedValue(undefined);
     map.pruneChoices.mockResolvedValue(undefined);
     map.setEdgeOption.mockResolvedValue({} as never);
+    map.getSubgraphsFromSource.mockResolvedValue([]);
     curriculum.touchDraft.mockResolvedValue({} as never);
   });
 
@@ -274,7 +360,10 @@ describe('CourseMapService.syncQuizzes', () => {
     map.getLayers.mockResolvedValue([
       { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
     ] as never);
-    quiz.getQuizById.mockResolvedValue({ id: 'quiz-1', questions: [{ id: 'qn-1' }] } as never);
+    quiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      questions: [{ id: 'qn-1', options: [] }],
+    } as never);
     quiz.updateQuestion.mockResolvedValue({
       id: 'qn-1',
       options: [{ id: 'opt-1' }, { id: 'opt-2' }],
@@ -302,20 +391,25 @@ describe('CourseMapService.syncQuizzes', () => {
       node('bees', { isRoot: false, title: 'Bee keeping', x: 100, depth: 1 }),
       node('woods', { isRoot: false, title: 'Woodlands', x: 200, depth: 1 }),
       node('bee-site', { isRoot: false, title: 'On site', x: 100, depth: 2 }),
+      node('bee-home', { isRoot: false, title: 'At home', x: 150, depth: 2 }),
       node('wood-site', { isRoot: false, title: 'On site', x: 200, depth: 2 }),
+      node('wood-home', { isRoot: false, title: 'At home', x: 250, depth: 2 }),
     ] as never);
     map.getEdges.mockResolvedValue([
       { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'bees', optionId: null },
       { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: null },
       { id: 'e3', courseId: 'c1', parentId: 'bees', childId: 'bee-site', optionId: null },
+      { id: 'e5', courseId: 'c1', parentId: 'bees', childId: 'bee-home', optionId: null },
       { id: 'e4', courseId: 'c1', parentId: 'woods', childId: 'wood-site', optionId: null },
+      { id: 'e6', courseId: 'c1', parentId: 'woods', childId: 'wood-home', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
       { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
       { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', moduleId: 'mod-2' },
     ] as never);
     quiz.getQuizById.mockImplementation(
-      (id: string) => Promise.resolve({ id, questions: [{ id: `qn-${id}` }] }) as never,
+      (id: string) =>
+        Promise.resolve({ id, questions: [{ id: `qn-${id}`, options: [] }] }) as never,
     );
     quiz.updateQuestion.mockResolvedValue({
       id: 'qn',
@@ -332,7 +426,9 @@ describe('CourseMapService.syncQuizzes', () => {
       expect.objectContaining({
         options: [
           { text: 'Bee keeping › On site', isCorrect: false },
+          { text: 'Bee keeping › At home', isCorrect: false },
           { text: 'Woodlands › On site', isCorrect: false },
+          { text: 'Woodlands › At home', isCorrect: false },
         ],
       }),
     );
@@ -348,9 +444,11 @@ describe('CourseMapService.syncQuizzes', () => {
     map.getNodes.mockResolvedValue([
       node('root'),
       node('bees', { isRoot: false, title: 'Bee keeping', x: 100 }),
+      node('woods', { isRoot: false, title: 'Woodlands', x: 200 }),
     ] as never);
     map.getEdges.mockResolvedValue([
       { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'bees', optionId: 'opt-1' },
+      { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: 'opt-2' },
     ] as never);
     map.getLayers.mockResolvedValue([
       { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
@@ -361,7 +459,10 @@ describe('CourseMapService.syncQuizzes', () => {
         {
           id: 'qn-1',
           prompt: 'Which of these apply to you?',
-          options: [{ id: 'opt-1', text: 'Bee keeping' }],
+          options: [
+            { id: 'opt-1', text: 'Bee keeping' },
+            { id: 'opt-2', text: 'Woodlands' },
+          ],
         },
       ],
     } as never);
@@ -412,6 +513,52 @@ describe('CourseMapService.syncQuizzes', () => {
     expect(quiz.updateQuestion).toHaveBeenCalled();
   });
 
+  /**
+   * The title, prompt and hint are the author's to word. The map rewrites the
+   * options when it changes, and must leave the wording exactly as it was.
+   */
+  it("keeps the author's title, prompt and hint when the options change", async () => {
+    map.getNodes.mockResolvedValue([
+      node('root'),
+      node('bees', { isRoot: false, title: 'Bee keeping', x: 100 }),
+      node('woods', { isRoot: false, title: 'Woodlands', x: 200 }),
+    ] as never);
+    map.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'bees', optionId: null },
+      { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: null },
+    ] as never);
+    map.getLayers.mockResolvedValue([
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+    ] as never);
+    quiz.getQuizById.mockResolvedValue({
+      id: 'quiz-1',
+      title: 'Where do you volunteer?',
+      questions: [
+        {
+          id: 'qn-1',
+          prompt: 'Which projects are you part of?',
+          hint: 'Pick every one',
+          options: [{ id: 'opt-old', text: 'Woodlands' }],
+        },
+      ],
+    } as never);
+    quiz.updateQuestion.mockResolvedValue({
+      id: 'qn-1',
+      options: [{ id: 'opt-1' }, { id: 'opt-2' }],
+    } as never);
+
+    await CourseMapService.syncQuizzes('c1');
+
+    const written = quiz.updateQuestion.mock.calls[0][1];
+    expect(written).toEqual({
+      options: [
+        { text: 'Bee keeping', isCorrect: false },
+        { text: 'Woodlands', isCorrect: false },
+      ],
+    });
+    expect(quiz.updateQuiz).not.toHaveBeenCalled();
+  });
+
   it('removes the module and quiz of a layer the map no longer has', async () => {
     map.getNodes.mockResolvedValue([node('root')] as never);
     map.getEdges.mockResolvedValue([]);
@@ -426,6 +573,78 @@ describe('CourseMapService.syncQuizzes', () => {
 
     expect(quiz.hardDeleteQuiz).toHaveBeenCalledWith('quiz-1');
     expect(curriculum.hardDeleteModule).toHaveBeenCalledWith('mod-1');
+  });
+
+  /*
+    A map that runs in a line — or converges on one node — never forks, so there
+    is nothing to ask. No quiz is generated, and any it had is removed.
+  */
+  it('generates no quiz where no node has two or more children', async () => {
+    map.getNodes.mockResolvedValue([
+      node('root'),
+      node('a', { isRoot: false, title: 'A', x: 100 }),
+      node('b', { isRoot: false, title: 'B', x: 200 }),
+    ] as never);
+    map.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'a', optionId: 'opt-1' },
+      { id: 'e2', courseId: 'c1', parentId: 'a', childId: 'b', optionId: null },
+    ] as never);
+    map.getLayers.mockResolvedValue([
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+    ] as never);
+    map.deleteLayer.mockResolvedValue({} as never);
+    quiz.hardDeleteQuiz.mockResolvedValue({} as never);
+    curriculum.hardDeleteModule.mockResolvedValue({} as never);
+
+    await CourseMapService.syncQuizzes('c1');
+
+    expect(map.createLayer).not.toHaveBeenCalled();
+    expect(quiz.updateQuestion).not.toHaveBeenCalled();
+    expect(quiz.hardDeleteQuiz).toHaveBeenCalledWith('quiz-1');
+    // The stale option is let go, so it cannot be read as a live route.
+    expect(map.setEdgeOption).toHaveBeenCalledWith('e1', null);
+  });
+
+  it('offers only the forking parent’s children when a layer mixes the two', async () => {
+    map.getNodes.mockResolvedValue([
+      node('root'),
+      node('a', { isRoot: false, title: 'A', x: 100, depth: 1 }),
+      node('b', { isRoot: false, title: 'B', x: 200, depth: 1 }),
+      node('a1', { isRoot: false, title: 'A1', x: 100, depth: 2 }),
+      node('a2', { isRoot: false, title: 'A2', x: 150, depth: 2 }),
+      node('b1', { isRoot: false, title: 'B1', x: 200, depth: 2 }),
+    ] as never);
+    map.getEdges.mockResolvedValue([
+      { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'a', optionId: null },
+      { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'b', optionId: null },
+      { id: 'e3', courseId: 'c1', parentId: 'a', childId: 'a1', optionId: null },
+      { id: 'e4', courseId: 'c1', parentId: 'a', childId: 'a2', optionId: null },
+      { id: 'e5', courseId: 'c1', parentId: 'b', childId: 'b1', optionId: null },
+    ] as never);
+    map.getLayers.mockResolvedValue([
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', moduleId: 'mod-2' },
+    ] as never);
+    quiz.getQuizById.mockImplementation(
+      (id: string) =>
+        Promise.resolve({ id, questions: [{ id: `qn-${id}`, options: [] }] }) as never,
+    );
+    quiz.updateQuestion.mockResolvedValue({
+      id: 'qn',
+      options: [{ id: 'o' }, { id: 'o2' }],
+    } as never);
+
+    await CourseMapService.syncQuizzes('c1');
+
+    expect(quiz.updateQuestion).toHaveBeenCalledWith(
+      'qn-quiz-2',
+      expect.objectContaining({
+        options: [
+          { text: 'A1', isCorrect: false },
+          { text: 'A2', isCorrect: false },
+        ],
+      }),
+    );
   });
 });
 
@@ -560,9 +779,12 @@ describe('CourseMapService.previewFor', () => {
         depth: 1,
         items: [{ sectionId: 's-exam', sourceCourseId: 'lender' }],
       }),
+      // A second branch, so the root forks and the learner has a choice to make.
+      node('other', { isRoot: false, depth: 1, x: 100 }),
     ] as never);
     map.getEdges.mockResolvedValue([
       { id: 'e1', parentId: 'root', childId: 'branch', optionId: 'opt-1' },
+      { id: 'e2', parentId: 'root', childId: 'other', optionId: 'opt-2' },
     ] as never);
     map.getLayers.mockResolvedValue([
       { id: 'l1', depth: 1, quizId: 'layer-quiz', moduleId: 'mod-q1', sectionId: 's-q1' },
@@ -595,5 +817,327 @@ describe('CourseMapService.previewFor', () => {
     const preview = await CourseMapService.previewFor('c1', new Map());
 
     expect(preview.course.sections.map((section) => section.id)).not.toContain('s-exam');
+  });
+});
+
+/*
+  Linked maps, worked through the example they were specified by.
+
+  Course B is mapped BG → B1, BG → B2. Course A is mapped AG → A1, AG → A2, and
+  links B in: A1 → BG, A2 → BG. A then carries on from the end of B's map with
+  its own nodes: B2 → A3, A3 → A4.
+
+  B is then remapped: B1 → B1.1, B2 → B2.1. A's copy follows straight away. The
+  red connections are B's and are never cut; B2 is no longer the end of B's map,
+  so A's B2 → A3 is cut, leaving A3 → A4 as a piece of its own.
+*/
+const edge = (id: string, parentId: string, childId: string, subgraphId: string | null = null) => ({
+  id,
+  courseId: 'c1',
+  parentId,
+  childId,
+  optionId: null,
+  subgraphId,
+});
+
+const courseB = (remapped: boolean) => ({
+  nodes: [
+    node('BG', { courseId: 'b', isRoot: true, title: 'General content', x: 0, y: 0 }),
+    node('B1', { courseId: 'b', isRoot: false, title: 'B1', x: 300, y: -100 }),
+    node('B2', { courseId: 'b', isRoot: false, title: 'B2', x: 300, y: 100 }),
+    ...(remapped
+      ? [
+          node('B1.1', { courseId: 'b', isRoot: false, title: 'B1.1', x: 600, y: -100 }),
+          node('B2.1', { courseId: 'b', isRoot: false, title: 'B2.1', x: 600, y: 100 }),
+        ]
+      : []),
+  ],
+  edges: [
+    edge('b1', 'BG', 'B1'),
+    edge('b2', 'BG', 'B2'),
+    ...(remapped ? [edge('b3', 'B1', 'B1.1'), edge('b4', 'B2', 'B2.1')] : []),
+  ],
+});
+
+const copy = (sourceNodeId: string, overrides: Record<string, unknown> = {}) =>
+  node(`copy-${sourceNodeId}`, {
+    isRoot: false,
+    title: sourceNodeId,
+    subgraphId: 'g1',
+    sourceNodeId,
+    ...overrides,
+  });
+
+/** Course A, after B has been linked in and A3, A4 hung off the end of it. */
+const courseA = {
+  nodes: [
+    node('AG'),
+    node('A1', { isRoot: false }),
+    node('A2', { isRoot: false }),
+    copy('BG', { x: 1000, y: 1000 }),
+    copy('B1'),
+    copy('B2'),
+    node('A3', { isRoot: false }),
+    node('A4', { isRoot: false }),
+  ],
+  edges: [
+    edge('a1', 'AG', 'A1'),
+    edge('a2', 'AG', 'A2'),
+    edge('into-1', 'A1', 'copy-BG'),
+    edge('into-2', 'A2', 'copy-BG'),
+    edge('red-1', 'copy-BG', 'copy-B1', 'g1'),
+    edge('red-2', 'copy-BG', 'copy-B2', 'g1'),
+    edge('on', 'copy-B2', 'A3'),
+    edge('a3', 'A3', 'A4'),
+  ],
+};
+
+function mockMaps(target: typeof courseA, source: ReturnType<typeof courseB>) {
+  map.getNodes.mockImplementation(((courseId: string) =>
+    Promise.resolve(courseId === 'b' ? source.nodes : target.nodes)) as never);
+  map.getEdges.mockImplementation(((courseId: string) =>
+    Promise.resolve(courseId === 'b' ? source.edges : target.edges)) as never);
+}
+
+describe('CourseMapService.syncSubgraph', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    map.getSubgraphById.mockResolvedValue({
+      id: 'g1',
+      courseId: 'c1',
+      sourceCourseId: 'b',
+      anchorNodeId: null,
+    } as never);
+    curriculum.getCourseById.mockResolvedValue({ id: 'b', title: 'Course B' } as never);
+    map.runTransaction.mockImplementation(((fn: (db: unknown) => unknown) => fn({})) as never);
+    map.createNode.mockImplementation(((data: { sourceNodeId: string }) =>
+      Promise.resolve({ id: `copy-${data.sourceNodeId}` })) as never);
+    map.updateNode.mockImplementation(((id: string) => Promise.resolve({ id })) as never);
+    map.setItems.mockResolvedValue(undefined);
+    map.removeAuthoredSection.mockResolvedValue({ count: 0 } as never);
+    map.createEdge.mockResolvedValue({} as never);
+    map.deleteEdge.mockResolvedValue({ count: 0 } as never);
+    map.deleteEdgeById.mockResolvedValue({} as never);
+    map.clearSubgraphAnchor.mockResolvedValue({} as never);
+  });
+
+  describe('when the source is remapped', () => {
+    beforeEach(() => mockMaps(courseA, courseB(true)));
+
+    it('copies the new nodes in and joins them with red connections', async () => {
+      await CourseMapService.syncSubgraph('g1');
+
+      expect(map.createNode).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'B1.1', subgraphId: 'g1', sourceNodeId: 'B1.1' }),
+        expect.anything(),
+      );
+      expect(map.createEdge).toHaveBeenCalledWith(
+        { courseId: 'c1', parentId: 'copy-B1', childId: 'copy-B1.1', subgraphId: 'g1' },
+        expect.anything(),
+      );
+      expect(map.createEdge).toHaveBeenCalledWith(
+        { courseId: 'c1', parentId: 'copy-B2', childId: 'copy-B2.1', subgraphId: 'g1' },
+        expect.anything(),
+      );
+    });
+
+    it('cuts B2 → A3, since B2 is no longer the end of the linked map', async () => {
+      await CourseMapService.syncSubgraph('g1');
+
+      expect(map.deleteEdgeById).toHaveBeenCalledWith('on', expect.anything());
+    });
+
+    it('never cuts a red connection, nor A’s own connections into BG or after A3', async () => {
+      await CourseMapService.syncSubgraph('g1');
+
+      const cut = map.deleteEdgeById.mock.calls.map(([id]) => id);
+      expect(cut).toEqual(['on']);
+    });
+
+    it('places a new node relative to where BG’s copy now sits', async () => {
+      await CourseMapService.syncSubgraph('g1');
+
+      expect(map.createNode).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceNodeId: 'B2.1', x: 1600, y: 1100 }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('cuts nothing when the end of the linked map has not moved', async () => {
+    mockMaps(courseA, courseB(false));
+
+    await CourseMapService.syncSubgraph('g1');
+
+    expect(map.deleteEdgeById).not.toHaveBeenCalled();
+  });
+
+  it('cuts this course’s connections to a node the source deleted, through the cascade', async () => {
+    const source = courseB(false);
+    source.nodes = source.nodes.filter((current) => current.id !== 'B2');
+    source.edges = source.edges.filter((current) => current.childId !== 'B2');
+    mockMaps(courseA, source);
+    map.deleteNode.mockResolvedValue({} as never);
+
+    await CourseMapService.syncSubgraph('g1');
+
+    expect(map.deleteNode).toHaveBeenCalledWith('copy-B2', expect.anything());
+    // Already gone with the node: asking the database again would fail.
+    expect(map.deleteEdgeById).not.toHaveBeenCalledWith('on', expect.anything());
+    expect(map.deleteEdgeById).not.toHaveBeenCalledWith('red-2', expect.anything());
+  });
+
+  it('on a new link, copies BG in beside the node it was dropped on and leads into it', async () => {
+    map.getSubgraphById.mockResolvedValue({
+      id: 'g1',
+      courseId: 'c1',
+      sourceCourseId: 'b',
+      anchorNodeId: 'A1',
+    } as never);
+    mockMaps(
+      {
+        nodes: [node('AG'), node('A1', { isRoot: false, x: 400, y: 200 })],
+        edges: [edge('a1', 'AG', 'A1')],
+      },
+      courseB(false),
+    );
+
+    await CourseMapService.syncSubgraph('g1');
+
+    expect(map.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Course B: General content',
+        sourceNodeId: 'BG',
+        x: 720,
+        y: 200,
+      }),
+      expect.anything(),
+    );
+    // A1 → BG is A's own connection, not a red one.
+    expect(map.createEdge).toHaveBeenCalledWith(
+      { courseId: 'c1', parentId: 'A1', childId: 'copy-BG' },
+      expect.anything(),
+    );
+    expect(map.createEdge).toHaveBeenCalledWith(
+      { courseId: 'c1', parentId: 'copy-BG', childId: 'copy-B1', subgraphId: 'g1' },
+      expect.anything(),
+    );
+    expect(map.clearSubgraphAnchor).toHaveBeenCalledWith('g1', expect.anything());
+  });
+
+  it('removes the link when the source no longer has a map', async () => {
+    mockMaps(courseA, { nodes: [], edges: [] });
+    map.deleteSubgraph.mockResolvedValue({ count: 1 } as never);
+
+    await CourseMapService.syncSubgraph('g1');
+
+    expect(map.deleteSubgraph).toHaveBeenCalledWith('g1');
+    expect(map.createNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('CourseMapService.deleteNode on a linked map', () => {
+  it('removes the whole linked map rather than the one node', async () => {
+    map.getNodeById.mockResolvedValue(node('copy-a', { isRoot: false, subgraphId: 'g1' }) as never);
+    map.getLayers.mockResolvedValue([]);
+    map.getSubgraphsFromSource.mockResolvedValue([]);
+    curriculum.getCourseById.mockResolvedValue(stagedCourse({ directedLearning: false }) as never);
+    map.deleteSubgraph.mockResolvedValue({ count: 1 } as never);
+
+    await CourseMapService.deleteNode('copy-a');
+
+    expect(map.deleteSubgraph).toHaveBeenCalledWith('g1');
+    expect(map.deleteNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('CourseMapService.connect with a linked map', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    map.getLayers.mockResolvedValue([]);
+    curriculum.getCourseById.mockResolvedValue(stagedCourse({ directedLearning: false }) as never);
+    map.getNodeById.mockImplementation(((id: string) =>
+      Promise.resolve(courseA.nodes.find((current) => current.id === id) ?? null)) as never);
+    map.getEdges.mockResolvedValue(courseA.edges);
+    map.createEdge.mockResolvedValue({} as never);
+    map.getSubgraphs.mockResolvedValue([]);
+    map.getImports.mockResolvedValue([]);
+    map.getNodes.mockResolvedValue([]);
+    map.placedSectionIds.mockResolvedValue(new Set());
+  });
+
+  it('lets this course lead into the linked map’s root, from more than one node', async () => {
+    map.getEdges.mockResolvedValue(courseA.edges.filter((current) => current.id !== 'into-2'));
+
+    await CourseMapService.connect('A2', 'copy-BG');
+
+    expect(map.createEdge).toHaveBeenCalledWith({
+      courseId: 'c1',
+      parentId: 'A2',
+      childId: 'copy-BG',
+    });
+  });
+
+  it('refuses to lead into the middle of a linked map', async () => {
+    await expect(CourseMapService.connect('A2', 'copy-B1')).rejects.toThrow(/first node/i);
+    expect(map.createEdge).not.toHaveBeenCalled();
+  });
+
+  it('lets a node at the end of the linked map lead on to this course’s nodes', async () => {
+    await CourseMapService.connect('copy-B1', 'A4');
+
+    expect(map.createEdge).toHaveBeenCalledWith({
+      courseId: 'c1',
+      parentId: 'copy-B1',
+      childId: 'A4',
+    });
+  });
+
+  it('refuses to lead on from a node the linked map already leads on from', async () => {
+    await expect(CourseMapService.connect('copy-BG', 'A4')).rejects.toThrow(/end of a linked map/i);
+    expect(map.createEdge).not.toHaveBeenCalled();
+  });
+});
+
+describe('CourseMapService.disconnect with a linked map', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    map.getLayers.mockResolvedValue([]);
+    curriculum.getCourseById.mockResolvedValue(stagedCourse({ directedLearning: false }) as never);
+    map.getNodeById.mockImplementation(((id: string) =>
+      Promise.resolve(courseA.nodes.find((current) => current.id === id) ?? null)) as never);
+    map.getEdges.mockResolvedValue(courseA.edges);
+    map.getSubgraphById.mockResolvedValue({ id: 'g1', sourceCourseId: 'b' } as never);
+    map.deleteEdge.mockResolvedValue({ count: 1 } as never);
+  });
+
+  it('lets this course cut its own connection into BG', async () => {
+    await CourseMapService.disconnect('A1', 'copy-BG');
+    expect(map.deleteEdge).toHaveBeenCalledWith('A1', 'copy-BG');
+  });
+
+  it('never cuts a red connection', async () => {
+    await expect(CourseMapService.disconnect('copy-BG', 'copy-B1')).rejects.toThrow(
+      /linked in from/i,
+    );
+    expect(map.deleteEdge).not.toHaveBeenCalled();
+  });
+});
+
+describe('CourseMapService.propagate', () => {
+  it('rewrites every course the map is linked into, without waiting for a publish', async () => {
+    jest.clearAllMocks();
+    map.getSubgraphsFromSource.mockResolvedValue([
+      { id: 'g1', courseId: 'c1', sourceCourseId: 'b', anchorNodeId: null },
+    ] as never);
+    const sync = jest.spyOn(CourseMapService, 'syncSubgraph').mockResolvedValue(undefined);
+    const quizzes = jest.spyOn(CourseMapService, 'syncQuizzes').mockResolvedValue(undefined);
+
+    await CourseMapService.propagate('b', new Set());
+
+    expect(sync).toHaveBeenCalledWith('g1');
+    expect(quizzes).toHaveBeenCalledWith('c1', expect.any(Set));
+    sync.mockRestore();
+    quizzes.mockRestore();
   });
 });

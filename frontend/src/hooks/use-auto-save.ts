@@ -18,13 +18,30 @@ import { logger } from '@/utils/logger';
  *   re-renders and refetches do not cause write loops.
  * - Only the newest value is written; a save in flight is superseded rather than
  *   racing, so a fast typist cannot land an older value last.
+ * - An edit still waiting out the delay is written immediately when the form
+ *   goes away — switching to another section unmounts the element editors — or
+ *   when `resetKey` says the form now holds a different record. Dropping the
+ *   timer there lost whatever was typed in the last moment before the switch.
  */
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export function useAutoSave<T>(
   value: T,
   save: (value: T) => Promise<unknown>,
-  { delay = 700, enabled = true }: { delay?: number; enabled?: boolean } = {},
+  {
+    delay = 700,
+    enabled = true,
+    resetKey,
+  }: {
+    delay?: number;
+    enabled?: boolean;
+    /**
+     * Which record the form is showing. When it changes, any pending edit is
+     * saved against the record it was typed into, and the next value is taken
+     * as the new starting point rather than as an edit.
+     */
+    resetKey?: string | null;
+  } = {},
 ) {
   const [state, setState] = useState<SaveState>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,10 +58,54 @@ export function useAutoSave<T>(
   // which would restart the timer on every parent render.
   saveRef.current = save;
 
+  /**
+   * The edit waiting out the delay, with the save that was current when it was
+   * typed — so flushing it after the form has moved on still writes it to the
+   * record it belongs to, not to whatever is showing now.
+   */
+  const pending = useRef<{ value: T; save: (value: T) => Promise<unknown> } | null>(null);
+
+  /** Writes the pending edit now, if there is one. Fire and forget: the form may be gone. */
+  const flush = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const edit = pending.current;
+    pending.current = null;
+    if (!edit) return;
+
+    inFlight.current += 1;
+    edit.save(edit.value).catch((err) => logger.error('Auto-save failed:', err));
+  }, []);
+
+  // Saved on the way out, so leaving a section never loses the last edit.
+  useEffect(() => flush, [flush]);
+
+  /** The record the last pass saw, and whether the next value is its starting point. */
+  const keyRef = useRef(resetKey);
+  const rebaseline = useRef(false);
+
   useEffect(() => {
-    if (!enabled) return;
+    // Switched off with an edit still waiting: it is written rather than lost.
+    if (!enabled) return flush();
 
     const serialised = JSON.stringify(value);
+
+    // A different record: the old one's edit is written, and this one starts afresh.
+    if (resetKey !== keyRef.current) {
+      keyRef.current = resetKey;
+      flush();
+      lastSaved.current = serialised;
+      // The form refills from the new record on the next render; that value is
+      // its starting point, not something the author typed.
+      rebaseline.current = true;
+      return;
+    }
+
+    if (rebaseline.current) {
+      rebaseline.current = false;
+      lastSaved.current = serialised;
+      return;
+    }
 
     // First pass just records the starting value.
     if (lastSaved.current === null) {
@@ -52,11 +113,16 @@ export function useAutoSave<T>(
       return;
     }
 
+    // Typed and then put back: whatever was waiting to be written is now wrong.
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    pending.current = null;
     if (serialised === lastSaved.current) return;
 
-    if (timer.current) clearTimeout(timer.current);
+    pending.current = { value, save: saveRef.current };
 
     timer.current = setTimeout(async () => {
+      pending.current = null;
       const ticket = ++inFlight.current;
       setState('saving');
       try {
@@ -71,11 +137,7 @@ export function useAutoSave<T>(
         setState('error');
       }
     }, delay);
-
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [value, delay, enabled]);
+  }, [value, delay, enabled, resetKey, flush]);
 
   /** Call after saving elsewhere, so the next edit is measured from this value. */
   const markSaved = useCallback((next: T) => {
@@ -97,6 +159,7 @@ export function useAutoSave<T>(
    */
   const saveNow = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current);
+    pending.current = null;
 
     const value = latest.current;
     const serialised = JSON.stringify(value);

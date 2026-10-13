@@ -38,7 +38,7 @@
  * happens first clears the ref, so the other finds nothing and the rename is
  * sent exactly once.
  */
-import { Bars3Icon } from '@heroicons/react/24/outline';
+import { Bars3Icon, LockClosedIcon } from '@heroicons/react/24/outline';
 import { useEffect, useRef, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
@@ -124,6 +124,8 @@ const NodeContents = ({
   }
 
   const held = node.items.map((item) => item.sectionId);
+  /** A node copied in from another course's map: nothing on it is this course's to change. */
+  const linked = node.linked ?? null;
 
   /**
    * Moves the dragged sections to sit where the one they were dropped on sits.
@@ -137,6 +139,7 @@ const NodeContents = ({
     setDragId(null);
     if (dragging.length === 0 || dragging.includes(targetId)) return;
 
+    if (linked) return;
     const arriving = dragging.filter((id) => !held.includes(id));
     if (arriving.length > 0) return onAdopt(dragging);
 
@@ -181,7 +184,7 @@ const NodeContents = ({
 
         <Input
           value={title}
-          disabled={node.isRoot}
+          disabled={node.isRoot || Boolean(linked)}
           onChange={(event) => {
             setTitle(event.target.value);
             pending.current = { nodeId: node.id, was: node.title, now: event.target.value };
@@ -202,8 +205,24 @@ const NodeContents = ({
           className="mt-1 h-9 bg-light-gray"
           // The root's name is what every learner's course opens with and it has
           // no quiz option to label, so there is nothing for a rename to change.
-          title={node.isRoot ? 'The root node is always called this' : 'Rename this node'}
+          title={
+            node.isRoot
+              ? 'The root node is always called this'
+              : linked
+                ? `Named in ${linked.sourceTitle}, which owns this node`
+                : 'Rename this node'
+          }
         />
+
+        {linked && (
+          <p className="mt-1 text-xs font-semibold text-danger">
+            Linked from {linked.sourceTitle} — edit it there, and changes follow here automatically.
+            Removing this node removes the whole linked map.
+            {linked.entry
+              ? ' Your nodes can lead into this one.'
+              : ' If nothing in the linked map leads on from here, it can lead on to your nodes.'}
+          </p>
+        )}
 
         {selectMode && pickedHere > 0 && (
           <p className="mt-1 text-xs text-dark-gray">
@@ -221,11 +240,13 @@ const NodeContents = ({
           <ul className="flex flex-col gap-1">
             {node.items.map((item) => {
               const picked = selectMode && selected.has(item.sectionId);
+              /** Placed by a linked map: it can be reordered here, never taken off. */
+              const fixed = Boolean(item.locked) || Boolean(linked);
 
               return (
                 <li key={item.sectionId}>
                   <div
-                    draggable
+                    draggable={!linked}
                     onDragStart={(event) => {
                       const group = selectMode
                         ? dragGroup(item.sectionId, selected)
@@ -236,7 +257,7 @@ const NodeContents = ({
                       // it is not read as a return.
                       writeDrag(event.dataTransfer, group, node.id);
                     }}
-                    onClick={() => selectMode && onToggleSelected(item.sectionId)}
+                    onClick={() => selectMode && !fixed && onToggleSelected(item.sectionId)}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.stopPropagation();
@@ -244,12 +265,21 @@ const NodeContents = ({
                       dropOn(item.sectionId, readDrag(event.dataTransfer));
                     }}
                     onDragEnd={() => setDragId(null)}
-                    className={`flex cursor-grab items-center gap-2 rounded-md border px-2 py-1.5
-                      text-sm
-                      ${picked ? 'border-navy bg-navy/10 ring-1 ring-navy/30' : 'border-navy/20 bg-light-gray'}
+                    title={
+                      fixed
+                        ? 'Part of a linked map — it can only be removed by unlinking the map'
+                        : undefined
+                    }
+                    className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm
+                      ${linked ? 'cursor-default' : 'cursor-grab'}
+                      ${picked ? 'border-navy bg-navy/10 ring-1 ring-navy/30' : fixed ? 'border-danger/40 bg-light-gray' : 'border-navy/20 bg-light-gray'}
                       ${dragId === item.sectionId ? 'opacity-50' : ''}`}
                   >
-                    <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+                    {fixed ? (
+                      <LockClosedIcon className="w-4 h-4 shrink-0 text-danger" />
+                    ) : (
+                      <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
+                    )}
                     <span className="min-w-0 flex-1 truncate text-dark-gray">
                       <span className="font-medium">{item.number}</span> {item.title}
                     </span>

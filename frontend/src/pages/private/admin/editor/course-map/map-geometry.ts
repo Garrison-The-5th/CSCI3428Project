@@ -23,6 +23,17 @@ export const NODE_HEIGHT = 96;
 /** How much empty canvas is allowed past the outermost node. */
 export const PAN_MARGIN = 160;
 
+/**
+ * How far outside a node, in screen pixels, a string may be let go and still
+ * land on it.
+ *
+ * The box alone was too small a target: an author aiming at the input dot on the
+ * left edge would let go just short of it, on bare canvas, and the string would
+ * snap back. Measured on screen rather than on the canvas so it stays the same
+ * size to the hand whatever the zoom.
+ */
+export const CONNECT_REACH = 36;
+
 export interface Point {
   x: number;
   y: number;
@@ -90,24 +101,45 @@ export function nodeRect(node: Point): {
  *
  * Searched from the end, because later nodes are painted over earlier ones and
  * the one you can see is the one you mean.
+ *
+ * `reach` grows every box by that much on all sides, in canvas units. A point
+ * inside a node always wins over one that is merely within reach of another, so
+ * the extra margin never steals a drop from the node the pointer is actually on.
  */
 export function nodeAtPoint<T extends { id: string; x: number; y: number }>(
   nodes: T[],
   point: Point,
+  reach = 0,
 ): T | null {
+  const within = (node: T, pad: number) => {
+    const box = nodeRect(node);
+    return (
+      point.x >= box.left - pad &&
+      point.x <= box.right + pad &&
+      point.y >= box.top - pad &&
+      point.y <= box.bottom + pad
+    );
+  };
+
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    const box = nodeRect(nodes[index]);
-    if (
-      point.x >= box.left &&
-      point.x <= box.right &&
-      point.y >= box.top &&
-      point.y <= box.bottom
-    ) {
-      return nodes[index];
+    if (within(nodes[index], 0)) return nodes[index];
+  }
+  if (reach <= 0) return null;
+
+  // Nothing directly underneath: the nearest node whose input dot is in reach.
+  let best: T | null = null;
+  let bestDistance = Infinity;
+  for (const node of nodes) {
+    if (!within(node, reach)) continue;
+    const port = inputPort(node);
+    const distance = Math.hypot(point.x - port.x, point.y - port.y);
+    if (distance < bestDistance) {
+      best = node;
+      bestDistance = distance;
     }
   }
 
-  return null;
+  return best;
 }
 
 export interface Bounds {

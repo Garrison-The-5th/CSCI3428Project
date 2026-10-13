@@ -136,6 +136,13 @@ model Course {
   /// doing the mapping. Nothing about it reaches a learner — that is still
   /// `publish`.
   stagedAt         DateTime?
+  /// The modules and sections that existed when the course was last staged.
+  ///
+  /// Mapping is refused while anything has been added since: the staging pool
+  /// and the map would otherwise disagree about what there is to place. Ids
+  /// rather than a count, so adding one section and deleting another still
+  /// reads as "something new to stage".
+  stagedContentIds String[]   @default([])
   publishedAt      DateTime? // stamped the first time it is published
   /// Which CoursePublication learners are currently served. 0 means the course
   /// has never been published, so there is nothing for a learner to read.
@@ -190,6 +197,9 @@ model Course {
   mapImportedBy   CourseMapImport[]   @relation("MapImportSource")
   layerQuizzes    DirectedLayerQuiz[]
   directedChoices DirectedChoice[]
+  /// Other courses' maps linked into this one, and this map linked into others.
+  mapSubgraphs    CourseMapSubgraph[] @relation("SubgraphOwner")
+  mapLinkedInto   CourseMapSubgraph[] @relation("SubgraphSource")
 
   @@index([kind])
   @@index([createdById])
@@ -771,12 +781,21 @@ model CourseMapNode {
   depth    Int     @default(0)
   /// True on the one node the map starts from. See the note above.
   isRoot   Boolean @default(false)
+  /// Set when this node is a copy of another course's node, brought in as part
+  /// of a linked map. Such a node is read-only here and is kept in step with
+  /// `sourceNodeId` whenever the source course's map changes.
+  subgraphId   String?
+  subgraph     CourseMapSubgraph? @relation("SubgraphNodes", fields: [subgraphId], references: [id], onDelete: Cascade)
+  sourceNodeId String?
 
   /// Connections into this node, and out of it.
   parents  CourseMapEdge[] @relation("EdgeChild")
   children CourseMapEdge[] @relation("EdgeParent")
   items    CourseMapItem[]
+  /// Linked maps hung off this node — it stands in for their root.
+  anchoredSubgraphs CourseMapSubgraph[] @relation("SubgraphAnchor")
 
+  @@unique([subgraphId, sourceNodeId])
   @@index([courseId, depth])
 }
 
@@ -801,6 +820,9 @@ model CourseMapEdge {
   /// quizzes being regenerated.
   optionId String?       @unique
   option   Option?       @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  /// Set when this connection belongs to a linked map, which fixes it in place.
+  subgraphId String?
+  subgraph   CourseMapSubgraph? @relation(fields: [subgraphId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, childId])
   @@index([courseId])
@@ -821,6 +843,9 @@ model CourseMapItem {
   sectionId      String
   section        Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   sourceCourseId String
+  /// Set when this placement was written by a linked map rather than the author.
+  subgraphId     String?
+  subgraph       CourseMapSubgraph? @relation(fields: [subgraphId], references: [id], onDelete: Cascade)
 
   @@unique([nodeId, sectionId])
   @@index([sectionId])
@@ -846,6 +871,35 @@ model CourseMapImport {
 
   @@unique([courseId, sourceCourseId])
   @@index([sourceCourseId])
+}
+
+/// Another course's whole map, linked into this one as a fixed piece.
+///
+/// Made when content from an imported course that is itself mapped is dropped
+/// onto a node. Every source node is copied in, its root included, with the
+/// source's connections between them (drawn red). The copy is read-only here —
+/// the source course owns it — and is rewritten whenever the source's map
+/// changes, so both courses stay in step. This course's own nodes may lead into
+/// the copy's root, and on from any copy node with no children of its own.
+/// Deleting any node of the copy removes the whole link.
+model CourseMapSubgraph {
+  id             String          @id @default(uuid())
+  courseId       String
+  course         Course          @relation("SubgraphOwner", fields: [courseId], references: [id], onDelete: Cascade)
+  sourceCourseId String
+  sourceCourse   Course          @relation("SubgraphSource", fields: [sourceCourseId], references: [id], onDelete: Cascade)
+  /// The node it was dropped on, until the first sync connects that node to the
+  /// copy's root and clears this. Also how links made before the root was
+  /// copied in are recognised and converted.
+  anchorNodeId   String?
+  anchorNode     CourseMapNode?  @relation("SubgraphAnchor", fields: [anchorNodeId], references: [id], onDelete: SetNull)
+  nodes          CourseMapNode[] @relation("SubgraphNodes")
+  edges          CourseMapEdge[]
+  items          CourseMapItem[]
+
+  @@unique([courseId, sourceCourseId])
+  @@index([sourceCourseId])
+  @@index([anchorNodeId])
 }
 
 /// The generated quiz for one layer of a map, and the module it lives in.

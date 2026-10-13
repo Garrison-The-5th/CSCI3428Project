@@ -73,6 +73,15 @@ function exampleMap(): SnapshotMap {
         sectionIds: ['s-ppe', 's-hive'],
       },
       {
+        id: 'bee-dev',
+        title: 'Developer',
+        x: 150,
+        y: 200,
+        depth: 2,
+        isRoot: false,
+        sectionIds: ['s-bee-files'],
+      },
+      {
         id: 'wood-site',
         title: 'On site',
         x: 300,
@@ -96,6 +105,7 @@ function exampleMap(): SnapshotMap {
       { parentId: 'root', childId: 'drones' },
       { parentId: 'root', childId: 'woods' },
       { parentId: 'bees', childId: 'bee-site' },
+      { parentId: 'bees', childId: 'bee-dev' },
       { parentId: 'woods', childId: 'wood-site' },
       { parentId: 'woods', childId: 'wood-dev' },
     ],
@@ -123,6 +133,7 @@ function exampleCourse() {
       section('s-woods'),
       section('s-ppe'),
       section('s-hive'),
+      section('s-bee-files'),
       section('s-chop'),
       section('s-files'),
       section('s-q1'),
@@ -339,9 +350,9 @@ describe('a layer quiz only offers the routes this learner can reach', () => {
       choices({ 1: ['bees'] }),
     );
 
-    // Only bee-site hangs off `bees`; the two woodlands routes hang off a node
-    // this learner never picked and could never reach by answering.
-    expect(optionsOffered(course, 's-q2')).toEqual(['opt-bees-bee-site']);
+    // Only bee-site and bee-dev hang off `bees`; the two woodlands routes hang
+    // off a node this learner never picked and could never reach by answering.
+    expect(optionsOffered(course, 's-q2')).toEqual(['opt-bees-bee-site', 'opt-bees-bee-dev']);
   });
 
   it('offers both when both parents were taken', () => {
@@ -353,6 +364,7 @@ describe('a layer quiz only offers the routes this learner can reach', () => {
 
     expect(optionsOffered(course, 's-q2')).toEqual([
       'opt-bees-bee-site',
+      'opt-bees-bee-dev',
       'opt-woods-wood-site',
       'opt-woods-wood-dev',
     ]);
@@ -385,7 +397,7 @@ describe('a layer quiz only offers the routes this learner can reach', () => {
       choices({ 1: ['bees'] }),
     );
 
-    expect(optionsOffered(course, 's-q2')).toHaveLength(3);
+    expect(optionsOffered(course, 's-q2')).toHaveLength(4);
   });
 });
 
@@ -452,6 +464,85 @@ describe('a layer quiz is only offered when the learner can actually reach that 
   /** And it is still asked of somebody whose branch does carry on that far. */
   it('asks about depth 3 for the branch that reaches it', () => {
     const map = exampleMap();
+    map.nodes.push(
+      {
+        id: 'bee-deep',
+        title: 'Advanced hives',
+        x: 100,
+        y: 300,
+        depth: 3,
+        isRoot: false,
+        sectionIds: ['s-hive'],
+      },
+      {
+        id: 'bee-queen',
+        title: 'Queen rearing',
+        x: 200,
+        y: 300,
+        depth: 3,
+        isRoot: false,
+        sectionIds: ['s-queen'],
+      },
+    );
+    map.edges.push(
+      { parentId: 'bee-site', childId: 'bee-deep' },
+      { parentId: 'bee-site', childId: 'bee-queen' },
+    );
+    map.layers.push({ depth: 3, quizId: 'quiz-3', moduleId: 'mod-q3', sectionId: 's-q3' });
+
+    const { course } = projectDirectedCourse(
+      {
+        ...exampleCourse(),
+        sections: [...exampleCourse().sections, section('s-q3'), section('s-queen')],
+      },
+      map,
+      choices({ 1: ['bees'], 2: ['bee-site'] }),
+    );
+
+    expect(course.modules.map((module) => module.title)).toContain('Directed learning quiz 3');
+  });
+});
+
+/*
+  Only a fork asks a question. A node with one child leads straight on to it, so
+  a map that converges on a single node — or runs in a line — asks nothing there.
+*/
+describe('a node with only one child is followed without a quiz', () => {
+  function lineMap(): SnapshotMap {
+    return {
+      nodes: [
+        { id: 'root', title: 'General', x: 0, y: 0, depth: 0, isRoot: true, sectionIds: ['s-a'] },
+        { id: 'next', title: 'Next', x: 100, y: 0, depth: 1, isRoot: false, sectionIds: ['s-b'] },
+        { id: 'last', title: 'Last', x: 200, y: 0, depth: 2, isRoot: false, sectionIds: ['s-c'] },
+      ],
+      edges: [
+        { parentId: 'root', childId: 'next' },
+        { parentId: 'next', childId: 'last' },
+      ],
+      // A stale layer from before the rule: it must still not be asked.
+      layers: [{ depth: 1, quizId: 'quiz-1', moduleId: 'mod-q1', sectionId: 's-q1' }],
+    };
+  }
+
+  const lineCourse = () => ({
+    id: 'course-1',
+    modules: exampleCourse().modules,
+    sections: [section('s-a'), section('s-b'), section('s-c'), section('s-q1')],
+  });
+
+  it('serves the whole line to somebody who has answered nothing', () => {
+    expect([...visibleNodeIds(lineMap(), choices({}))]).toEqual(['root', 'next', 'last']);
+  });
+
+  it('asks no quiz along the way', () => {
+    const { course, locks } = projectDirectedCourse(lineCourse(), lineMap(), choices({}));
+
+    expect(course.modules.map((module) => module.title)).toEqual(['General', 'Next', 'Last']);
+    expect(locks).toEqual([]);
+  });
+
+  it('follows the single child of a picked branch straight on', () => {
+    const map = exampleMap();
     map.nodes.push({
       id: 'bee-deep',
       title: 'Advanced hives',
@@ -462,14 +553,15 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       sectionIds: ['s-hive'],
     });
     map.edges.push({ parentId: 'bee-site', childId: 'bee-deep' });
-    map.layers.push({ depth: 3, quizId: 'quiz-3', moduleId: 'mod-q3', sectionId: 's-q3' });
 
     const { course } = projectDirectedCourse(
-      { ...exampleCourse(), sections: [...exampleCourse().sections, section('s-q3')] },
+      exampleCourse(),
       map,
       choices({ 1: ['bees'], 2: ['bee-site'] }),
     );
 
-    expect(course.modules.map((module) => module.title)).toContain('Directed learning quiz 3');
+    const titles = course.modules.map((module) => module.title);
+    expect(titles).toContain('Advanced hives');
+    expect(titles).not.toContain('Directed learning quiz 3');
   });
 });

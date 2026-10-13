@@ -6,6 +6,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
+import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import CurriculumService, {
@@ -15,6 +16,8 @@ import CurriculumService, {
 } from '@/services/curriculum-service/curriculum-service';
 
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
+// Answers "no layer modules" unless a test says otherwise.
+jest.mock('@/gateways/course-map-gateway/course-map-gateway');
 jest.mock('@/gateways/quiz-gateway/quiz-gateway');
 jest.mock('@/services/auth-service/auth-service');
 jest.mock('@/services/enrolment-service/enrolment-service');
@@ -253,6 +256,31 @@ describe('createSection', () => {
       expect.objectContaining({ moduleId: 's2' }),
       expect.anything(),
     );
+  });
+
+  /*
+    A course map appends its generated quiz modules at the end, so "the last
+    module" used to mean one of those — and new sections landed inside a
+    directed learning quiz module.
+  */
+  it('skips the map’s quiz modules when defaulting, and refuses one named outright', async () => {
+    gateway.getModules.mockResolvedValue([
+      { id: 's1', number: 1 },
+      { id: 'layer', number: 2 },
+    ] as never);
+    (CourseMapGateway.getLayers as jest.Mock).mockResolvedValue([{ moduleId: 'layer' }]);
+
+    await CurriculumService.createSection('c1', { title: 'M' });
+    expect(gateway.createSection).toHaveBeenCalledWith(
+      expect.objectContaining({ moduleId: 's1' }),
+      expect.anything(),
+    );
+
+    await expect(
+      CurriculumService.createSection('c1', { title: 'M', moduleId: 'layer' }),
+    ).rejects.toThrow(/directed learning quiz modules/i);
+
+    (CourseMapGateway.getLayers as jest.Mock).mockResolvedValue(undefined);
   });
 
   it('refuses a module that is not in this course', async () => {

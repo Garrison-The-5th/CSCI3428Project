@@ -16,6 +16,16 @@ export interface MapItem {
   number: string;
   title: string;
   estimatedMinutes: number;
+  /** Placed by a linked map, so it moves only when that map does. */
+  locked?: boolean;
+}
+
+/** A map linked in from another course, which owns it. */
+export interface LinkedMap {
+  subgraphId: string;
+  sourceTitle: string;
+  /** The copy of the source's root — the one linked node this course may lead into. */
+  entry?: boolean;
 }
 
 export interface MapNode {
@@ -34,11 +44,15 @@ export interface MapNode {
   depth: number;
   isRoot: boolean;
   items: MapItem[];
+  /** Set on a node copied in from another course's map: read-only here. */
+  linked?: LinkedMap | null;
 }
 
 export interface MapEdge {
   parentId: string;
   childId: string;
+  /** Part of a linked map: drawn red, and cannot be cut. */
+  locked?: boolean;
 }
 
 /** One group in the staging manager: a course, and what of it is unplaced. */
@@ -47,12 +61,22 @@ export interface StagingGroup {
   courseTitle: string;
   /** False on this course's own content, which is always the first group. */
   imported: boolean;
+  /**
+   * An imported course with a map of its own. Dropping any of its sections on a
+   * node links that whole map in beneath the node.
+   */
+  mapped?: boolean;
   sections: Array<{ id: string; number: string; title: string; estimatedMinutes: number }>;
 }
 
 export interface CourseMap {
   directedLearning: boolean;
   stagedAt: string | null;
+  /**
+   * True when sections or modules have been added since the last stage (or it
+   * has never been staged). Mapping is refused until the course is staged.
+   */
+  needsStaging?: boolean;
   nodes: MapNode[];
   edges: MapEdge[];
   staging: StagingGroup[];

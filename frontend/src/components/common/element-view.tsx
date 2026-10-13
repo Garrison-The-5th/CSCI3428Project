@@ -274,6 +274,22 @@ interface ElementViewProps {
   fill?: boolean;
 }
 
+/**
+ * Sends every link in lesson text to a new tab.
+ *
+ * The server writes `target="_blank"` onto links as it saves them, but that only
+ * covers text saved since — anything stored or published before keeps whatever
+ * it had, and a link that replaced the page would throw the learner out of the
+ * course and lose their place. Deciding it here, at the click, holds for all of
+ * it. `noopener` so the opened page cannot reach back into this one.
+ */
+function openLinksInNewTab(event: React.MouseEvent<HTMLElement>) {
+  const link = (event.target as HTMLElement).closest('a[href]');
+  if (!(link instanceof HTMLAnchorElement)) return;
+  event.preventDefault();
+  window.open(link.href, '_blank', 'noopener,noreferrer');
+}
+
 const ElementView = ({ element, preview = false, fill = false }: ElementViewProps) => {
   const missing = (message: string) =>
     preview ? (
@@ -290,6 +306,7 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
     return (
       <div
         className={`rich-text break-words text-dark-gray ${fill ? 'h-full overflow-y-auto' : ''}`}
+        onClick={openLinksInNewTab}
         // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
         dangerouslySetInnerHTML={{ __html: element.textContent }}
       />
