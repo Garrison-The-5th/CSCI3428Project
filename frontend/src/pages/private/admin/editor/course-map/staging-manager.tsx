@@ -150,6 +150,16 @@ const StagingManager = ({
               )}
             </div>
 
+            {group.mapped && group.sections.length > 0 && (
+              <p
+                className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-2 py-1 text-xs
+                  text-danger"
+              >
+                This course has its own map. Drop any of it on a node to link the whole map in
+                beneath that node — it stays fixed here and follows any changes made to it there.
+              </p>
+            )}
+
             {group.sections.length === 0 ? (
               <p className="mt-1 text-xs text-dark-gray">
                 {group.imported
@@ -180,9 +190,17 @@ const StagingManager = ({
                             ? 'border-navy bg-navy/10 ring-1 ring-navy/30'
                             : blocking.has(section.id)
                               ? 'border-new/50 bg-new-soft'
-                              : 'border-navy/20 bg-light-gray'
+                              : group.mapped
+                                ? 'border-danger/40 bg-light-gray'
+                                : 'border-navy/20 bg-light-gray'
                           }`}
-                        title={selectMode ? 'Click to pick, drag to move' : 'Drag onto a node'}
+                        title={
+                          group.mapped
+                            ? 'Drag onto a node to link this course’s whole map in beneath it'
+                            : selectMode
+                              ? 'Click to pick, drag to move'
+                              : 'Drag onto a node'
+                        }
                       >
                         <span className="font-medium text-dark-gray">{section.number}</span>{' '}
                         <span className="text-dark-gray">{section.title}</span>

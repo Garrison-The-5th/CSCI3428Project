@@ -80,7 +80,15 @@ export default class CourseMapGateway {
   // ---- Nodes ----
 
   static createNode(
-    data: { courseId: string; title: string; x: number; y: number; isRoot?: boolean },
+    data: {
+      courseId: string;
+      title: string;
+      x: number;
+      y: number;
+      isRoot?: boolean;
+      subgraphId?: string;
+      sourceNodeId?: string;
+    },
     db: Db = prisma,
   ) {
     return db.courseMapNode.create({
@@ -111,10 +119,14 @@ export default class CourseMapGateway {
   // ---- Edges ----
 
   static createEdge(
-    data: { courseId: string; parentId: string; childId: string },
+    data: { courseId: string; parentId: string; childId: string; subgraphId?: string },
     db: Db = prisma,
   ) {
     return db.courseMapEdge.create({ data });
+  }
+
+  static deleteEdgeById(id: string, db: Db = prisma) {
+    return db.courseMapEdge.delete({ where: { id } });
   }
 
   static deleteEdge(parentId: string, childId: string, db: Db = prisma) {
@@ -136,7 +148,7 @@ export default class CourseMapGateway {
    */
   static async setItems(
     nodeId: string,
-    items: Array<{ sectionId: string; sourceCourseId: string }>,
+    items: Array<{ sectionId: string; sourceCourseId: string; subgraphId?: string | null }>,
     db: Db = prisma,
   ) {
     await db.courseMapItem.deleteMany({ where: { nodeId } });
@@ -176,6 +188,60 @@ export default class CourseMapGateway {
   /** Drops one section from wherever it sits, so it can be placed elsewhere. */
   static removeSection(courseId: string, sectionId: string, db: Db = prisma) {
     return db.courseMapItem.deleteMany({ where: { sectionId, node: { courseId } } });
+  }
+
+  /**
+   * Drops a section from wherever the author put it, leaving any placement a
+   * linked map owns alone — that one is the source course's to move.
+   */
+  static removeAuthoredSection(courseId: string, sectionId: string, db: Db = prisma) {
+    return db.courseMapItem.deleteMany({
+      where: { sectionId, subgraphId: null, node: { courseId } },
+    });
+  }
+
+  // ---- Linked maps ----
+
+  /**
+   * A transaction with room to breathe. Rewriting a linked map touches every
+   * node, item and connection in it, which on a large map can outlast Prisma's
+   * five-second default.
+   */
+  static runTransaction<T>(fn: (db: Db) => Promise<T>) {
+    return prisma.$transaction(fn, { timeout: 30_000 });
+  }
+
+  static getSubgraphs(courseId: string, db: Db = prisma) {
+    return db.courseMapSubgraph.findMany({ where: { courseId } });
+  }
+
+  static getSubgraphById(id: string, db: Db = prisma) {
+    return db.courseMapSubgraph.findUnique({ where: { id } });
+  }
+
+  /** Every course that has this one's map linked into it. */
+  static getSubgraphsFromSource(sourceCourseId: string, db: Db = prisma) {
+    return db.courseMapSubgraph.findMany({ where: { sourceCourseId } });
+  }
+
+  static createSubgraph(
+    data: { courseId: string; sourceCourseId: string; anchorNodeId: string | null },
+    db: Db = prisma,
+  ) {
+    return db.courseMapSubgraph.create({ data });
+  }
+
+  static clearSubgraphAnchor(id: string, db: Db = prisma) {
+    return db.courseMapSubgraph.update({ where: { id }, data: { anchorNodeId: null } });
+  }
+
+  /** Removes the link, and with it every node, connection and item it wrote. */
+  static deleteSubgraph(id: string, db: Db = prisma) {
+    return db.courseMapSubgraph.deleteMany({ where: { id } });
+  }
+
+  static deleteSubgraphsFromSource(courseId: string, sourceCourseId: string, db: Db = prisma) {
+    return db.courseMapSubgraph.deleteMany({ where: { courseId, sourceCourseId } });
   }
 
   // ---- Imports ----

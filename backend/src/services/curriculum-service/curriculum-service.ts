@@ -996,13 +996,30 @@ export default class CurriculumService {
       throw new Error('add a module before adding sections — a section lives inside one');
     }
 
-    // No module named means the last one, which is where an author adding
-    // sections in order expects them to land.
+    // A course map's generated quiz modules hold their own quiz and nothing
+    // else — the map writes them, and a section put there by hand would be
+    // deleted with the module the next time the map changed.
+    const layerModules = await CourseMapService.layerModuleIds(courseId);
+    if (data.moduleId && layerModules.has(data.moduleId)) {
+      throw new Error(
+        'directed learning quiz modules are built by the course map and cannot hold new sections',
+      );
+    }
+
+    // No module named means the last one the author wrote, which is where an
+    // author adding sections in order expects them to land. The map's quiz
+    // modules sit after those and are skipped.
+    const authored = modules.filter((current) => !layerModules.has(current.id));
     const module = data.moduleId
       ? modules.find((current) => current.id === data.moduleId)
-      : modules[modules.length - 1];
-    if (!module)
-      throw new NotFoundError(`Module with ID ${data.moduleId} not found in this course`);
+      : authored[authored.length - 1];
+    if (!module) {
+      throw new NotFoundError(
+        data.moduleId
+          ? `Module with ID ${data.moduleId} not found in this course`
+          : 'add a module before adding sections — a section lives inside one',
+      );
+    }
 
     const siblings = (await CurriculumGateway.getSectionsForRenumber(courseId)).filter(
       (section) => section.moduleId === module.id,
@@ -1104,6 +1121,26 @@ export default class CurriculumService {
     }
     if (orderedSectionIds.length !== knownSections.size) {
       throw new Error('reorder must list every section in the course');
+    }
+
+    // A map's quiz module keeps exactly the section it was built with: nothing
+    // moves in, and its own section does not move out.
+    const layerModules = await CourseMapService.layerModuleIds(courseId);
+    if (layerModules.size > 0) {
+      const homeOf = new Map(course.sections.map((section) => [section.id, section.moduleId]));
+      for (const entry of modules) {
+        for (const sectionId of entry.sectionIds) {
+          const home = homeOf.get(sectionId) ?? null;
+          const intoLayer = layerModules.has(entry.id);
+          const outOfLayer = home !== null && layerModules.has(home);
+          if ((intoLayer || outOfLayer) && home !== entry.id) {
+            throw new Error(
+              'directed learning quiz modules are built by the course map — sections cannot be ' +
+                'moved into or out of them',
+            );
+          }
+        }
+      }
     }
 
     await CurriculumGateway.runTransaction(async (db) => {

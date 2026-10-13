@@ -239,7 +239,9 @@ const StructureEditor = ({
       });
       await onRefresh();
     },
-    { enabled: Boolean(selectedSection) },
+    // Keyed on the section, so switching to another one writes what was typed
+    // into this one rather than dropping it.
+    { enabled: Boolean(selectedSection), resetKey: selectedSection?.id ?? null },
   );
 
   const toggleModule = (moduleId: string) =>
@@ -266,14 +268,26 @@ const StructureEditor = ({
     if (ok) setNewModule({ title: '' });
   };
 
+  /**
+   * The modules a new section may go into: every one but the map's generated
+   * quiz modules, which hold their own quiz and nothing else. Those are appended
+   * at the end of the course, so defaulting to "the last module" used to put new
+   * sections straight into one.
+   */
+  const sectionHomes = groups.filter((group) => !isLayerModule(group.module.title));
+  const defaultHome = sectionHomes[sectionHomes.length - 1]?.module.id ?? '';
+  const chosenHome = sectionHomes.some((group) => group.module.id === newSection.moduleId)
+    ? newSection.moduleId
+    : defaultHome;
+
   /** Lands at the end of the chosen module and takes the next number there. */
   const addSection = async () => {
     if (!newSection.title.trim()) return onNotify('Give the section a title', 'error');
-    if (groups.length === 0) {
+    if (sectionHomes.length === 0) {
       return onNotify('Add a module first — sections live inside one', 'error');
     }
 
-    const moduleId = newSection.moduleId || groups[groups.length - 1].module.id;
+    const moduleId = chosenHome;
     const ok = await run(
       () =>
         curriculumApi.createSection(course.id, {
@@ -350,6 +364,68 @@ const StructureEditor = ({
     }
   };
 
+  /**
+   * Content typed into the Add box is saved to the section it was typed for
+   * when the author moves to another section — or leaves this tab — without
+   * pressing Add.
+   *
+   * The text editor is never added on blur (its toolbar takes focus), so before
+   * this a paragraph written and then left behind by clicking another section
+   * either vanished or, worse, sat in the box and was added to the next section
+   * instead. The section it belongs to is noted whenever the draft changes, and
+   * the draft is written there the moment the selection moves away.
+   */
+  const draftRef = useRef<{ sectionId: string | null; draft: typeof newElement }>({
+    sectionId: selectedSectionId,
+    draft: newElement,
+  });
+  useEffect(() => {
+    draftRef.current = { sectionId: selectedSectionId, draft: newElement };
+  }, [newElement]);
+
+  const commitDraft = async () => {
+    const { sectionId, draft } = draftRef.current;
+    const value = draft.value.trim();
+    if (!sectionId || !value || (draft.type === 'TEXT' && isBlankHtml(value))) return;
+
+    draftRef.current = { sectionId: null, draft: { type: draft.type, value: '' } };
+    setNewElement({ type: draft.type, value: '' });
+
+    try {
+      if (draft.type === 'QUIZ') {
+        await quizApi.createQuiz({ title: value, sectionId });
+      } else {
+        await curriculumApi.createElement(
+          sectionId,
+          draft.type === 'TEXT'
+            ? { type: draft.type, textContent: value }
+            : draft.type === 'YOUTUBE'
+              ? { type: draft.type, videoUrl: value }
+              : { type: draft.type, imageUrl: value },
+        );
+      }
+      const section = course.sections.find((current) => current.id === sectionId);
+      onNotify(`Your new content was saved to ${section ? section.number : 'its section'}`);
+      await onRefresh();
+    } catch (err) {
+      logger.error('Failed to save new content on leaving the section:', err);
+      // Put back so nothing typed is lost.
+      setNewElement(draft);
+      onNotify('Failed to save the content you were adding', 'error');
+    }
+  };
+  const commitDraftRef = useRef(commitDraft);
+  commitDraftRef.current = commitDraft;
+
+  useEffect(() => {
+    if (draftRef.current.sectionId && draftRef.current.sectionId !== selectedSectionId) {
+      commitDraftRef.current();
+    }
+  }, [selectedSectionId]);
+
+  // Leaving the Modules tab, or the editor, counts as leaving the section.
+  useEffect(() => () => void commitDraftRef.current(), []);
+
   /** Dragging content renumbers the section's whole sequence, quizzes included. */
   const handleContentDrop = async (targetId: string) => {
     if (!selectedSection || !contentDragId || contentDragId === targetId) {
@@ -422,9 +498,18 @@ const StructureEditor = ({
     const dragged = drag;
     setDrag(null);
     if (dragged?.kind !== 'section' || dragged.id === targetSectionId) return;
-    // A layer quiz's module holds its own section and nothing else.
+    // A layer quiz's module holds its own section and nothing else, and its
+    // section stays where the map put it.
     const into = groups.find((group) => group.module.id === moduleId);
-    if (into && isLayerModule(into.module.title)) return;
+    const from = groups.find((group) =>
+      group.sections.some((section) => section.id === dragged.id),
+    );
+    if (into !== from && [into, from].some((group) => group && isLayerModule(group.module.title))) {
+      return onNotify(
+        'Directed learning quiz modules are built by the course map and cannot hold other sections',
+        'error',
+      );
+    }
 
     const next = groups.map((group) => ({
       ...group,
@@ -443,8 +528,17 @@ const StructureEditor = ({
     await applyStructure(next);
   };
 
-  /** Dragging a module heading moves it and everything inside it. */
+  /**
+   * Dragging a module heading moves it and everything inside it.
+   *
+   * A *section* dropped on a heading goes on the end of that module. The heading
+   * is where an author naturally aims, and for an empty module it is most of
+   * what there is to aim at — ignoring the drop there made empty modules look as
+   * though they refused sections altogether.
+   */
   const handleModuleDrop = async (targetModuleId: string) => {
+    if (drag?.kind === 'section') return handleSectionDrop(targetModuleId, null);
+
     const dragged = drag;
     setDrag(null);
     if (dragged?.kind !== 'module' || dragged.id === targetModuleId) return;
@@ -498,13 +592,13 @@ const StructureEditor = ({
             <p className="text-sm font-semibold text-dark-gray">New section</p>
             <div className="flex gap-2">
               <select
-                value={newSection.moduleId || groups[groups.length - 1]?.module.id || ''}
+                value={chosenHome}
                 onChange={(e) => setNewSection({ ...newSection, moduleId: e.target.value })}
-                disabled={groups.length === 0}
+                disabled={sectionHomes.length === 0}
                 className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2
                   text-sm text-dark-gray"
               >
-                {groups.map((group) => (
+                {sectionHomes.map((group) => (
                   <option key={group.module.id} value={group.module.id}>
                     {group.module.title}
                   </option>
@@ -524,7 +618,11 @@ const StructureEditor = ({
               placeholder="New section title"
               className={inputClass}
             />
-            <Button onClick={addSection} className={primaryBtn} disabled={groups.length === 0}>
+            <Button
+              onClick={addSection}
+              className={primaryBtn}
+              disabled={sectionHomes.length === 0}
+            >
               <PlusIcon className="w-5 h-5 stroke-2" /> Add section
             </Button>
           </div>
@@ -685,7 +783,11 @@ const StructureEditor = ({
                           onDrop={() => handleSectionDrop(group.module.id, null)}
                         >
                           {group.sections.length === 0 ? (
-                            <p className="px-2 py-2 text-xs text-dark-gray">
+                            <p
+                              className={`rounded-md border-2 border-dashed px-2 py-4 text-center
+                                text-xs text-dark-gray
+                                ${drag?.kind === 'section' ? 'border-navy/50 bg-navy/5' : 'border-gray-300'}`}
+                            >
                               Empty — drag a section here.
                             </p>
                           ) : (

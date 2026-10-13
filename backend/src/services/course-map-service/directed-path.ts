@@ -158,12 +158,33 @@ function byPosition(a: SnapshotMapNode, b: SnapshotMapNode): number {
 }
 
 /**
+ * The nodes that fork: more than one connection leads out of them.
+ *
+ * Only a fork asks the learner anything. A node with a single way out leads
+ * straight on to it — there is nothing to choose — so that connection is never
+ * offered in a layer quiz and its child follows on its own. A map that runs in a
+ * single line therefore generates no quiz at all.
+ */
+export function forkingNodeIds(edges: Array<{ parentId: string }>): Set<string> {
+  const outDegree = new Map<string, number>();
+  for (const edge of edges) outDegree.set(edge.parentId, (outDegree.get(edge.parentId) ?? 0) + 1);
+  return new Set([...outDegree].filter(([, count]) => count >= 2).map(([id]) => id));
+}
+
+/** The connections a layer quiz offers — those leaving a fork — by id. */
+export function choiceEdgeIds(edges: Array<{ id: string; parentId: string }>): Set<string> {
+  const forks = forkingNodeIds(edges);
+  return new Set(edges.filter((edge) => forks.has(edge.parentId)).map((edge) => edge.id));
+}
+
+/**
  * Which nodes this learner has actually reached.
  *
- * The root always. Below it, a node is in if they ticked it *and* at least one
- * of its parents is in — the second half matters because the author can delete
- * the node that offered it long after the answer was given, and a stored choice
- * must never resurrect a branch the map no longer has a route to.
+ * The root always. Below it, a node is in if a visible parent leads only to it
+ * — no choice to make, so it follows — or if they ticked it *and* a visible
+ * parent forks towards it. The "visible parent" half matters because the author
+ * can delete the node that offered it long after the answer was given, and a
+ * stored choice must never resurrect a branch the map no longer has a route to.
  *
  * Walked depth by depth, so a parent's verdict is always settled before its
  * children are asked about. That is what makes "any parent unlocks it" cheap:
@@ -172,6 +193,7 @@ function byPosition(a: SnapshotMapNode, b: SnapshotMapNode): number {
  */
 export function visibleNodeIds(map: SnapshotMap, choices: LearnerChoices): Set<string> {
   const visible = new Set(map.nodes.filter((node) => node.isRoot).map((node) => node.id));
+  const forks = forkingNodeIds(map.edges);
   const parentsOf = new Map<string, string[]>();
   for (const edge of map.edges) {
     parentsOf.set(edge.childId, [...(parentsOf.get(edge.childId) ?? []), edge.parentId]);
@@ -184,10 +206,10 @@ export function visibleNodeIds(map: SnapshotMap, choices: LearnerChoices): Set<s
     const chosen = new Set(choices.byDepth.get(depth) ?? []);
 
     for (const node of map.nodes.filter((current) => current.depth === depth)) {
-      if (!chosen.has(node.id)) continue;
-      if ((parentsOf.get(node.id) ?? []).some((parentId) => visible.has(parentId))) {
-        visible.add(node.id);
-      }
+      const parents = (parentsOf.get(node.id) ?? []).filter((parentId) => visible.has(parentId));
+      const followsOn = parents.some((parentId) => !forks.has(parentId));
+      const picked = chosen.has(node.id) && parents.some((parentId) => forks.has(parentId));
+      if (followsOn || picked) visible.add(node.id);
     }
   }
 
@@ -245,6 +267,12 @@ function groupsFor(map: SnapshotMap, visible: Set<string>): Group[] {
   const depths = [...new Set(map.nodes.map((node) => node.depth))].sort((a, b) => a - b);
   const layerByDepth = new Map(map.layers.map((layer) => [layer.depth, layer]));
   const depthOf = new Map(map.nodes.map((node) => [node.id, node.depth]));
+  const forks = forkingNodeIds(map.edges);
+  /**
+   * Quizzes are numbered in the order this learner meets them, not by depth: a
+   * layer with no fork has no quiz, and "quiz 1, quiz 3" would read as a gap.
+   */
+  let quizNumber = 0;
 
   /**
    * Whether anything at all has been read so far, not merely at the depth above.
@@ -257,15 +285,20 @@ function groupsFor(map: SnapshotMap, visible: Set<string>): Group[] {
 
   for (const depth of depths) {
     const layer = layerByDepth.get(depth);
+    // Only a fork this learner can see is anything to ask them about.
     const offerable = map.edges.some(
-      (edge) => depthOf.get(edge.childId) === depth && visible.has(edge.parentId),
+      (edge) =>
+        depthOf.get(edge.childId) === depth &&
+        visible.has(edge.parentId) &&
+        forks.has(edge.parentId),
     );
 
     if (depth > 0 && layer && anythingRead && offerable) {
+      quizNumber += 1;
       groups.push({
         kind: 'layer',
         id: layer.moduleId,
-        title: `Directed learning quiz ${depth}`,
+        title: `Directed learning quiz ${quizNumber}`,
         sectionIds: [layer.sectionId],
         depth,
       });
@@ -302,10 +335,16 @@ export interface Projection<T> {
  */
 function offeredOptionIds(map: SnapshotMap, visible: Set<string>, depth: number): Set<string> {
   const depthOf = new Map(map.nodes.map((node) => [node.id, node.depth]));
+  const forks = forkingNodeIds(map.edges);
 
   return new Set(
     map.edges
-      .filter((edge) => depthOf.get(edge.childId) === depth && visible.has(edge.parentId))
+      .filter(
+        (edge) =>
+          depthOf.get(edge.childId) === depth &&
+          visible.has(edge.parentId) &&
+          forks.has(edge.parentId),
+      )
       .map((edge) => edge.optionId)
       .filter((optionId): optionId is string => Boolean(optionId)),
   );

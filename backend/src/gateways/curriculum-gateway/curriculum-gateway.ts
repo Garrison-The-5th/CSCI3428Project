@@ -184,6 +184,7 @@ export default class CurriculumGateway {
       lockAfterDue: boolean;
       directedLearning: boolean;
       stagedAt: Date | null;
+      stagedContentIds: string[];
       imageData: string | null;
       imageType: string | null;
       instructors: { set: Array<{ id: string }> };

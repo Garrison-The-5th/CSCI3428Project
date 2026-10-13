@@ -5,11 +5,12 @@
  * Modified by: Jacob Matthews
  * Date: 2026-09-25
  */
-import { NotFoundError } from '@/controllers/http-errors';
+import { ConflictError, NotFoundError } from '@/controllers/http-errors';
 import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import {
+  choiceEdgeIds,
   DirectedLock,
   LearnerChoices,
   ProjectableCourse,
@@ -50,6 +51,9 @@ import { CourseKind, QuizType } from '../../../generated/prisma';
 const ROOT_POSITION = { x: 80, y: 260 };
 const NODE_SPACING = { x: 320, y: 200 };
 
+/** How far to the right of the node it was dropped on a linked map's root lands. */
+const ROOT_TO_LINK = { x: 320, y: 0 };
+
 /** The node every map has and nobody creates. */
 const ROOT_TITLE = 'General content';
 
@@ -72,7 +76,26 @@ export interface StagingGroup {
   courseTitle: string;
   /** False on the importing course's own content, which is always first. */
   imported: boolean;
+  /**
+   * True on an imported course that has a map of its own. Dropping any of its
+   * sections onto a node links that whole map in beneath the node, rather than
+   * placing the one section — see `linkSubgraph`.
+   */
+  mapped: boolean;
   sections: Array<{ id: string; number: string; title: string; estimatedMinutes: number }>;
+}
+
+/** What the author is told when they try to map content that has not been staged. */
+const STAGE_FIRST =
+  'New sections or modules have been added since this course was last staged. ' +
+  'Stage the course before mapping it.';
+
+/** What the author is told when they try to change part of a linked map. */
+function linkedRefusal(sourceTitle: string) {
+  return (
+    `that is part of the map linked in from ${sourceTitle} and can only be changed there — ` +
+    `remove one of its nodes to unlink the whole map`
+  );
 }
 
 export default class CourseMapService {
@@ -87,19 +110,42 @@ export default class CourseMapService {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
 
-    const [nodes, edges, imports, layers] = await Promise.all([
+    const [nodes, edges, imports, layers, subgraphs] = await Promise.all([
       CourseMapGateway.getNodes(courseId),
       CourseMapGateway.getEdges(courseId),
       CourseMapGateway.getImports(courseId),
       CourseMapGateway.getLayers(courseId),
+      CourseMapGateway.getSubgraphs(courseId),
     ]);
 
     const staging = await CourseMapService.stagingPool(courseId, imports);
     const unmapped = staging.find((group) => !group.imported)?.sections ?? [];
 
+    // The course each linked map came from, by name, so the editor can say whose
+    // it is without a second request.
+    const sourceTitles = new Map(
+      await Promise.all(
+        subgraphs.map(async (subgraph) => {
+          const source = await CurriculumGateway.getCourseById(subgraph.sourceCourseId);
+          return [subgraph.id, source?.title ?? 'another course'] as const;
+        }),
+      ),
+    );
+    const linkedFor = (node: { id: string; subgraphId: string | null }) =>
+      node.subgraphId
+        ? {
+            subgraphId: node.subgraphId,
+            sourceTitle: sourceTitles.get(node.subgraphId) ?? 'another course',
+            /** The copy of the source's root: this course's nodes may lead into it. */
+            entry: CourseMapService.isLinkedEntry(node, edges),
+          }
+        : null;
+
     return {
       directedLearning: course.directedLearning,
       stagedAt: course.stagedAt,
+      /** True while mapping is refused until the course is staged again. */
+      needsStaging: CourseMapService.needsStaging(course, layers),
       nodes: nodes.map((node) => ({
         id: node.id,
         title: node.title,
@@ -107,15 +153,24 @@ export default class CourseMapService {
         y: node.y,
         depth: node.depth,
         isRoot: node.isRoot,
+        /** Set on a node copied in from another course's map, which is read-only here. */
+        linked: linkedFor(node),
         items: node.items.map((item) => ({
           sectionId: item.sectionId,
           sourceCourseId: item.sourceCourseId,
           number: item.section.number,
           title: item.section.title,
           estimatedMinutes: item.section.estimatedMinutes,
+          /** Placed by a linked map, so it moves only when that map does. */
+          locked: item.subgraphId !== null,
         })),
       })),
-      edges: edges.map((edge) => ({ parentId: edge.parentId, childId: edge.childId })),
+      edges: edges.map((edge) => ({
+        parentId: edge.parentId,
+        childId: edge.childId,
+        /** Part of a linked map: drawn red, and cannot be cut. */
+        locked: edge.subgraphId !== null,
+      })),
       staging,
       layers: layers.map((layer) => ({ depth: layer.depth, quizId: layer.quizId })),
       /** Named so the editor can say exactly what is blocking the publish. */
@@ -139,6 +194,15 @@ export default class CourseMapService {
 
     const ids = [courseId, ...added.map((entry) => entry.sourceCourseId)];
     const courses = await Promise.all(ids.map((id) => CurriculumGateway.getCourseById(id)));
+    const mapped = new Set(
+      (
+        await Promise.all(
+          ids
+            .filter((id) => id !== courseId)
+            .map(async (id) => ((await CourseMapService.hasMap(id)) ? id : null)),
+        )
+      ).filter((id): id is string => id !== null),
+    );
 
     return courses
       .filter((course): course is NonNullable<typeof course> => course !== null)
@@ -146,6 +210,7 @@ export default class CourseMapService {
         courseId: course.id,
         courseTitle: course.title,
         imported: course.id !== courseId,
+        mapped: mapped.has(course.id),
         sections: course.sections
           // See `isPlaceableSection` for what is turned away and why.
           .filter((section) => CourseMapService.isPlaceableSection(section))
@@ -157,6 +222,16 @@ export default class CourseMapService {
             estimatedMinutes: section.estimatedMinutes,
           })),
       }));
+  }
+
+  /**
+   * The modules the map generated for its layer quizzes. Those hold their own
+   * quiz and nothing else, so the structure editor's paths ask here before
+   * putting a section in one.
+   */
+  static async layerModuleIds(courseId: string): Promise<Set<string>> {
+    const layers = await CourseMapGateway.getLayers(courseId);
+    return new Set((layers ?? []).map((layer) => layer.moduleId));
   }
 
   /** Layer sections are named by the generator and recognised by that name. */
@@ -255,16 +330,75 @@ export default class CourseMapService {
 
     await CourseMapService.ensureRoot(courseId);
     await CourseMapService.syncQuizzes(courseId);
-    await CurriculumGateway.updateCourse(courseId, { stagedAt: new Date() });
+
+    // Read after the sync, which may have minted or removed a layer module.
+    const layers = await CourseMapGateway.getLayers(courseId);
+    await CurriculumGateway.updateCourse(courseId, {
+      stagedAt: new Date(),
+      stagedContentIds: CourseMapService.contentIds(course, layers),
+    });
 
     return CourseMapService.getMap(courseId);
+  }
+
+  /**
+   * The modules and sections the author wrote, by id.
+   *
+   * The map's own layer modules and sections are left out: they come and go as
+   * the map changes, and counting them would have every connection drawn demand
+   * a fresh stage.
+   */
+  static contentIds(
+    course: { modules: Array<{ id: string }>; sections: Array<{ id: string; title: string }> },
+    layers: Array<{ moduleId: string }>,
+  ): string[] {
+    const layerModules = new Set(layers.map((layer) => layer.moduleId));
+    return [
+      ...course.modules.filter((module) => !layerModules.has(module.id)).map((m) => m.id),
+      ...course.sections
+        .filter((section) => !CourseMapService.isLayerSection(section.title))
+        .map((section) => section.id),
+    ];
+  }
+
+  /**
+   * Whether anything has been written since the last stage — or the course has
+   * never been staged at all — which is when mapping is refused.
+   *
+   * Only additions count. A section deleted since the stage is simply no longer
+   * there to place, and asking for a stage over it would be asking for nothing.
+   */
+  static needsStaging(
+    course: {
+      stagedAt: Date | null;
+      stagedContentIds: string[];
+      modules: Array<{ id: string }>;
+      sections: Array<{ id: string; title: string }>;
+    },
+    layers: Array<{ moduleId: string }>,
+  ): boolean {
+    if (!course.stagedAt) return true;
+    const staged = new Set(course.stagedContentIds);
+    return CourseMapService.contentIds(course, layers).some((id) => !staged.has(id));
+  }
+
+  /**
+   * Refuses a change to the map while the course needs staging.
+   *
+   * The editor checks first and says so without asking; this is the door, for a
+   * page that was open before somebody added a section in another tab.
+   */
+  static async assertStaged(courseId: string) {
+    const course = await CurriculumGateway.getCourseById(courseId);
+    if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
+    const layers = await CourseMapGateway.getLayers(courseId);
+    if (CourseMapService.needsStaging(course, layers)) throw new ConflictError(STAGE_FIRST);
   }
 
   // ---- Nodes ----
 
   static async createNode(courseId: string, data: { title?: string; x?: number; y?: number }) {
-    const course = await CurriculumGateway.getCourseById(courseId);
-    if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
+    await CourseMapService.assertStaged(courseId);
 
     const title = String(data.title ?? DEFAULT_NODE_TITLE).trim() || DEFAULT_NODE_TITLE;
 
@@ -291,9 +425,15 @@ export default class CourseMapService {
   static async updateNode(id: string, data: { title?: string; x?: number; y?: number }) {
     const node = await CourseMapGateway.getNodeById(id);
     if (!node) throw new NotFoundError(`Node with ID ${id} not found`);
+    await CourseMapService.assertStaged(node.courseId);
 
     const title = data.title !== undefined ? String(data.title).trim() : undefined;
     if (title !== undefined && !title) throw new Error('a node needs a name');
+    // A linked node's name is the source course's — moving it is still allowed,
+    // since where it sits on this canvas is this course's business.
+    if (title !== undefined && title !== node.title && node.subgraphId) {
+      throw new Error(await CourseMapService.linkedMessage(node.subgraphId));
+    }
 
     const moved = {
       ...(data.x !== undefined ? { x: Math.round(Number(data.x)) } : {}),
@@ -377,6 +517,7 @@ export default class CourseMapService {
    * whole layout over.
    */
   static async setLayout(courseId: string, positions: Array<{ id: string; x: number; y: number }>) {
+    await CourseMapService.assertStaged(courseId);
     const nodes = await CourseMapGateway.getNodes(courseId);
     const mine = new Map(nodes.map((node) => [node.id, node]));
     const wanted = positions.filter((at) => mine.has(at.id));
@@ -413,12 +554,22 @@ export default class CourseMapService {
    * map as unconnected until the author gives them a new parent. That is the
    * honest outcome: the author removed one box, and quietly taking a whole
    * subtree of other people's work with it is not what they asked for.
+   *
+   * A node that belongs to a linked map is the exception, and deliberately so:
+   * the linked map is one piece, so removing any of it unlinks all of it.
    */
   static async deleteNode(id: string) {
     const node = await CourseMapGateway.getNodeById(id);
     if (!node) throw new NotFoundError(`Node with ID ${id} not found`);
     if (node.isRoot) {
       throw new Error('the root node cannot be deleted — it is where every learner starts');
+    }
+    await CourseMapService.assertStaged(node.courseId);
+
+    if (node.subgraphId) {
+      await CourseMapGateway.deleteSubgraph(node.subgraphId);
+      await CourseMapService.syncQuizzes(node.courseId);
+      return { id };
     }
 
     await CourseMapGateway.deleteNode(id);
@@ -451,8 +602,35 @@ export default class CourseMapService {
     if (child.isRoot) {
       throw new Error('the root node cannot have a parent — it is where every learner starts');
     }
-
+    await CourseMapService.assertStaged(parent.courseId);
     const edges = await CourseMapGateway.getEdges(parent.courseId);
+
+    /*
+      A linked map is one fixed piece, owned by the course it came from. This
+      course may join it in two places only:
+
+        into its root — the copy of the source's General content — which is how
+        the linked map is reached at all;
+
+        out of a node at the end of it, one the source's map does not lead on
+        from, which is how this course carries on afterwards.
+
+      Anything else would change the linked map's own shape, which only its own
+      course may do.
+    */
+    if (child.subgraphId && !CourseMapService.isLinkedEntry(child, edges)) {
+      throw new Error(
+        `${child.title} is inside the map linked in from another course — only that map’s ` +
+          'first node can be led into',
+      );
+    }
+    if (parent.subgraphId && CourseMapService.leadsOnInLinkedMap(parent, edges)) {
+      throw new Error(
+        `${parent.title} already leads on within the map linked in from another course — ` +
+          'only a node at the end of a linked map can lead on to this course’s own nodes',
+      );
+    }
+
     if (edges.some((edge) => edge.parentId === parentId && edge.childId === childId)) {
       return CourseMapService.getMap(parent.courseId);
     }
@@ -468,6 +646,13 @@ export default class CourseMapService {
   static async disconnect(parentId: string, childId: string) {
     const parent = await CourseMapGateway.getNodeById(parentId);
     if (!parent) throw new NotFoundError(`Node with ID ${parentId} not found`);
+    await CourseMapService.assertStaged(parent.courseId);
+
+    const edges = await CourseMapGateway.getEdges(parent.courseId);
+    const edge = edges.find(
+      (current) => current.parentId === parentId && current.childId === childId,
+    );
+    if (edge?.subgraphId) throw new Error(await CourseMapService.linkedMessage(edge.subgraphId));
 
     await CourseMapGateway.deleteEdge(parentId, childId);
     await CourseMapService.syncQuizzes(parent.courseId);
@@ -549,30 +734,102 @@ export default class CourseMapService {
   static async setNodeItems(nodeId: string, sectionIds: string[]) {
     const node = await CourseMapGateway.getNodeById(nodeId);
     if (!node) throw new NotFoundError(`Node with ID ${nodeId} not found`);
+    await CourseMapService.assertStaged(node.courseId);
+    if (node.subgraphId) throw new Error(await CourseMapService.linkedMessage(node.subgraphId));
 
     const wanted = [...new Set(sectionIds.map(String))];
-    const allowed = await CourseMapService.placeableSections(node.courseId);
+    const wantedSet = new Set(wanted);
 
-    const items = wanted.map((sectionId) => {
+    /*
+      What a linked map placed here stays here.
+
+      Those placements belong to the source course's map, so they leave only when
+      the link does. A list that drops one is refused rather than half-obeyed;
+      one that merely reorders them is fine, since the order on this node is this
+      course's to choose.
+    */
+    const locked = node.items.filter((item) => item.subgraphId !== null);
+    const droppedLocked = locked.find((item) => !wantedSet.has(item.sectionId));
+    if (droppedLocked) {
+      throw new Error(await CourseMapService.linkedMessage(droppedLocked.subgraphId!));
+    }
+    const lockedHere = new Map(locked.map((item) => [item.sectionId, item]));
+
+    // Nor may a section a linked map placed on some *other* node be pulled here.
+    const elsewhere = await CourseMapService.lockedPlacements(node.courseId);
+    const stolen = wanted.find((id) => !lockedHere.has(id) && elsewhere.has(id));
+    if (stolen) throw new Error(await CourseMapService.linkedMessage(elsewhere.get(stolen)!));
+
+    const allowed = await CourseMapService.placeableSections(node.courseId);
+    const held = new Set(node.items.map((item) => item.sectionId));
+    const mapped = await CourseMapService.mappedImports(node.courseId);
+
+    /*
+      A section arriving from a course that has its own map brings the whole map.
+
+      Its sections are not placed one by one. Instead the source's map is linked
+      in with this node standing in for its root — see `linkSubgraph` — which
+      places every section that map holds, in the shape it holds them.
+    */
+    const linking = new Set<string>();
+    const items: Array<{ sectionId: string; sourceCourseId: string; subgraphId?: string | null }> =
+      [];
+
+    for (const sectionId of wanted) {
+      const kept = lockedHere.get(sectionId);
+      if (kept) {
+        items.push({ sectionId, sourceCourseId: kept.sourceCourseId, subgraphId: kept.subgraphId });
+        continue;
+      }
+
       const sourceCourseId = allowed.get(sectionId);
       if (!sourceCourseId) {
         throw new Error(
           'that content is not in this map’s staging — add its course to staging first',
         );
       }
-      return { sectionId, sourceCourseId };
-    });
+
+      if (!held.has(sectionId) && mapped.has(sourceCourseId)) {
+        linking.add(sourceCourseId);
+        continue;
+      }
+
+      items.push({ sectionId, sourceCourseId });
+    }
 
     await CurriculumGateway.runTransaction(async (db) => {
       for (const item of items) {
-        await CourseMapGateway.removeSection(node.courseId, item.sectionId, db);
+        if (item.subgraphId) continue;
+        await CourseMapGateway.removeAuthoredSection(node.courseId, item.sectionId, db);
       }
       await CourseMapGateway.setItems(nodeId, items, db);
     });
 
+    for (const sourceCourseId of linking) {
+      await CourseMapService.linkSubgraph(node.courseId, nodeId, sourceCourseId);
+    }
+
     await CourseMapService.autoName(node, items);
     await CourseMapService.syncQuizzes(node.courseId);
     return CourseMapService.getMap(node.courseId);
+  }
+
+  /** Sections a linked map has placed on this course's map, and which link placed each. */
+  static async lockedPlacements(courseId: string): Promise<Map<string, string>> {
+    const nodes = await CourseMapGateway.getNodes(courseId);
+    return new Map(
+      nodes
+        .flatMap((node) => node.items)
+        .filter((item) => item.subgraphId !== null)
+        .map((item) => [item.sectionId, item.subgraphId!]),
+    );
+  }
+
+  /** The refusal for touching a linked map, naming the course it belongs to. */
+  static async linkedMessage(subgraphId: string): Promise<string> {
+    const subgraph = await CourseMapGateway.getSubgraphById(subgraphId);
+    const source = subgraph ? await CurriculumGateway.getCourseById(subgraph.sourceCourseId) : null;
+    return linkedRefusal(source?.title ?? 'another course');
   }
 
   /**
@@ -705,6 +962,10 @@ export default class CourseMapService {
    * having to place them again.
    */
   static async removeImport(courseId: string, sourceCourseId: string) {
+    await CourseMapService.assertStaged(courseId);
+    // A linked map from this course goes with it, nodes and all.
+    await CourseMapGateway.deleteSubgraphsFromSource(courseId, sourceCourseId);
+
     const nodes = await CourseMapGateway.getNodes(courseId);
     const orphaned = nodes.flatMap((node) =>
       node.items.filter((item) => item.sourceCourseId === sourceCourseId),
@@ -719,6 +980,313 @@ export default class CourseMapService {
 
     await CourseMapService.syncQuizzes(courseId);
     return CourseMapService.getMap(courseId);
+  }
+
+  // ---- Linked maps ----
+
+  /** Whether a course has a map worth linking: a root, and something on it. */
+  static async hasMap(courseId: string): Promise<boolean> {
+    const nodes = await CourseMapGateway.getNodes(courseId);
+    return nodes.some((node) => node.isRoot) && nodes.some((node) => node.items.length > 0);
+  }
+
+  /** The imported courses on this map's staging that have maps of their own. */
+  static async mappedImports(courseId: string): Promise<Set<string>> {
+    const imports = await CourseMapGateway.getImports(courseId);
+    const mapped = await Promise.all(
+      imports.map(async (entry) =>
+        (await CourseMapService.hasMap(entry.sourceCourseId)) ? entry.sourceCourseId : null,
+      ),
+    );
+    return new Set(mapped.filter((id): id is string => id !== null));
+  }
+
+  /**
+   * Whether linking `sourceCourseId` into `courseId` would close a loop — the
+   * source already carrying this course's map, directly or through others.
+   * Left alone, each course would keep rewriting the other for ever.
+   */
+  static async linksBack(courseId: string, sourceCourseId: string): Promise<boolean> {
+    const seen = new Set<string>();
+    const queue = [sourceCourseId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === courseId) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      const links = await CourseMapGateway.getSubgraphs(current);
+      queue.push(...links.map((link) => link.sourceCourseId));
+    }
+    return false;
+  }
+
+  /**
+   * Whether a node is the copy of a linked map's root — the one node of it that
+   * nothing inside the linked map leads into.
+   */
+  static isLinkedEntry(
+    node: { id: string; subgraphId: string | null },
+    edges: Array<{ childId: string; subgraphId: string | null }>,
+  ): boolean {
+    if (!node.subgraphId) return false;
+    return !edges.some((edge) => edge.childId === node.id && edge.subgraphId === node.subgraphId);
+  }
+
+  /** Whether a linked node leads on to anything within its own linked map. */
+  static leadsOnInLinkedMap(
+    node: { id: string; subgraphId: string | null },
+    edges: Array<{ parentId: string; subgraphId: string | null }>,
+  ): boolean {
+    if (!node.subgraphId) return false;
+    return edges.some((edge) => edge.parentId === node.id && edge.subgraphId === node.subgraphId);
+  }
+
+  /**
+   * Links another course's whole map into this one, joined on after the node it
+   * was dropped on.
+   *
+   * Every source node is copied in, its root included, and connected exactly as
+   * it is in the source — see `syncSubgraph`, which also draws the one
+   * connection from the drop target into the copy's root. That connection is
+   * this course's own and can be cut and redrawn like any other.
+   */
+  static async linkSubgraph(courseId: string, anchorNodeId: string, sourceCourseId: string) {
+    const existing = await CourseMapGateway.getSubgraphs(courseId);
+    if (existing.some((subgraph) => subgraph.sourceCourseId === sourceCourseId)) {
+      throw new Error('that course’s map is already linked into this one');
+    }
+    if (await CourseMapService.linksBack(courseId, sourceCourseId)) {
+      throw new Error(
+        'that course already includes this one’s map, so it cannot be linked back in',
+      );
+    }
+
+    const subgraph = await CourseMapGateway.createSubgraph({
+      courseId,
+      sourceCourseId,
+      anchorNodeId,
+    });
+    await CourseMapService.syncSubgraph(subgraph.id);
+  }
+
+  /**
+   * Rewrites one linked map from its source, so the two courses agree again.
+   *
+   * Nodes are matched to their source by `sourceNodeId` and updated in place
+   * rather than recreated: a learner's choices are stored against node ids, and
+   * an author upstream renaming a box must not wipe everybody's path here. A new
+   * node is placed where it sits relative to the source's root, offset from
+   * where that root's copy sits here; one that already exists keeps wherever it
+   * was moved to on this canvas.
+   *
+   * ─────────────────────────────────────────────────────────────────────────────
+   * WHAT IS CUT WHEN THE SOURCE CHANGES
+   * ─────────────────────────────────────────────────────────────────────────────
+   *
+   * The red connections — the source's own — are never cut here; they are
+   * rewritten to match the source exactly. What can be cut is this course's
+   * own connections to the linked map, and only where the source has made them
+   * break the rules `connect` enforces:
+   *
+   *   one leading out of a linked node that the source now leads on from — the
+   *   end of the linked map has moved, so carrying on from there would join one
+   *   of the source's own layers. Whatever this course hung there is left as a
+   *   piece of its own, for the author to reconnect;
+   *
+   *   one leading into a linked node that is no longer the linked map's root.
+   *
+   * Connections into the root's copy are never cut: the root never changes.
+   */
+  static async syncSubgraph(subgraphId: string) {
+    const subgraph = await CourseMapGateway.getSubgraphById(subgraphId);
+    if (!subgraph) return;
+
+    const [sourceNodes, sourceEdges, targetNodes, targetEdges, sourceCourse] = await Promise.all([
+      CourseMapGateway.getNodes(subgraph.sourceCourseId),
+      CourseMapGateway.getEdges(subgraph.sourceCourseId),
+      CourseMapGateway.getNodes(subgraph.courseId),
+      CourseMapGateway.getEdges(subgraph.courseId),
+      CurriculumGateway.getCourseById(subgraph.sourceCourseId),
+    ]);
+
+    const sourceRoot = sourceNodes.find((node) => node.isRoot);
+    if (!sourceRoot) {
+      // Nothing left to link: the source no longer has a map.
+      await CourseMapGateway.deleteSubgraph(subgraph.id);
+      return;
+    }
+
+    const anchor = subgraph.anchorNodeId
+      ? (targetNodes.find((node) => node.id === subgraph.anchorNodeId) ?? null)
+      : null;
+    const mirrors = new Map(
+      targetNodes
+        .filter((node) => node.subgraphId === subgraph.id && node.sourceNodeId)
+        .map((node) => [node.sourceNodeId!, node]),
+    );
+
+    // Where the root's copy sits, which everything new is placed relative to: as
+    // it is, or a column to the right of the node the map was dropped on.
+    const rootMirror = mirrors.get(sourceRoot.id);
+    const origin = rootMirror
+      ? { x: rootMirror.x, y: rootMirror.y }
+      : anchor
+        ? { x: anchor.x + ROOT_TO_LINK.x, y: anchor.y }
+        : { x: sourceRoot.x, y: sourceRoot.y };
+
+    /*
+      A section can only sit in one place on a map. Anything the author placed
+      themselves that the linked map now wants is taken off where they put it —
+      the link is the one that cannot be rearranged.
+    */
+    const linkedSections = new Set(
+      sourceNodes.flatMap((node) => node.items.map((item) => item.sectionId)),
+    );
+
+    await CourseMapGateway.runTransaction(async (db) => {
+      for (const sectionId of linkedSections) {
+        await CourseMapGateway.removeAuthoredSection(subgraph.courseId, sectionId, db);
+      }
+
+      // Made before the root was copied in, the root's content sat on the node
+      // the map was dropped on. It moves to the root's own copy now.
+      if (anchor) {
+        await CourseMapGateway.setItems(
+          anchor.id,
+          anchor.items
+            .filter((item) => item.subgraphId !== subgraph.id)
+            .map((item) => ({
+              sectionId: item.sectionId,
+              sourceCourseId: item.sourceCourseId,
+              subgraphId: item.subgraphId,
+            })),
+          db,
+        );
+      }
+
+      /** Source node id → its copy on this map. */
+      const copyOf = new Map<string, string>();
+
+      for (const source of sourceNodes) {
+        const title = source.isRoot
+          ? `${sourceCourse?.title ?? 'Linked course'}: ${source.title}`
+          : source.title;
+        const mirror = mirrors.get(source.id);
+        const node = mirror
+          ? await CourseMapGateway.updateNode(mirror.id, { title }, db)
+          : await CourseMapGateway.createNode(
+              {
+                courseId: subgraph.courseId,
+                title,
+                x: origin.x + (source.x - sourceRoot.x),
+                y: origin.y + (source.y - sourceRoot.y),
+                subgraphId: subgraph.id,
+                sourceNodeId: source.id,
+              },
+              db,
+            );
+        copyOf.set(source.id, node.id);
+
+        await CourseMapGateway.setItems(
+          node.id,
+          source.items.map((item) => ({
+            sectionId: item.sectionId,
+            sourceCourseId: item.sourceCourseId,
+            subgraphId: subgraph.id,
+          })),
+          db,
+        );
+      }
+
+      // Nodes the source no longer has. Every connection to them goes with them,
+      // through the cascade — so those are left out of everything below.
+      const removed = new Set<string>();
+      for (const [sourceNodeId, mirror] of mirrors) {
+        if (!sourceNodes.some((node) => node.id === sourceNodeId)) {
+          await CourseMapGateway.deleteNode(mirror.id, db);
+          removed.add(mirror.id);
+        }
+      }
+
+      // The red connections: exactly the source's, between the copies.
+      const wanted = new Set(
+        sourceEdges
+          .filter((edge) => copyOf.has(edge.parentId) && copyOf.has(edge.childId))
+          .map((edge) => `${copyOf.get(edge.parentId)}->${copyOf.get(edge.childId)}`),
+      );
+      const live = targetEdges.filter(
+        (edge) => !removed.has(edge.parentId) && !removed.has(edge.childId),
+      );
+      for (const edge of live.filter((current) => current.subgraphId === subgraph.id)) {
+        if (!wanted.has(`${edge.parentId}->${edge.childId}`)) {
+          await CourseMapGateway.deleteEdgeById(edge.id, db);
+        }
+      }
+      const present = new Set(
+        live
+          .filter((edge) => edge.subgraphId === subgraph.id)
+          .map((edge) => `${edge.parentId}->${edge.childId}`),
+      );
+      for (const key of wanted) {
+        if (present.has(key)) continue;
+        const [parentId, childId] = key.split('->');
+        // A connection of this course's own between the same two nodes cannot
+        // exist — nothing may lead into a non-root copy — but if one somehow
+        // does, the red one replaces it.
+        await CourseMapGateway.deleteEdge(parentId, childId, db);
+        await CourseMapGateway.createEdge(
+          { courseId: subgraph.courseId, parentId, childId, subgraphId: subgraph.id },
+          db,
+        );
+      }
+
+      // This course's own connections that the new shape no longer allows.
+      const copies = new Set(copyOf.values());
+      const rootCopy = copyOf.get(sourceRoot.id)!;
+      const leadsOn = new Set([...wanted].map((key) => key.split('->')[0]));
+      for (const edge of live.filter((current) => current.subgraphId === null)) {
+        const outOfMiddle = copies.has(edge.parentId) && leadsOn.has(edge.parentId);
+        const intoMiddle = copies.has(edge.childId) && edge.childId !== rootCopy;
+        if (outOfMiddle || intoMiddle) await CourseMapGateway.deleteEdgeById(edge.id, db);
+      }
+
+      // The node it was dropped on leads into the root's copy, once. After that
+      // the connection is the author's own, to keep or cut like any other.
+      if (anchor) {
+        const already = targetEdges.some(
+          (edge) => edge.parentId === anchor.id && edge.childId === rootCopy,
+        );
+        if (!already) {
+          await CourseMapGateway.createEdge(
+            { courseId: subgraph.courseId, parentId: anchor.id, childId: rootCopy },
+            db,
+          );
+        }
+        await CourseMapGateway.clearSubgraphAnchor(subgraph.id, db);
+      }
+    });
+  }
+
+  /**
+   * Carries a change to this course's map into every course it is linked into,
+   * and on outward from those.
+   *
+   * Their copies are rewritten straight away — the author there does not have
+   * to do anything — but nothing reaches their learners until they publish
+   * again, because learners read the published snapshot.
+   *
+   * `visited` is what stops it going round: `linkSubgraph` refuses a loop, but a
+   * propagation that could not end would be the worst way to find one it missed.
+   */
+  static async propagate(courseId: string, visited: Set<string>) {
+    visited.add(courseId);
+    const links = await CourseMapGateway.getSubgraphsFromSource(courseId);
+
+    for (const link of links ?? []) {
+      if (visited.has(link.courseId)) continue;
+      await CourseMapService.syncSubgraph(link.id);
+      await CourseMapService.syncQuizzes(link.courseId, visited);
+    }
   }
 
   // ---- The generated quizzes ----
@@ -739,8 +1307,9 @@ export default class CourseMapService {
    * on stage would leave the map inert until the author pressed a button they
    * had no reason to think was involved, which is a trap rather than a workflow.
    */
-  static async syncQuizzes(courseId: string) {
+  static async syncQuizzes(courseId: string, visited: Set<string> = new Set()) {
     const course = await CurriculumGateway.getCourseById(courseId);
+    // Off, the map cannot be edited, so there is nothing new to carry outward.
     if (!course || !course.directedLearning) return;
 
     const [nodes, edges, layers] = await Promise.all([
@@ -754,6 +1323,26 @@ export default class CourseMapService {
     await CourseMapGateway.pruneChoices(courseId, [...depths.keys()]);
 
     const byId = new Map(nodes.map((node) => [node.id, node]));
+
+    /*
+      Only a real fork asks a question.
+
+      A node with one way out leads its learners straight on — there is nothing to
+      choose, so no option is minted for it and its child simply follows, the
+      same way the root's content does. See `isChoiceEdge` in directed-path.ts,
+      which applies the same rule on the learner's side. A layer with no fork
+      in it at all has no quiz.
+    */
+    const choice = choiceEdgeIds(edges);
+
+    // Connections that no longer offer anything let go of their option, so a
+    // stale id cannot be mistaken for a live route.
+    await Promise.all(
+      edges
+        .filter((edge) => !choice.has(edge.id) && edge.optionId !== null)
+        .map((edge) => CourseMapGateway.setEdgeOption(edge.id, null)),
+    );
+
     /** Depth → the connections that offer a node at that depth, in reading order. */
     const routes = new Map<
       number,
@@ -767,6 +1356,7 @@ export default class CourseMapService {
       // Only routes the walk actually took. An edge into an unreachable node
       // offers nothing, and an edge from one is offered by nobody.
       if (!child || parentDepth === undefined || childDepth === undefined) continue;
+      if (!choice.has(edge.id)) continue;
       routes.set(childDepth, [...(routes.get(childDepth) ?? []), { edge, child }]);
     }
 
@@ -812,6 +1402,7 @@ export default class CourseMapService {
     }
 
     await CurriculumGateway.touchDraft(courseId);
+    await CourseMapService.propagate(courseId, visited);
   }
 
   /**

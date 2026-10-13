@@ -19,7 +19,7 @@
  * which changes which node is offered where: too much moves at once for the
  * browser to reconstruct honestly, and the server has just worked it all out.
  */
-import { ArrowPathIcon, MapIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon, ExclamationTriangleIcon, MapIcon } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useState } from 'react';
 
 import ConfirmDialog from '@/components/common/confirm-dialog';
@@ -59,6 +59,9 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
    */
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** The red "stage first" pop-up, shown when a change is tried on an unstaged map. */
+  const [mustStage, setMustStage] = useState(false);
+  const [staging, setStaging] = useState(false);
 
   const toggleSelected = useCallback((sectionId: string) => {
     setSelected((current) => {
@@ -101,6 +104,12 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
     load();
   }, [load]);
 
+  // Staged from the header's button: the map has to hear about it, or it would
+  // go on refusing changes the server would now accept.
+  useEffect(() => {
+    if (course.stagedAt) load();
+  }, [course.stagedAt]);
+
   // Keep something selected, so the second box is never blank on arrival. The
   // root is the honest default: it is the one node every map has.
   useEffect(() => {
@@ -136,6 +145,36 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
   const selectedNode = map?.nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   /**
+   * Lets a change through only once everything written has been staged.
+   *
+   * The gesture itself is allowed — the author can drag, pull a string, drop a
+   * section — but nothing is saved: a moved node goes back, a string lets go,
+   * and the red pop-up says why. The server refuses the same changes, so a page
+   * left open while someone added a section elsewhere cannot slip one through.
+   */
+  const allowed = () => {
+    if (!map?.needsStaging) return true;
+    setMustStage(true);
+    return false;
+  };
+
+  /** Stages from the pop-up, so the author does not have to go and find the button. */
+  const stageNow = async () => {
+    try {
+      setStaging(true);
+      setMap((await courseMapApi.stage(course.id)).map ?? (await refetch()));
+      setMustStage(false);
+      await onRefresh();
+      onNotify('Staged — your content is ready to map');
+    } catch (err) {
+      logger.error('Failed to stage:', err);
+      onNotify(err instanceof Error && err.message ? err.message : 'Failed to stage', 'error');
+    } finally {
+      setStaging(false);
+    }
+  };
+
+  /**
    * Nodes with no route back to the root, which is one of the two things that
    * refuses a publish. See the note where it is drawn.
    */
@@ -167,7 +206,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
    */
   const place = (nodeId: string, sectionIds: string[]) => {
     const node = map?.nodes.find((current) => current.id === nodeId);
-    if (!node) return;
+    if (!node || !allowed()) return;
 
     const held = node.items.map((item) => item.sectionId);
     const arriving = sectionIds.filter((id) => !held.includes(id));
@@ -193,7 +232,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
     const holders = (map?.nodes ?? []).filter((node) =>
       node.items.some((item) => leaving.has(item.sectionId)),
     );
-    if (holders.length === 0) return;
+    if (holders.length === 0 || !allowed()) return;
 
     const done = run(
       // Sent one after another rather than together. Each of these rebuilds the
@@ -277,6 +316,14 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
               {map.stagedAt
                 ? `Last staged ${new Date(map.stagedAt).toLocaleString()}`
                 : 'Not staged yet — press Stage to course mapping to bring your content across.'}
+              {map.stagedAt && map.needsStaging && (
+                <>
+                  {' · '}
+                  <span className="font-semibold text-danger">
+                    New content since then — stage the course before mapping it
+                  </span>
+                </>
+              )}
               {map.unmappedSectionIds.length > 0 && (
                 <>
                   {' · '}
@@ -350,6 +397,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
               unmappedSectionIds={map.unmappedSectionIds}
               onAddCourse={() => setAdding(true)}
               onRemoveCourse={(sourceCourseId) =>
+                allowed() &&
                 run(
                   () => courseMapApi.removeImport(course.id, sourceCourseId).then((r) => r.map),
                   'Failed to remove that course from staging',
@@ -368,16 +416,20 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
               node={selectedNode}
               onReorder={(sectionIds) =>
                 selectedNode &&
+                allowed() &&
                 run(() => courseMapApi.setItems(selectedNode.id, sectionIds), 'Failed to reorder')
               }
               // Renames the node it was told about rather than whichever is
               // selected now: a rename is flushed when the author clicks away,
               // by which time the selection has already moved on.
               onRename={(nodeId, title) =>
-                run(
-                  () => courseMapApi.updateNode(nodeId, { title }).then(refetch),
-                  'Failed to rename that node',
-                )
+                allowed()
+                  ? run(
+                      () => courseMapApi.updateNode(nodeId, { title }).then(refetch),
+                      'Failed to rename that node',
+                    )
+                  : // Refused: the box refills from the node as it is stored.
+                    setMap((current) => (current ? { ...current } : current))
               }
               onAdopt={(sectionIds) => selectedNode && place(selectedNode.id, sectionIds)}
               selectMode={selectMode}
@@ -392,16 +444,39 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
           edges={map.edges}
           selectedNodeId={selectedNodeId}
           onSelect={setSelectedNodeId}
-          onMove={(nodeId, x, y) =>
+          onMove={(nodeId, x, y) => {
+            if (!allowed()) return;
+            /*
+              Moved on screen at once, before the server answers.
+
+              The canvas lets go of its own copy of the dragged position the
+              moment the pointer comes up, so without this the node fell back to
+              where it started for the length of the round trip and then jumped
+              to where it had been put. Set in the same event as the canvas lets
+              go, the two land in one render and the node simply stays put. A
+              refused move is put right by `run`, which re-reads the map.
+            */
+            setMap((current) =>
+              current
+                ? {
+                    ...current,
+                    nodes: current.nodes.map((node) =>
+                      node.id === nodeId ? { ...node, x, y } : node,
+                    ),
+                  }
+                : current,
+            );
             run(
               () => courseMapApi.updateNode(nodeId, { x, y }).then(refetch),
               'Failed to move that node',
-            )
-          }
+            );
+          }}
           onConnect={(parentId, childId) =>
+            allowed() &&
             run(() => courseMapApi.connect(parentId, childId), 'Failed to connect those nodes')
           }
           onDisconnect={(parentId, childId) =>
+            allowed() &&
             run(
               () => courseMapApi.disconnect(parentId, childId),
               'Failed to disconnect those nodes',
@@ -411,10 +486,12 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
             // No name given: the server's placeholder is also what it recognises
             // as "never named", which is what lets the first content dropped on
             // a node name it. See `CourseMapService.autoName`.
+            allowed() &&
             run(() => courseMapApi.createNode(course.id).then(refetch), 'Failed to add a node')
           }
-          onDeleteNode={setPendingDelete}
+          onDeleteNode={(node) => allowed() && setPendingDelete(node)}
           onLayout={(positions) =>
+            allowed() &&
             run(
               () => courseMapApi.setLayout(course.id, positions),
               'Failed to tidy the map into layers',
@@ -441,12 +518,22 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
         open={pendingDelete !== null}
         title="Remove this node"
         message={
-          <>
-            Remove <span className="font-semibold">{pendingDelete?.title}</span> from the map?
-            <br />
-            Its content goes back to the staging manager, and anything connected below it is left
-            unconnected rather than removed with it.
-          </>
+          pendingDelete?.linked ? (
+            <>
+              <span className="font-semibold">{pendingDelete.title}</span> is part of the map linked
+              in from <span className="font-semibold">{pendingDelete.linked.sourceTitle}</span>.
+              <br />
+              Removing it removes the whole linked map — every one of its nodes and connections —
+              and its content goes back to the staging manager.
+            </>
+          ) : (
+            <>
+              Remove <span className="font-semibold">{pendingDelete?.title}</span> from the map?
+              <br />
+              Its content goes back to the staging manager, and anything connected below it is left
+              unconnected rather than removed with it.
+            </>
+          )
         }
         confirmLabel="Remove"
         onConfirm={() => {
@@ -461,6 +548,62 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
         }}
         onCancel={() => setPendingDelete(null)}
       />
+
+      {/*
+        The red "stage first" pop-up. Shown when a change is tried on a map whose
+        course has had sections or modules added since it was last staged; the
+        change itself was not saved.
+      */}
+      {mustStage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          role="presentation"
+          onClick={() => setMustStage(false)}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="must-stage-title"
+            className="w-full max-w-md rounded-lg border-2 border-danger bg-danger p-6 text-white
+              shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <ExclamationTriangleIcon className="h-7 w-7 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <h2 id="must-stage-title" className="text-lg font-semibold">
+                  Stage the course before mapping it
+                </h2>
+                <p className="mt-2 text-sm">
+                  {map.stagedAt
+                    ? 'New sections or modules have been added since this course was last staged. '
+                    : 'This course has not been staged yet. '}
+                  Your change has not been saved — stage the course, then make it again.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                type="button"
+                onClick={() => setMustStage(false)}
+                variant="outline"
+                className="border-white bg-transparent text-white hover:bg-white/10"
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                onClick={stageNow}
+                disabled={staging}
+                className="bg-white text-danger hover:bg-white/90"
+              >
+                {staging ? 'Staging...' : 'Stage course now'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
