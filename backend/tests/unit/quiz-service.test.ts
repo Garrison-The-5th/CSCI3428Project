@@ -118,6 +118,23 @@ describe('redactAnswers', () => {
   it('handles a quiz with no questions', () => {
     expect(redactAnswers({ ...quizFixture(), questions: [] }).questions).toEqual([]);
   });
+
+  /**
+   * With `isCorrect` gone the runner cannot count correct options itself, so
+   * without this flag every multiple-answer question was drawn as radios and
+   * could never be answered right.
+   */
+  it('flags a question with several correct options as multiple-answer', () => {
+    const fixture = quizFixture();
+    fixture.questions[1].options[1].isCorrect = true;
+
+    const redacted = redactAnswers(fixture) as unknown as {
+      questions: Array<{ multiAnswer: boolean }>;
+    };
+
+    expect(redacted.questions[0].multiAnswer).toBe(false);
+    expect(redacted.questions[1].multiAnswer).toBe(true);
+  });
 });
 
 describe('submitAttempt — grading', () => {

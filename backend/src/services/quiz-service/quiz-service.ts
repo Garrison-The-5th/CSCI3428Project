@@ -364,6 +364,11 @@ function learningCheckSession() {
  * callers with genuinely different shapes: a quiz read from the database, and
  * one lifted out of a published snapshot. Both have questions with options, and
  * that is all this needs to know.
+ *
+ * `multiAnswer` is computed before the key goes, because the runner needs it to
+ * draw checkboxes rather than radios. Without it every learner saw radios, could
+ * only ever tick one option, and was marked wrong on every multiple-answer
+ * question. It says only that several options are right, never which.
  */
 export function redactAnswers<
   T extends { questions: Array<{ options: Array<Record<string, unknown>> }> },
@@ -372,6 +377,7 @@ export function redactAnswers<
     ...quiz,
     questions: quiz.questions.map((question) => ({
       ...question,
+      multiAnswer: question.options.filter((option) => option.isCorrect === true).length > 1,
       // Destructured out rather than deleted — this is how the key is dropped.
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       options: question.options.map(({ isCorrect, ...option }) => option),
