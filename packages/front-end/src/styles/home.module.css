@@ -1,0 +1,68 @@
+/**
+ * Purpose: Styles for the home/landing page layout, responsive design, 
+           and visual hierarchy
+ * 
+ * Author: Alison Cook
+ *
+ * Made with Mantine's "Hero with bullets" from the "Hero headers" category
+ *
+ * Styling:
+ * - .inner: Main container with flexbox layout, centers content vertically with gap spacing
+ * - .content: Left column content area with max-width and responsive margins
+ * - .title: Hero title with custom font (Outfit), responsive font sizes, and proper line height
+ * - .control: Play button styling with responsive flex behavior on mobile
+ * - .image: Character image (500x500px) that hides on medium screens and below
+ * - .highlight: Highlight styling for text with blue background and border radius
+ */
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-top: calc(var(--mantine-spacing-xl) * 3);
+  padding-bottom: calc(var(--mantine-spacing-xl) * 3);
+}
+
+.content {
+  max-width: 750px;
+  margin-right: calc(var(--mantine-spacing-xl) * 3);
+
+  @media (max-width: $mantine-breakpoint-md) {
+    max-width: 100%;
+    margin-right: 0;
+  }
+}
+
+.title {
+  color: light-dark(var(--mantine-color-black), var(--mantine-color-white));
+  font-family: Outfit, var(--mantine-font-family);
+  font-size: 44px;
+  line-height: 1.2;
+  font-weight: 500;
+
+  @media (max-width: $mantine-breakpoint-xs) {
+    font-size: 28px;
+  }
+}
+
+.control {
+  @media (max-width: $mantine-breakpoint-xs) {
+    flex: 1;
+  }
+}
+
+.image {
+  width: 500px;
+  height: 500px;
+
+  @media (max-width: $mantine-breakpoint-md) {
+    display: none;
+  }
+}
+
+.highlight {
+  position: relative;
+  background-color: var(--mantine-color-blue-light);
+  border-radius: var(--mantine-radius-sm);
+  padding: 4px 12px;
+}
