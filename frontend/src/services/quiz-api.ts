@@ -23,6 +23,11 @@ export interface QuizQuestion {
   /** Section number the hint points back to, e.g. "1.2". */
   hintSectionNumber: string | null;
   options: QuizOption[];
+  /**
+   * Sent on learner-facing reads, where `isCorrect` is stripped and so cannot be
+   * counted. Absent on author reads, which count `isCorrect` instead.
+   */
+  multiAnswer?: boolean;
 }
 
 /**
@@ -207,8 +212,14 @@ export interface QuestionInput {
   options: Array<{ text: string; isCorrect: boolean }>;
 }
 
-/** A question is multiple-answer when more than one of its options is correct. */
+/**
+ * A question is multiple-answer when more than one of its options is correct.
+ *
+ * A learner's copy has no `isCorrect` to count, so the server's `multiAnswer`
+ * flag is what decides it there.
+ */
 export function isMultiAnswer(question: QuizQuestion): boolean {
+  if (question.multiAnswer !== undefined) return question.multiAnswer;
   return question.options.filter((option) => option.isCorrect).length > 1;
 }
 
