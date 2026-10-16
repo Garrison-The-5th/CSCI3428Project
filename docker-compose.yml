@@ -105,6 +105,14 @@ services:
       # Optional: leave unset and assignment emails are logged instead of sent.
       EMAIL_USER: ${EMAIL_USER:-}
       EMAIL_APP_PASSWORD: ${EMAIL_APP_PASSWORD:-}
+      # Optional: a Keycloak service account that lets the Users page grant and
+      # remove admin access. Leave unset and the page only shows who is admin.
+      # Inside compose the backend reaches Keycloak by its service name, not the
+      # browser-facing localhost:4000. See docs/keycloak.md.
+      KEYCLOAK_ADMIN_URL: ${KEYCLOAK_ADMIN_URL:-http://keycloak:8080}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-learningapp}
+      KEYCLOAK_SERVICE_CLIENT_ID: ${KEYCLOAK_SERVICE_CLIENT_ID:-}
+      KEYCLOAK_SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICE_CLIENT_SECRET:-}
       # Only needed to send through something other than Gmail, or on 587 when
       # 465 is blocked. See docs/email.md.
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}

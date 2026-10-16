@@ -470,6 +470,9 @@ model Element {
   imageType       String? // MIME type of the uploaded file
   fileName        String? // original filename, shown for PDF downloads
   textContent     String? // for TEXT type
+  /// For CANVAS type: the layout (pictures, text boxes, shapes) and the pool of
+  /// uploaded pictures it draws from. Shape in src/config/canvas.ts.
+  canvasData      Json?
   /// Runtime of a YOUTUBE element, entered by the author. Summed for the
   /// "hours of video" figure on the course page.
   durationMinutes Int?
@@ -488,6 +491,7 @@ enum ElementType {
   IMAGE
   TEXT
   PDF
+  CANVAS
 }
 
 /// Sections auto-complete on view, so one row per user per section is all progress needs.

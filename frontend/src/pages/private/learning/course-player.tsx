@@ -28,6 +28,7 @@ import {
   PencilSquareIcon,
   PhotoIcon,
   PlayCircleIcon,
+  PresentationChartBarIcon,
   QuestionMarkCircleIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
@@ -657,6 +658,8 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       <PlayCircleIcon className="w-4 h-4 shrink-0" />
     ) : element.type === 'IMAGE' ? (
       <PhotoIcon className="w-4 h-4 shrink-0" />
+    ) : element.type === 'CANVAS' ? (
+      <PresentationChartBarIcon className="w-4 h-4 shrink-0" />
     ) : (
       <DocumentTextIcon className="w-4 h-4 shrink-0" />
     );
@@ -667,7 +670,9 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       ? plainPreview(element.textContent ?? 'Article', 45) || 'Article'
       : element.type === 'YOUTUBE'
         ? 'Video'
-        : plainPreview(element.fileName ?? element.type, 45);
+        : element.type === 'CANVAS'
+          ? 'Slide'
+          : plainPreview(element.fileName ?? element.type, 45);
 
   /** Tooltip for the prev/next buttons, so you know where they take you. */
   const navLabel = (item: NonNullable<Selection>) =>

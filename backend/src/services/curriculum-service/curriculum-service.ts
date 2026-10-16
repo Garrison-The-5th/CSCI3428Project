@@ -5,6 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-09-25
  */
+import { addCanvasImage, emptyCanvas, mergeCanvasLayout } from '@/config/canvas';
 import { logger } from '@/config/logger';
 import { normalizeUpload } from '@/config/media-upload';
 import { parseModuleColor } from '@/config/module-colors';
@@ -1256,7 +1257,10 @@ export default class CurriculumService {
       throw new Error(`type must be one of ${ELEMENT_TYPES.join(', ')}`);
     }
     const type = data.type as ElementType;
-    const { durationMinutes, ...rest } = data;
+    // Picked apart rather than spread: the route hands over the whole body, and
+    // only these fields belong on a new element.
+    const { durationMinutes, videoUrl, imageUrl, textContent } = data;
+    const rest = { videoUrl, imageUrl, textContent };
 
     // Lesson text is rendered as markup for learners, so clean it before storing.
     if (type === 'TEXT' && rest.textContent) {
@@ -1283,6 +1287,10 @@ export default class CurriculumService {
           type,
           // Only meaningful for video, and drives the "hours of video" figure.
           durationMinutes: type === 'YOUTUBE' ? validateMinutes(durationMinutes) || null : null,
+          // A canvas starts blank; pictures, text and shapes are added in the editor.
+          ...(type === 'CANVAS'
+            ? { canvasData: emptyCanvas() as unknown as Prisma.InputJsonValue }
+            : {}),
         },
         last + 1,
         db,
@@ -1323,7 +1331,7 @@ export default class CurriculumService {
     return CurriculumGateway.getSectionById(sectionId);
   }
 
-  static updateElement(
+  static async updateElement(
     id: string,
     data: Partial<{
       type: string;
@@ -1331,9 +1339,14 @@ export default class CurriculumService {
       imageUrl: string | null;
       textContent: string | null;
       durationMinutes: number | string | null;
+      canvas: unknown;
     }>,
   ) {
-    const { type, durationMinutes, ...rest } = data;
+    // Picked apart rather than spread: the route hands over the whole body, and
+    // spreading it would let a request write columns no field here names — the
+    // stored picture pool among them, which only the upload route may fill.
+    const { type, durationMinutes, canvas, videoUrl, imageUrl, textContent } = data;
+    const rest = { videoUrl, imageUrl, textContent };
 
     if (type !== undefined && !ELEMENT_TYPES.includes(type)) {
       throw new Error(`type must be one of ${ELEMENT_TYPES.join(', ')}`);
@@ -1351,13 +1364,55 @@ export default class CurriculumService {
       rest.imageUrl = safeUrl(rest.imageUrl, 'image URL') ?? null;
     }
 
+    // A canvas sends its layout only. The pictures it draws from stay as stored
+    // and are merged back in, so they never travel with an auto-save.
+    let canvasData: Prisma.InputJsonValue | undefined;
+    if (canvas !== undefined) {
+      const element = await CurriculumGateway.getElementCanvas(id);
+      if (!element) throw new NotFoundError(`Element with ID ${id} not found`);
+      if (element.type !== 'CANVAS') throw new Error('Only a canvas has a canvas layout');
+      canvasData = mergeCanvasLayout(
+        canvas,
+        element.canvasData,
+      ) as unknown as Prisma.InputJsonValue;
+    }
+
     return CurriculumGateway.updateElement(id, {
       ...rest,
       ...(type !== undefined ? { type: type as ElementType } : {}),
       ...(durationMinutes !== undefined
         ? { durationMinutes: durationMinutes === null ? null : validateMinutes(durationMinutes) }
         : {}),
+      ...(canvasData !== undefined ? { canvasData } : {}),
     });
+  }
+
+  /**
+   * Adds an uploaded picture to a canvas's pool.
+   *
+   * Accepts exactly what a course cover photo accepts — the same upload rules,
+   * HEIC converted to JPEG, PDFs refused — because a canvas picture has to
+   * render as a picture. Returns the picture so the editor can place it without
+   * fetching the whole element again.
+   */
+  static async addCanvasImage(elementId: string, file: Express.Multer.File) {
+    const element = await CurriculumGateway.getElementCanvas(elementId);
+    if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
+    if (element.type !== 'CANVAS') throw new Error('Pictures can only be added to a canvas');
+
+    const normalized = await normalizeUpload(file);
+    if (normalized.isPdf) throw new Error('A canvas picture must be an image, not a PDF');
+
+    const upload = {
+      data: normalized.buffer.toString('base64'),
+      mimeType: normalized.mimeType,
+      fileName: file.originalname ? withinLimit(file.originalname, 'fileName', 'file name') : null,
+    };
+    const { canvas, imageId } = addCanvasImage(element.canvasData, upload);
+    await CurriculumGateway.updateElement(elementId, {
+      canvasData: canvas as unknown as Prisma.InputJsonValue,
+    });
+    return { imageId, ...canvas.images[imageId] };
   }
 
   static deleteElement(id: string) {

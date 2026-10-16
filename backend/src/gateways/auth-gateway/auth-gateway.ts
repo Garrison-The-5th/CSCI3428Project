@@ -6,6 +6,9 @@
  * Date: 2026-08-10
  */
 import { User } from '../../../generated/prisma';
+
+/** What `User.role` holds: the highest app role somebody has. */
+export type LocalRole = 'admin' | 'author' | 'user';
 import { prisma } from '../../../prisma/prisma-client';
 
 /**
@@ -107,6 +110,18 @@ export default class AuthGateway {
       select: { lastSignInAt: true },
     });
     return user?.lastSignInAt != null;
+  }
+
+  static getUserById(id: number): Promise<User | null> {
+    return prisma.user.findUnique({ where: { id } });
+  }
+
+  /**
+   * The local copy of somebody's highest role. Keycloak is the authority; this
+   * is what the Users page falls back on when Keycloak cannot be asked.
+   */
+  static setRole(id: number, role: LocalRole) {
+    return prisma.user.update({ where: { id }, data: { role } });
   }
 
   static markSignedIn(id: number) {

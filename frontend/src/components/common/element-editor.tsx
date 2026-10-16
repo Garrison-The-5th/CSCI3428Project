@@ -24,6 +24,8 @@
 import { Bars3Icon, CheckIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
+import CanvasEditor from '@/components/canvas/canvas-editor';
+import { CanvasImageAsset, layoutOf } from '@/components/canvas/canvas-model';
 import EditedTag from '@/components/common/edited-tag';
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import RichTextEditor from '@/components/common/rich-text-editor';
@@ -48,6 +50,23 @@ interface ElementEditorProps {
 
 const inputClass = 'bg-white text-dark-gray';
 
+/** "2 pictures, 1 text box" — what the collapsed row says about a canvas. */
+function canvasSummary(items: Array<{ kind: string }>): string {
+  if (items.length === 0) return 'Empty canvas';
+  const names: Record<string, [string, string]> = {
+    image: ['picture', 'pictures'],
+    text: ['text box', 'text boxes'],
+    shape: ['shape', 'shapes'],
+  };
+  return Object.entries(names)
+    .map(([kind, [one, many]]) => {
+      const count = items.filter((item) => item.kind === kind).length;
+      return count ? `${count} ${count === 1 ? one : many}` : '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
 const ElementEditor = ({
   element,
   onDelete,
@@ -62,10 +81,21 @@ const ElementEditor = ({
     videoUrl: element.videoUrl ?? '',
     imageUrl: element.imageUrl ?? '',
     durationMinutes: element.durationMinutes?.toString() ?? '',
+    // Only the layout: a canvas's pictures are uploaded on their own and never
+    // ride along with an auto-save.
+    canvas: layoutOf(element.canvasData),
   };
 
   const [draft, setDraft] = useState(stored);
   const [open, setOpen] = useState(false);
+
+  /**
+   * Pictures uploaded onto a canvas since the element was last fetched. The
+   * server has them already; holding them here means they show the moment the
+   * upload lands rather than after the next refresh.
+   */
+  const [uploaded, setUploaded] = useState<Record<string, CanvasImageAsset>>({});
+  const canvasImages = { ...element.canvasData?.images, ...uploaded };
 
   // Pull in changes that came from elsewhere (a reorder, another tab).
   useEffect(() => {
@@ -74,7 +104,9 @@ const ElementEditor = ({
       videoUrl: element.videoUrl ?? '',
       imageUrl: element.imageUrl ?? '',
       durationMinutes: element.durationMinutes?.toString() ?? '',
+      canvas: layoutOf(element.canvasData),
     });
+    setUploaded({});
   }, [element.id]);
 
   /**
@@ -93,6 +125,7 @@ const ElementEditor = ({
       // An uploaded image has its own data; only linked ones use the URL field.
       imageUrl: element.type === 'IMAGE' && !element.imageData ? value.imageUrl : undefined,
       durationMinutes: element.type === 'YOUTUBE' ? Number(value.durationMinutes) || 0 : undefined,
+      canvas: element.type === 'CANVAS' ? value.canvas : undefined,
     });
     onSaved();
   });
@@ -111,7 +144,9 @@ const ElementEditor = ({
       ? plainPreview(draft.textContent) || 'Empty text'
       : element.type === 'YOUTUBE'
         ? draft.videoUrl || 'No link yet'
-        : (element.fileName ?? draft.imageUrl ?? 'Uploaded file');
+        : element.type === 'CANVAS'
+          ? canvasSummary(draft.canvas.items)
+          : (element.fileName ?? draft.imageUrl ?? 'Uploaded file');
 
   return (
     <div
@@ -209,20 +244,40 @@ const ElementEditor = ({
             </p>
           )}
 
+          {element.type === 'CANVAS' && (
+            <CanvasEditor
+              layout={draft.canvas}
+              onChange={(canvas) => setDraft((prev) => ({ ...prev, canvas }))}
+              images={canvasImages}
+              onUpload={async (file) => {
+                const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(
+                  element.id,
+                  file,
+                );
+                setUploaded((prev) => ({ ...prev, [imageId]: asset }));
+                return { imageId, asset };
+              }}
+            />
+          )}
+
           {element.type === 'PDF' && (
             <p className="text-sm text-dark-gray">
               Uploaded PDF{element.fileName ? `: ${element.fileName}` : ''}.
             </p>
           )}
 
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-dark-gray">
-              Preview
-            </p>
-            <div className="rounded-lg border border-gray-300 bg-light-gray p-4">
-              <ElementView element={previewElement} preview />
+          {/* A canvas is built on the slide itself, so a second copy underneath
+              would only repeat it. */}
+          {element.type !== 'CANVAS' && (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-dark-gray">
+                Preview
+              </p>
+              <div className="rounded-lg border border-gray-300 bg-light-gray p-4">
+                <ElementView element={previewElement} preview />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

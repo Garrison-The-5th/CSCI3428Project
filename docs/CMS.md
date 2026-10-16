@@ -4,6 +4,19 @@
 Role-based access control separating admin and user capabilities, and how to create an
 admin user in Keycloak to test it.
 
+## Roles
+
+| Role | Can do |
+|---|---|
+| **Admin** (`admin`) | Everything, including the Users page — searching users and granting or removing roles |
+| **Author** (`contributor`) | Everything except the Users page: create courses and quizzes, assign learning, the dashboard |
+| **Course author** | Named on a course; can edit that course, but cannot create courses |
+| **Learner** | Their own assigned learning |
+
+Admins grant and remove Author and Admin from the Users page — click a user
+and use the switches. See [keycloak.md](keycloak.md#admin-role-management) for
+the one-off Keycloak setup that needs. The manual steps below still work.
+
 ## Setup & Testing
 
 ### Creating an Admin User in Keycloak

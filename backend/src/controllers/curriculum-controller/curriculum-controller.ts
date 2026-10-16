@@ -846,6 +846,27 @@ export default class CurriculumController {
     }
   }
 
+  /**
+   * Uploads a picture onto a canvas. Placing it is the editor's job; this only
+   * stores it, after the same checks a cover photo goes through.
+   */
+  @post('/elements/:id/canvas-images')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
+  @use(authenticateAndAttachUser)
+  async uploadCanvasImage(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).send({ errorMessage: 'No file uploaded' });
+      }
+      const image = await CurriculumService.addCanvasImage(param(req, 'id'), req.file);
+      return res.send({ message: 'Picture added', image });
+    } catch (error) {
+      return fail(res, error, 'Error uploading picture');
+    }
+  }
+
   @del('/elements/:id')
   @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
   @use(authenticateAndAttachUser)

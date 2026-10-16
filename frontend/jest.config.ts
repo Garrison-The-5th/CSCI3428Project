@@ -24,12 +24,14 @@ const config: Config = {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
   },
 
+  // Checked in order, so the stubs come first: an aliased stylesheet such as
+  // '@/pages/…/page.css' would otherwise resolve to the real file and fail to parse.
   moduleNameMapper: {
-    // Keep the alias in step with vite.config.ts and tsconfig.app.json.
-    '^@/(.*)$': '<rootDir>/src/$1',
     // Styles carry no behaviour worth asserting; stub them so imports resolve.
     '\\.(css|scss)$': 'identity-obj-proxy',
     '\\.(svg|png|jpg|jpeg|gif|webp)$': '<rootDir>/tests/file-stub.ts',
+    // Keep the alias in step with vite.config.ts and tsconfig.app.json.
+    '^@/(.*)$': '<rootDir>/src/$1',
     // keycloak-js is ESM-only and Jest's CommonJS runtime cannot parse it.
     '^keycloak-js$': '<rootDir>/tests/keycloak-stub.ts',
   },

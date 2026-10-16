@@ -1,6 +1,6 @@
 # API Reference
 
-Every HTTP endpoint the backend exposes: **108 routes** across eight controllers.
+Every HTTP endpoint the backend exposes: **111 routes** across eight controllers.
 
 TTG Technology Standards §1.8 requires "detailed documentation covering all
 endpoints, parameters, request/response formats, and error codes".
@@ -89,6 +89,8 @@ Defined in `backend/src/controllers/**/auth-controller.ts`.
 |---|---|---|---|
 | `GET` | `/auth/all-users` | signed in, admin | Generous enough for a person, tight enough to stop a script |
 | `GET` | `/auth/users` | signed in, admin | Generous enough for a person, tight enough to stop a script |
+| `PUT` | `/auth/users/:id/admin` | signed in, admin | Grants or removes admin access in Keycloak. Body `{ admin: boolean }`; 403 for your own account, 409 if they have never signed in |
+| `PUT` | `/auth/users/:id/author` | signed in, admin | Grants or removes author access (the `contributor` realm role) in Keycloak. Body `{ author: boolean }`; 409 if they have never signed in |
 | `GET` | `/auth/search` | signed in, author/admin | Type-ahead for pickers that name a person — assigning contributors or students |
 | `POST` | `/auth/subscribe` | public | Public by design — anyone may put their address down |
 | `POST` | `/auth/send-email-to-subscribers` | signed in, admin | Public by design — anyone may put their address down |
@@ -162,6 +164,7 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `POST` | `/curriculum/sections/:sectionId/elements` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
 | `PUT` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
 | `DELETE` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
+| `POST` | `/curriculum/elements/:id/canvas-images` | signed in, can edit this course, upload quota | Uploads a picture onto a canvas element (same file rules as a cover photo) |
 | `GET` | `/curriculum/progress` | signed in | What this learner has already done |
 | `GET` | `/curriculum/dashboard` | signed in | Everything the home dashboard needs for the signed-in user |
 | `GET` | `/curriculum/instructors` | signed in, author/admin | Authors only |

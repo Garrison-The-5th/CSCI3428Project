@@ -10,6 +10,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 
 import { clientAddress } from '@/config/client-address';
 import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
+import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 import AuthService from '@/services/auth-service/auth-service';
 
 import { User } from '../../../generated/prisma';
@@ -110,6 +111,9 @@ export async function authenticateAndAttachUser(
     // Throttled to once an hour so an authenticated session is not a write per
     // request, and deliberately not awaited: it must never delay or fail a call.
     void AuthService.markSignedIn(req.user);
+    // Keeps the local copy of the admin role true to the token, for the Users
+    // page to fall back on if Keycloak's admin API cannot be asked.
+    void AdminAccessService.syncFromToken(req.user, roles);
 
     next();
   } catch (error) {

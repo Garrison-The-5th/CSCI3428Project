@@ -1,19 +1,22 @@
 /**
  * File: users-list.tsx
- * Description: Users list for the learning platform.
+ * Description: Users list for the learning platform — search, filter by role, and manage admin and author access.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-10-16
  */
 import '@/pages/private/users/users-list.css';
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
+import ConfirmDialog from '@/components/common/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import ToggleSwitch from '@/components/ui/toggle-switch';
 import { useAuth } from '@/contexts/auth-context';
 import HttpHelper from '@/utils/http-helper';
 import { logger } from '@/utils/logger';
@@ -25,8 +28,14 @@ interface User {
   subscribed: boolean;
   /** They have signed in at least once, rather than only being an address. */
   hasAccount: boolean;
-  /** Named on a course, or holding the admin role. */
+  /** Holds the admin role in Keycloak: everything, including this page. */
+  isAdmin: boolean;
+  /** Holds the author role itself — what the Author switch shows. */
+  hasAuthorRole: boolean;
+  /** Can create content: holds the author role, or is an admin. */
   isAuthor: boolean;
+  /** Named on at least one course, so can edit that course but not create one. */
+  isCourseAuthor: boolean;
   /** Has been assigned something to learn. */
   isStudent: boolean;
 }
@@ -43,8 +52,14 @@ interface User {
 function rolesOf(user: User): Array<{ label: string; className: string }> {
   const roles: Array<{ label: string; className: string }> = [];
 
+  if (user.isAdmin) {
+    roles.push({ label: 'Admin', className: 'bg-purple text-white' });
+  }
+
   if (user.isAuthor) {
     roles.push({ label: 'Author', className: 'bg-navy text-white' });
+  } else if (user.isCourseAuthor) {
+    roles.push({ label: 'Course author', className: 'bg-navy/70 text-white' });
   }
 
   if (user.isStudent) {
@@ -62,9 +77,76 @@ function rolesOf(user: User): Array<{ label: string; className: string }> {
   return roles;
 }
 
+type RoleFilter = 'student' | 'author' | 'admin';
+
+const ROLE_FILTERS: Array<{ id: RoleFilter; label: string; matches: (user: User) => boolean }> = [
+  { id: 'student', label: 'Student', matches: (user) => user.isStudent },
+  // Course authors count: they author, just not courses of their own.
+  { id: 'author', label: 'Author', matches: (user) => user.isAuthor || user.isCourseAuthor },
+  { id: 'admin', label: 'Admin', matches: (user) => user.isAdmin },
+];
+
+/**
+ * Who the list shows: everyone matching the search, narrowed to any of the
+ * ticked roles. Ticking two roles widens rather than narrows — "students and
+ * authors" means either, which is what someone ticking both is looking for.
+ */
+export function filterUsers(users: User[], query: string, roles: Set<RoleFilter>): User[] {
+  const needle = query.trim().toLowerCase();
+  return users.filter((user) => {
+    if (needle && !`${user.name ?? ''} ${user.email}`.toLowerCase().includes(needle)) return false;
+    if (roles.size === 0) return true;
+    return ROLE_FILTERS.some((filter) => roles.has(filter.id) && filter.matches(user));
+  });
+}
+
+/** The role a switch changes. Author is `contributor` in Keycloak. */
+type ManagedRole = 'admin' | 'author';
+
+/** What each switch says about what the role gives, and what it takes away. */
+const ROLE_COPY: Record<
+  ManagedRole,
+  { label: string; hint: string; grant: string; revoke: string; noun: string }
+> = {
+  admin: {
+    label: 'Admin access',
+    hint: 'Everything an author can do, plus this Users page — managing accounts and roles.',
+    grant:
+      'will be given the admin role in Keycloak. They will be able to manage users and ' +
+      'roles, as well as everything an author can do.',
+    revoke:
+      'will lose the admin role in Keycloak, and with it the Users page. If they also hold ' +
+      'the author role they keep authoring access.',
+    noun: 'an admin',
+  },
+  author: {
+    label: 'Author access',
+    hint:
+      'Create their own courses and quizzes, assign learning and use the dashboard — ' +
+      'everything except this Users page.',
+    grant:
+      'will be given the author role in Keycloak. They will be able to create their own ' +
+      'courses and quizzes to share, assign learning and use the dashboard. They will not ' +
+      'see the Users page or be able to change anyone’s account.',
+    revoke:
+      'will lose the author role in Keycloak and will no longer be able to create courses ' +
+      'or quizzes. Any course they are named on as an author stays editable by them.',
+    noun: 'an author',
+  },
+};
+
 const UsersList = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [canManageAdmins, setCanManageAdmins] = useState(false);
+  const [query, setQuery] = useState('');
+  const [roleFilters, setRoleFilters] = useState<Set<RoleFilter>>(new Set());
+  const [openUserId, setOpenUserId] = useState<number | null>(null);
+  /** The role change waiting on the confirm pop-up. */
+  const [pending, setPending] = useState<{ role: ManagedRole; enabled: boolean } | null>(null);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMailDialogOpen, setIsMailDialogOpen] = useState(false);
@@ -86,11 +168,85 @@ const UsersList = () => {
       setError(null);
       const response = await HttpHelper.get('auth/all-users');
       setUsers(response.users);
+      setCanManageAdmins(Boolean(response.canManageAdmins));
     } catch (err) {
       setError('Failed to fetch users');
       logger.error('Error fetching users:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const shown = useMemo(() => filterUsers(users, query, roleFilters), [users, query, roleFilters]);
+  const openUser = users.find((candidate) => candidate.id === openUserId) ?? null;
+  const isMe = (candidate: User) =>
+    !!user?.email && candidate.email.toLowerCase() === user.email.toLowerCase();
+
+  const toggleFilter = (id: RoleFilter) =>
+    setRoleFilters((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const closeUser = () => {
+    setOpenUserId(null);
+    setPending(null);
+    setAdminError(null);
+  };
+
+  /** Why a role switch is off for this person, or null when it can be used. */
+  const lockReason = (candidate: User, role: ManagedRole): string | null => {
+    if (!canManageAdmins) {
+      return 'Roles can only be shown here until Keycloak admin access is set up (docs/keycloak.md).';
+    }
+    if (!candidate.hasAccount) {
+      return 'They need to sign in once before they can be given a role.';
+    }
+    if (role === 'admin' && isMe(candidate) && candidate.isAdmin) {
+      return 'You cannot remove your own admin access. Ask another admin to do it.';
+    }
+    if (role === 'author' && candidate.isAdmin) {
+      return 'Admins can already do everything an author can.';
+    }
+    return null;
+  };
+
+  const confirmRoleChange = async () => {
+    if (!openUser || pending === null || adminSaving) return;
+    const target = openUser;
+    const { role, enabled } = pending;
+    setAdminSaving(true);
+    setAdminError(null);
+    try {
+      const response = await HttpHelper.put(`auth/users/${target.id}/${role}`, {
+        [role]: enabled,
+      });
+      // The server reads back what Keycloak now holds, so take its word.
+      const isAdmin: boolean =
+        response?.user?.isAdmin ?? (role === 'admin' ? enabled : target.isAdmin);
+      const hasAuthorRole: boolean =
+        response?.user?.hasAuthorRole ?? (role === 'author' ? enabled : target.hasAuthorRole);
+      setUsers((current) =>
+        current.map((candidate) =>
+          candidate.id === target.id
+            ? { ...candidate, isAdmin, hasAuthorRole, isAuthor: isAdmin || hasAuthorRole }
+            : candidate,
+        ),
+      );
+      const who = target.name || target.email;
+      const { noun } = ROLE_COPY[role];
+      setAdminNotice(
+        `${who} ${enabled ? `is now ${noun}` : `is no longer ${noun}`}. ` +
+          'It takes effect the next time their session refreshes, within a few minutes.',
+      );
+      setPending(null);
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Could not change their access.');
+      setPending(null);
+    } finally {
+      setAdminSaving(false);
     }
   };
 
@@ -162,16 +318,102 @@ const UsersList = () => {
         </div>
       )}
 
+      {adminNotice && (
+        <p
+          role="status"
+          className="mb-4 flex w-full max-w-6xl items-start justify-between gap-3 rounded-md border
+            border-green bg-white px-4 py-3 text-sm text-dark-gray"
+        >
+          {adminNotice}
+          <button
+            type="button"
+            onClick={() => setAdminNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0"
+          >
+            <XMarkIcon className="h-4 w-4" />
+          </button>
+        </p>
+      )}
+
+      {/* Search and role filters. */}
+      <div className="mb-6 flex w-full max-w-6xl flex-wrap items-center gap-3">
+        <label className="relative min-w-60 flex-1">
+          <MagnifyingGlassIcon
+            className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2
+              text-dark-gray/60"
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name or email"
+            aria-label="Search users"
+            className="bg-white pl-10 text-dark-gray"
+          />
+        </label>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by role">
+          {ROLE_FILTERS.map((filter) => {
+            const active = roleFilters.has(filter.id);
+            const count = users.filter(filter.matches).length;
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => toggleFilter(filter.id)}
+                aria-pressed={active}
+                className={`h-9 rounded-full border px-4 text-sm font-medium transition-colors ${
+                  active
+                    ? 'border-navy bg-navy text-white'
+                    : 'border-gray-300 bg-white text-dark-gray hover:bg-light-gray'
+                }`}
+              >
+                {filter.label} <span className="opacity-70">({count})</span>
+              </button>
+            );
+          })}
+          {(roleFilters.size > 0 || query) && (
+            <button
+              type="button"
+              onClick={() => {
+                setRoleFilters(new Set());
+                setQuery('');
+              }}
+              className="text-sm text-dark-gray underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="grid w-full max-w-6xl grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {users.length === 0 ? (
-          <p className="col-span-full p-12 text-center text-lg text-dark-gray">No users found</p>
+        {shown.length === 0 ? (
+          <p className="col-span-full p-12 text-center text-lg text-dark-gray">
+            {users.length === 0 ? 'No users found' : 'No users match your search'}
+          </p>
         ) : (
-          users.map((u) => (
+          shown.map((u) => (
             <Card
               key={u.id}
-              className="responsive-user-card flex h-full items-center gap-4 border-2 border-border
-                p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-navy
-                hover:bg-light-gray hover:shadow-lg"
+              role="button"
+              tabIndex={0}
+              aria-label={`Open ${u.name || u.email}`}
+              onClick={() => {
+                setOpenUserId(u.id);
+                setAdminError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setOpenUserId(u.id);
+                  setAdminError(null);
+                }
+              }}
+              className="responsive-user-card flex h-full cursor-pointer items-center gap-4 border-2
+                border-border p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5
+                hover:border-navy hover:bg-light-gray hover:shadow-lg focus-visible:outline-2
+                focus-visible:outline-navy"
             >
               <CardContent className="flex w-full items-center gap-4 p-0">
                 <div
@@ -204,6 +446,119 @@ const UsersList = () => {
           ))
         )}
       </div>
+
+      {openUser && (
+        <div className="admin-mail-backdrop" role="presentation" onClick={closeUser}>
+          <Card
+            className="admin-mail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-detail-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHeader className="admin-mail-header">
+              <div className="flex min-w-0 items-center gap-4">
+                <div
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full
+                    bg-navy text-2xl font-bold text-white"
+                >
+                  {(openUser.name || openUser.email).charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <CardTitle id="user-detail-title" className="break-words">
+                    {openUser.name || 'No name'}
+                    {isMe(openUser) && (
+                      <span className="ml-2 text-sm font-normal text-text-muted">(you)</span>
+                    )}
+                  </CardTitle>
+                  <p className="break-all text-sm text-purple">{openUser.email}</p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                className="admin-mail-close"
+                variant="ghost"
+                size="icon"
+                aria-label="Close"
+                onClick={closeUser}
+              >
+                ×
+              </Button>
+            </CardHeader>
+
+            <CardContent className="flex flex-col gap-5">
+              <div className="flex flex-wrap gap-2">
+                {rolesOf(openUser).map((role) => (
+                  <Badge key={role.label} className={`w-fit px-2 ${role.className}`}>
+                    {role.label}
+                  </Badge>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-lg border border-gray-300 p-4">
+                {(['author', 'admin'] as const).map((role) => (
+                  <ToggleSwitch
+                    key={role}
+                    checked={role === 'admin' ? openUser.isAdmin : openUser.isAuthor}
+                    onChange={(enabled) => {
+                      setAdminError(null);
+                      setPending({ role, enabled });
+                    }}
+                    disabled={adminSaving || lockReason(openUser, role) !== null}
+                    label={ROLE_COPY[role].label}
+                    hint={lockReason(openUser, role) ?? ROLE_COPY[role].hint}
+                  />
+                ))}
+                {openUser.isCourseAuthor && !openUser.isAuthor && (
+                  <p className="text-xs text-dark-gray">
+                    Already named as an author on at least one course, which lets them edit that
+                    course. Author access lets them create their own.
+                  </p>
+                )}
+              </div>
+
+              {adminError && (
+                <p role="alert" className="text-sm font-medium text-destructive">
+                  {adminError}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={openUser !== null && pending !== null}
+        tone={pending?.enabled ? 'ask' : 'danger'}
+        title={
+          pending?.enabled
+            ? `Make this person ${ROLE_COPY[pending.role].noun}?`
+            : `Remove ${pending?.role ?? 'admin'} access?`
+        }
+        message={
+          openUser &&
+          pending && (
+            <>
+              <p>
+                <strong>{openUser.name || openUser.email}</strong>{' '}
+                {pending.enabled ? ROLE_COPY[pending.role].grant : ROLE_COPY[pending.role].revoke}
+              </p>
+              <p className="mt-2 text-sm">
+                This takes effect the next time their session refreshes, within a few minutes.
+              </p>
+            </>
+          )
+        }
+        confirmLabel={
+          adminSaving
+            ? 'Saving…'
+            : pending?.enabled
+              ? `Make ${pending.role}`
+              : `Remove ${pending?.role ?? 'admin'} access`
+        }
+        onConfirm={() => void confirmRoleChange()}
+        onCancel={() => setPending(null)}
+      />
 
       {isMailDialogOpen && (
         <div

@@ -19,6 +19,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useEffect, useRef, useState } from 'react';
 
+import CanvasView from '@/components/canvas/canvas-view';
 import { imageSrc, SectionElement } from '@/services/curriculum-api';
 
 /** Accepts watch/share/embed YouTube links and returns the embeddable form. */
@@ -341,6 +342,11 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
         </figcaption>
       </figure>
     );
+  }
+
+  if (element.type === 'CANVAS') {
+    if (!element.canvasData?.items?.length) return missing('Empty canvas');
+    return <CanvasView data={element.canvasData} fill={fill} onTextClick={openLinksInNewTab} />;
   }
 
   if (element.type === 'IMAGE') {

@@ -8,6 +8,7 @@
 // Service is useful for adding business logic/error handling
 import { logger } from '@/config/logger';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
+import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 
 import { User } from '../../../generated/prisma';
 
@@ -33,8 +34,10 @@ export default class AuthService {
   /**
    * Everyone, labelled by what they are.
    *
-   * Three states, and someone can be more than one of them:
-   *   author  — named on at least one course, or holding the author role
+   * Several states, and someone can be more than one of them:
+   *   admin   — holds the admin role
+   *   author  — holds the author role (or admin), so can create content
+   *   course author — named on at least one course, so can edit that course
    *   student — has been assigned something
    *   no account — an address that has never been signed into
    *
@@ -43,21 +46,32 @@ export default class AuthService {
    * like a bare address.
    */
   static async getAllWithRoles() {
-    const [users, assignedEmails] = await Promise.all([
+    const [users, assignedEmails, holders] = await Promise.all([
       AuthGateway.getAllWithRoles(),
       AuthGateway.getAssignedEmails(),
+      AdminAccessService.roleHolders(),
     ]);
 
     return users.map((user) => {
+      const email = user.email.toLowerCase();
       const hasAccount = user.lastSignInAt !== null;
+      // Keycloak's answer when it gives one; the local copy only when it cannot.
+      const isAdmin = holders ? holders.admins.has(email) : user.role === 'admin';
+      const hasAuthorRole = holders ? holders.authors.has(email) : user.role === 'author';
       return {
         id: user.id,
         email: user.email,
         name: user.name,
         subscribed: user.subscribed,
         hasAccount,
-        isAuthor: user._count.editableCourses > 0 || user.role === 'admin',
-        isStudent: assignedEmails.has(user.email.toLowerCase()),
+        isAdmin,
+        /** Holds the author role itself — what the Author switch shows. */
+        hasAuthorRole,
+        /** Can create content: an author, or an admin, who can do everything. */
+        isAuthor: hasAuthorRole || isAdmin,
+        /** Named on at least one course, which lets them edit that course only. */
+        isCourseAuthor: user._count.editableCourses > 0,
+        isStudent: assignedEmails.has(email),
       };
     });
   }

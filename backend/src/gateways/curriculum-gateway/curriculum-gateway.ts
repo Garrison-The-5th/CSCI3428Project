@@ -813,6 +813,7 @@ export default class CurriculumGateway {
       fileName?: string | null;
       textContent?: string | null;
       durationMinutes?: number | null;
+      canvasData?: Prisma.InputJsonValue;
     },
     order: number,
     db: Db = prisma,
@@ -886,6 +887,14 @@ export default class CurriculumGateway {
       where: { userId },
       orderBy: { viewedAt: 'desc' },
       select: { elementId: true, viewedAt: true },
+    });
+  }
+
+  /** What a canvas save needs: its type, and the stored pictures to merge back in. */
+  static getElementCanvas(id: string) {
+    return prisma.element.findUnique({
+      where: { id },
+      select: { id: true, type: true, canvasData: true },
     });
   }
 

@@ -83,12 +83,13 @@ const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
  * deliberately — those arrive through Upload, not by typing a value.
  */
 type NewContentType = Exclude<ElementType, 'PDF'> | 'QUIZ';
-const CONTENT_TYPES: NewContentType[] = ['TEXT', 'YOUTUBE', 'IMAGE', 'QUIZ'];
+const CONTENT_TYPES: NewContentType[] = ['TEXT', 'YOUTUBE', 'IMAGE', 'CANVAS', 'QUIZ'];
 
 const CONTENT_PLACEHOLDER: Record<NewContentType, string> = {
   TEXT: 'Start typing to add a text block...',
   YOUTUBE: 'Paste a YouTube link',
   IMAGE: 'Paste an image URL, or upload one',
+  CANVAS: '',
   QUIZ: 'New quiz title',
 };
 
@@ -331,7 +332,9 @@ const StructureEditor = ({
    */
   const addElement = async () => {
     const value = newElement.value.trim();
-    if (!selectedSection || !value || addingRef.current) return;
+    // A canvas starts blank and is built after it is added, so it needs no value.
+    const needsValue = newElement.type !== 'CANVAS';
+    if (!selectedSection || (needsValue && !value) || addingRef.current) return;
     // The rich text editor leaves markup behind when emptied — a stray <br>, an
     // empty paragraph — which is not content worth a block of its own.
     if (newElement.type === 'TEXT' && isBlankHtml(value)) return;
@@ -350,7 +353,9 @@ const StructureEditor = ({
           ? { type: newElement.type, textContent: value }
           : newElement.type === 'YOUTUBE'
             ? { type: newElement.type, videoUrl: value }
-            : { type: newElement.type, imageUrl: value };
+            : newElement.type === 'CANVAS'
+              ? { type: newElement.type }
+              : { type: newElement.type, imageUrl: value };
 
       const ok = await run(
         () => curriculumApi.createElement(selectedSection.id, payload),
@@ -979,6 +984,15 @@ const StructureEditor = ({
                           placeholder={CONTENT_PLACEHOLDER.TEXT}
                         />
                       </div>
+                    ) : newElement.type === 'CANVAS' ? (
+                      // Nothing to type: a canvas is added blank, then opened and
+                      // built from its own toolbar.
+                      <p
+                        className="flex min-h-9 min-w-60 flex-1 items-center text-sm text-dark-gray"
+                      >
+                        A blank slide for pictures, text boxes and shapes. Press Add, then open it
+                        to build it.
+                      </p>
                     ) : (
                       <Input
                         value={newElement.value}

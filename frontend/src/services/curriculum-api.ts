@@ -5,12 +5,13 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
+import type { CanvasData, CanvasImageAsset, CanvasLayout } from '@/components/canvas/canvas-model';
 import type { Quiz } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 
 export type { Quiz };
 
-export type ElementType = 'YOUTUBE' | 'IMAGE' | 'TEXT' | 'PDF';
+export type ElementType = 'YOUTUBE' | 'IMAGE' | 'TEXT' | 'PDF' | 'CANVAS';
 
 /**
  * What the upload endpoints accept. HEIC is converted to JPEG server-side so it
@@ -38,6 +39,8 @@ export interface SectionElement {
   textContent: string | null;
   /** Runtime of a video element, used for the "hours of video" figure. */
   durationMinutes: number | null;
+  /** A canvas's layout and the pictures it draws from. Absent on rows from before canvases. */
+  canvasData?: CanvasData | null;
 }
 
 /**
@@ -871,8 +874,24 @@ export const curriculumApi = {
       videoUrl?: string | null;
       imageUrl?: string | null;
       durationMinutes?: number | null;
+      /** The layout only — pictures are uploaded on their own and kept by the server. */
+      canvas?: CanvasLayout;
     },
   ) => HttpHelper.put(`curriculum/elements/${elementId}`, data),
+
+  /** Stores a picture on a canvas. Same rules as a cover photo; placing it is up to the editor. */
+  uploadCanvasImage: async (
+    elementId: string,
+    file: File,
+  ): Promise<CanvasImageAsset & { imageId: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await HttpHelper.postFormData(
+      `curriculum/elements/${elementId}/canvas-images`,
+      form,
+    );
+    return response.image;
+  },
 
   deleteElement: (elementId: string) => HttpHelper.delete(`curriculum/elements/${elementId}`),
 

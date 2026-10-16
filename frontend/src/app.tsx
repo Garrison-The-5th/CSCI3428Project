@@ -144,11 +144,12 @@ function App() {
 
             {/* Protected Routes - Authentication required */}
 
-            {/* admin side routes */}
+            {/* admin side routes. The dashboard is open to authors as well:
+                an author can do everything except manage users. */}
             <Route
               path="/admin"
               element={
-                <ProtectedRoute isAdmin={true}>
+                <ProtectedRoute isAuthor={true}>
                   <AdminPage />
                 </ProtectedRoute>
               }

@@ -407,3 +407,19 @@ body {
 .dark .rich-text th {
   background: rgba(255, 255, 255, 0.06);
 }
+
+/*
+ * While editing, a table whose lines have been hidden gets a faint dashed guide
+ * on each cell, so it can still be seen and typed into. A table with visible
+ * lines needs no guide. Learners never see it: the published text is not
+ * contenteditable. Both spellings are matched because the browser writes
+ * `border-color: transparent` and the server's sanitiser saves it without the
+ * space.
+ */
+[contenteditable='true'] td[style*='border-color: transparent'],
+[contenteditable='true'] td[style*='border-color:transparent'],
+[contenteditable='true'] th[style*='border-color: transparent'],
+[contenteditable='true'] th[style*='border-color:transparent'] {
+  outline: 1px dashed rgba(0, 0, 0, 0.18);
+  outline-offset: -2px;
+}
