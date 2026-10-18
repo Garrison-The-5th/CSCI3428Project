@@ -4,6 +4,8 @@ A collaborative full-stack software project developed as part of a software engi
 
 The project applies software engineering practices throughout the **Software Development Life Cycle (SDLC)**, from requirements gathering and system design through implementation, testing, and continuous integration.
 
+This is a fork of this repository [here](https://github.com/connorrmcneil/software-engineering-2025-project), and the continuation is being developed by team Garrison the 5th during the fall semester of CSCI 3428.
+
 ## Tech Stack
 
 * **Languages:** TypeScript, JavaScript, CSS
