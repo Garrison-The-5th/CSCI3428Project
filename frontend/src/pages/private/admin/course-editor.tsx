@@ -15,9 +15,12 @@
 import {
   ArchiveBoxIcon,
   ArrowLeftIcon,
+  ChevronDoubleLeftIcon,
+  ChevronDoubleRightIcon,
   CloudArrowUpIcon,
-  EyeIcon,
+  DocumentMagnifyingGlassIcon,
   MapIcon,
+  PlayCircleIcon,
   QuestionMarkCircleIcon,
   Squares2X2Icon,
   TrashIcon,
@@ -85,8 +88,9 @@ function panesFor(
     // Named Archive rather than Version history: the tab holds both, and the
     // kept versions are the half somebody chose to put there.
     { key: 'versions', label: 'Archive', Icon: ArchiveBoxIcon },
-    { key: 'preview-landing', label: 'Landing page preview', Icon: EyeIcon },
-    { key: 'preview-content', label: 'Course content preview', Icon: EyeIcon },
+    // Each icon is distinct, because collapsed the sidebar shows nothing else.
+    { key: 'preview-landing', label: 'Landing page preview', Icon: DocumentMagnifyingGlassIcon },
+    { key: 'preview-content', label: 'Course content preview', Icon: PlayCircleIcon },
   ];
 }
 
@@ -105,12 +109,22 @@ function quizzesTypeLockedByPublish(course: Course): Quiz[] {
 }
 
 /** Sits above a preview so it is never mistaken for the live page. */
-const PreviewBanner = ({ note }: { note: string }) => (
+const PreviewBanner = () => (
   <div className="mb-4 rounded-lg border-2 border-navy/30 bg-navy/5 px-4 py-3">
-    <p className="text-sm font-semibold text-dark-gray">Preview — exactly what a learner sees</p>
-    <p className="text-sm text-dark-gray">{note}</p>
+    <p className="text-sm font-semibold text-dark-gray">Preview</p>
   </div>
 );
+
+/** Where the sidebar's collapsed state is remembered between visits. */
+const SIDEBAR_KEY = 'course-editor-sidebar-collapsed';
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 /** Which job this shell is doing. */
 export type EditorMode = 'lesson' | 'quiz';
@@ -156,6 +170,18 @@ const CourseEditor = ({
   const [confirmingTypeLock, setConfirmingTypeLock] = useState(false);
   /** Set while the soft publish to the course map is in flight. */
   const [staging, setStaging] = useState(false);
+  /** Collapsed, the sidebar shows its icons only. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+
+  const toggleSidebar = () =>
+    setSidebarCollapsed((prev) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, prev ? '0' : '1');
+      } catch {
+        // Not remembered, which is fine.
+      }
+      return !prev;
+    });
 
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
@@ -437,8 +463,7 @@ const CourseEditor = ({
                   {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
                   {course.sections.length} sections · {totalMinutes} min
                 </>
-              )}{' '}
-              · changes save automatically
+              )}
             </p>
           </div>
 
@@ -452,7 +477,6 @@ const CourseEditor = ({
                 disabled={staging}
                 variant="outline"
                 className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
-                title="Hand this content to the course map. Learners see nothing until you publish."
               >
                 <MapIcon className="w-5 h-5" />
                 {staging ? 'Staging...' : 'Stage course to mapping'}
@@ -542,21 +566,45 @@ const CourseEditor = ({
 
         <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-navy" />
 
-        <div className="grid gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
+        <div
+          className={`grid gap-6 ${
+            sidebarCollapsed
+              ? 'md:grid-cols-[3.25rem_minmax(0,1fr)]'
+              : 'md:grid-cols-[14rem_minmax(0,1fr)]'
+            }`}
+        >
           {/* ---- Module sidebar ---- */}
           <nav className="h-fit md:sticky md:top-20">
+            <button
+              onClick={toggleSidebar}
+              aria-expanded={!sidebarCollapsed}
+              aria-label={sidebarCollapsed ? 'Expand menu' : 'Collapse menu'}
+              title={sidebarCollapsed ? 'Expand menu' : 'Collapse menu'}
+              className={`mb-1 hidden w-full items-center rounded-lg py-2 text-dark-gray
+                transition-colors hover:bg-light-gray md:flex
+                ${sidebarCollapsed ? 'justify-center px-0' : 'justify-end px-4'}`}
+            >
+              {sidebarCollapsed ? (
+                <ChevronDoubleRightIcon className="w-5 h-5" />
+              ) : (
+                <ChevronDoubleLeftIcon className="w-5 h-5" />
+              )}
+            </button>
             <ul className="flex flex-col gap-1">
               {panesFor(mode).map(({ key, label, Icon }) => (
                 <li key={key}>
                   <button
                     onClick={() => setPane(key)}
                     aria-current={pane === key ? 'page' : undefined}
-                    className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left
-                    text-sm font-medium transition-colors
+                    aria-label={label}
+                    title={sidebarCollapsed ? label : undefined}
+                    className={`flex w-full items-center gap-3 rounded-lg py-3 text-left text-sm
+                    font-medium transition-colors
+                    ${sidebarCollapsed ? 'px-4 md:justify-center md:px-0' : 'px-4'}
                     ${pane === key ? 'bg-navy text-white' : 'text-dark-gray hover:bg-light-gray'}`}
                   >
                     <Icon className="w-5 h-5 shrink-0" />
-                    {label}
+                    <span className={sidebarCollapsed ? 'md:sr-only' : undefined}>{label}</span>
                   </button>
                 </li>
               ))}
@@ -631,28 +679,14 @@ const CourseEditor = ({
               what is actually shipped. */}
             {pane === 'preview-landing' && (
               <>
-                <PreviewBanner note="The Course content button is disabled here." />
+                <PreviewBanner />
                 <CourseLanding previewCourse={course} preview />
               </>
             )}
 
             {pane === 'preview-content' && (
               <>
-                {/* What the preview does and does not do, said plainly, because
-                  all three are things an author would otherwise discover by
-                  being surprised: a quiz they thought they had taken, a course
-                  that reads straight through when the map says otherwise, and
-                  notes that disappear. */}
-                <PreviewBanner
-                  note={
-                    'Notes work but are not saved, and progress is not recorded. Quizzes cannot ' +
-                    'be handed in here.' +
-                    (course.directedLearning
-                      ? ' The map is applied, so answering a directed learning quiz changes ' +
-                        'what follows exactly as it will for a learner.'
-                      : '')
-                  }
-                />
+                <PreviewBanner />
                 <CoursePlayer previewCourse={course} preview />
               </>
             )}

@@ -8,6 +8,19 @@
 import { CourseKind, Prisma } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
+/**
+ * How far past their own courses somebody reaches — see
+ * `CurriculumGateway.accessibleCourses`.
+ *
+ * - `'all'` — an admin: every course, whoever made it.
+ * - `true` — an author: their own, ones they are named on, and the unowned ones.
+ * - `false` — their own and ones they are named on.
+ *
+ * `'all'` is truthy, so anything that only asks "global author or not?" reads
+ * an admin as one without changing.
+ */
+export type CourseReach = boolean | 'all';
+
 // Inside $transaction the client is a restricted PrismaClient (no $connect/$transaction/etc),
 // so transactional helpers take Prisma.TransactionClient rather than `typeof prisma`.
 type Db = Prisma.TransactionClient;
@@ -99,17 +112,19 @@ export default class CurriculumGateway {
   /**
    * The one rule for who may reach a course, as a `where` clause.
    *
-   * Two ways in: you made it, or you were named on it. Nothing else — holding
-   * `admin` in Keycloak says you may author, not that you may author *this*.
+   * Two ways in: you made it, or you were named on it — unless you are an admin
+   * (`'all'`), who reaches every course. Holding only the author role says you
+   * may author, not that you may author *this*.
    *
-   * `includeUnowned` is the single exception, and it is for history rather than
+   * `includeUnowned` is the other exception, and it is for history rather than
    * for roles. Courses created before ownership was recorded, and not
    * attributable by the migration's backfill, carry a null `createdById`. They
    * belong to nobody, so somebody has to be able to reach them: global authors
    * do, and the first person to be named on one takes it out of that pool for
    * good.
    */
-  static accessibleCourses(userId: number, includeUnowned: boolean): Prisma.CourseWhereInput {
+  static accessibleCourses(userId: number, includeUnowned: CourseReach): Prisma.CourseWhereInput {
+    if (includeUnowned === 'all') return {};
     return {
       OR: [
         { createdById: userId },
@@ -123,7 +138,7 @@ export default class CurriculumGateway {
    * Author view: everything this person may edit that has not been deleted,
    * published or not.
    */
-  static getCoursesForAuthor(userId: number, includeUnowned: boolean) {
+  static getCoursesForAuthor(userId: number, includeUnowned: CourseReach) {
     return prisma.course.findMany({
       where: { deletedAt: null, ...CurriculumGateway.accessibleCourses(userId, includeUnowned) },
       orderBy: { createdAt: 'asc' },
@@ -137,7 +152,7 @@ export default class CurriculumGateway {
    * Deleted ones are deliberately in: this is what scopes the recycle bin, and
    * everything in the bin is by definition soft deleted.
    */
-  static async getAccessibleCourseIds(userId: number, includeUnowned: boolean) {
+  static async getAccessibleCourseIds(userId: number, includeUnowned: CourseReach) {
     const courses = await prisma.course.findMany({
       where: CurriculumGateway.accessibleCourses(userId, includeUnowned),
       select: { id: true },
@@ -220,7 +235,7 @@ export default class CurriculumGateway {
    * emptying it are both guarded through here, and both name content that is
    * soft deleted by definition.
    */
-  static async canEditCourse(userId: number, courseId: string, includeUnowned: boolean) {
+  static async canEditCourse(userId: number, courseId: string, includeUnowned: CourseReach) {
     const match = await prisma.course.findFirst({
       where: { id: courseId, ...CurriculumGateway.accessibleCourses(userId, includeUnowned) },
       select: { id: true },
@@ -813,6 +828,7 @@ export default class CurriculumGateway {
       fileName?: string | null;
       textContent?: string | null;
       durationMinutes?: number | null;
+      canvasData?: Prisma.InputJsonValue;
     },
     order: number,
     db: Db = prisma,
@@ -886,6 +902,14 @@ export default class CurriculumGateway {
       where: { userId },
       orderBy: { viewedAt: 'desc' },
       select: { elementId: true, viewedAt: true },
+    });
+  }
+
+  /** What a canvas save needs: its type, and the stored pictures to merge back in. */
+  static getElementCanvas(id: string) {
+    return prisma.element.findUnique({
+      where: { id },
+      select: { id: true, type: true, canvasData: true },
     });
   }
 

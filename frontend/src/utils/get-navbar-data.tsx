@@ -94,7 +94,9 @@ export const getNavbarData = (
       quizzes,
       // Global authors create lessons; contributors only edit the ones they are on.
       ...(isAuthor ? [createLesson, createQuiz] : isCourseContributor ? [courseEditor] : []),
-      ...(isAdmin ? [users, adminDashboard] : []),
+      // Authors get everything but the Users page, which stays with admins.
+      ...(isAdmin ? [users] : []),
+      ...(isAuthor ? [adminDashboard] : []),
       contact,
     ],
   };

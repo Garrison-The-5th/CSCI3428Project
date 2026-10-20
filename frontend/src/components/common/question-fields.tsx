@@ -134,7 +134,6 @@ const QuestionFields = ({
   fixedOptions = false,
 }: QuestionFieldsProps) => {
   const correct = new Set(draft.correctIndexes);
-  const multi = correct.size > 1;
 
   /**
    * Ticking an option.
@@ -178,11 +177,7 @@ const QuestionFields = ({
 
       {fixedOptions ? (
         <>
-          <p className="mb-1 text-sm font-medium text-dark-gray">Options</p>
-          <p className="mb-2 text-xs text-dark-gray">
-            Set by the course map — one per branch the learner can pick. Change them on the Course
-            mapping tab.
-          </p>
+          <p className="mb-2 text-sm font-medium text-dark-gray">Options</p>
           <ul className="flex flex-col gap-2">
             {draft.options.map((option, index) => (
               <li
@@ -198,15 +193,8 @@ const QuestionFields = ({
         </>
       ) : (
         <>
-          <p className="mb-1 text-sm font-medium text-dark-gray">
+          <p className="mb-2 text-sm font-medium text-dark-gray">
             Options — tick every correct answer
-          </p>
-          <p className="mb-2 text-xs text-dark-gray">
-            {multi
-              ? `${correct.size} correct answers: the learner sees checkboxes and must pick ` +
-                'all of them.'
-              : 'One correct answer: the learner sees radio buttons. Tick a second to make it a ' +
-                'multiple-answer question.'}
           </p>
           <div className="flex flex-col gap-2">
             {draft.options.map((option, index) => (

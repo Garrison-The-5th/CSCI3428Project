@@ -22,9 +22,14 @@ const withAssigner = {
  * the person who set it rather than from a system mailbox.
  */
 export default class AssignmentGateway {
+  /** Replaces a link's token, which turns the old URL off. */
+  static setTokenHash(id: string, tokenHash: string) {
+    return prisma.assignment.update({ where: { id }, data: { tokenHash } });
+  }
+
   static create(data: {
     type: AssignmentType;
-    token: string;
+    tokenHash: string;
     email: string;
     courseId?: string | null;
     quizId?: string | null;
@@ -58,6 +63,8 @@ export default class AssignmentGateway {
   static listPlatformForEmail(email: string) {
     const now = new Date();
     return prisma.assignment.findMany({
+      // The hash is only ever compared against; nothing outside needs it.
+      omit: { tokenHash: true },
       where: {
         email,
         type: 'PLATFORM',
@@ -70,9 +77,9 @@ export default class AssignmentGateway {
 
   /** Looks a link up by its token. Returns the record even when revoked or expired
    *  so the caller can explain which it is. */
-  static findByToken(token: string) {
+  static findByTokenHash(tokenHash: string) {
     return prisma.assignment.findUnique({
-      where: { token },
+      where: { tokenHash },
       include: {
         course: { select: { id: true, title: true, published: true, deletedAt: true } },
         quiz: { select: { id: true, title: true, published: true, deletedAt: true } },
@@ -82,6 +89,8 @@ export default class AssignmentGateway {
 
   static listForCourse(courseId: string) {
     return prisma.assignment.findMany({
+      // The hash is only ever compared against; nothing outside needs it.
+      omit: { tokenHash: true },
       where: { courseId },
       orderBy: { assignedAt: 'desc' },
       include: withAssigner,
@@ -90,6 +99,8 @@ export default class AssignmentGateway {
 
   static listForQuiz(quizId: string) {
     return prisma.assignment.findMany({
+      // The hash is only ever compared against; nothing outside needs it.
+      omit: { tokenHash: true },
       where: { quizId },
       orderBy: { assignedAt: 'desc' },
       include: withAssigner,
@@ -105,6 +116,8 @@ export default class AssignmentGateway {
    */
   static listAll(assignedById: number | null) {
     return prisma.assignment.findMany({
+      // The hash is only ever compared against; nothing outside needs it.
+      omit: { tokenHash: true },
       where: assignedById === null ? {} : { assignedById },
       orderBy: { assignedAt: 'desc' },
       include: withAssigner,

@@ -29,7 +29,7 @@
  *
  * Off, a click does nothing and a drag carries one section, exactly as before.
  */
-import { CheckIcon, MagnifyingGlassIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { CheckIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -212,13 +212,6 @@ const StagingManager = ({
             )}
           </div>
         ))}
-
-        {groups.length <= 1 && groups[0]?.sections.length === 0 && (
-          <p className="flex items-center gap-2 text-xs text-dark-gray">
-            <MagnifyingGlassIcon className="w-4 h-4 shrink-0" />
-            Use + to bring in training from another course.
-          </p>
-        )}
       </div>
     </section>
   );

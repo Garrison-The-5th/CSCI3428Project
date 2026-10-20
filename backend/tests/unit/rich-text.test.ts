@@ -124,3 +124,44 @@ describe('looksLikeHtml', () => {
     expect(looksLikeHtml(value)).toBe(false);
   });
 });
+
+describe('sanitizeRichText — sizes, colours and table styling', () => {
+  it('keeps a font size in points', () => {
+    expect(sanitizeRichText('<span style="font-size: 14pt">x</span>')).toContain('font-size:14pt');
+  });
+
+  it('keeps text, fill and line colours written as hex or rgb()', () => {
+    const output = sanitizeRichText(
+      '<table><tbody><tr><td style="color: #ff0000; background-color: rgb(1, 2, 3); ' +
+        'border-color: transparent">x</td></tr></tbody></table>',
+    );
+    expect(output).toContain('color:#ff0000');
+    expect(output).toContain('background-color:rgb(1, 2, 3)');
+    expect(output).toContain('border-color:transparent');
+  });
+
+  it('keeps a dragged cell width and height in pixels, but only on table cells', () => {
+    const output = sanitizeRichText(
+      '<table><tbody><tr><td style="width: 120px; height: 48px">x</td></tr></tbody></table>' +
+        '<p style="width: 120px; height: 48px">y</p>',
+    );
+    expect(output).toContain('<td style="width:120px;height:48px">');
+    expect(output).toContain('<p>y</p>');
+  });
+
+  it('drops a cell size that is not plain pixels', () => {
+    const output = sanitizeRichText(
+      '<table><tbody><tr><td style="width: calc(100vw); height: 50%">x</td></tr></tbody></table>',
+    );
+    expect(output).toContain('<td>x</td>');
+  });
+
+  it.each([
+    ['a url()', 'background-color: url(https://evil.example/x.png)'],
+    ['an expression', 'color: expression(alert(1))'],
+    ['a named colour smuggling more', 'color: red; position: fixed'],
+  ])('drops %s', (_label, style) => {
+    const output = sanitizeRichText(`<span style="${style}">x</span>`);
+    expect(output).not.toMatch(/url\(|expression|position/);
+  });
+});

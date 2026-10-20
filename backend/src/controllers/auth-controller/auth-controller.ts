@@ -7,10 +7,17 @@
  */
 import { Request, Response } from 'express';
 
-import { authenticateAndAttachUser } from '@/controllers/auth-controller/auth-middleware';
+import {
+  authenticateAndAttachUser,
+  AuthenticatedRequest,
+} from '@/controllers/auth-controller/auth-middleware';
 import { requireAuthor, requireRole } from '@/controllers/auth-controller/authorization-middleware';
-import { controller, get, post, use } from '@/controllers/decorators';
+import { controller, del, get, post, put, use } from '@/controllers/decorators';
+import { fail } from '@/controllers/http-errors';
 import { rateLimit } from '@/controllers/middleware/rate-limit';
+import AdminAccessService, {
+  ManagedRole,
+} from '@/services/admin-access-service/admin-access-service';
 import AuthService from '@/services/auth-service/auth-service';
 import EmailService from '@/services/email-service/email-service';
 
@@ -26,7 +33,79 @@ export default class AuthController {
   @use(authenticateAndAttachUser)
   async getAllUsers(req: Request, res: Response) {
     const users = await AuthService.getAllWithRoles();
-    return res.send({ users });
+    // Whether the page may offer the role switches, or only show roles.
+    return res.send({ users, canManageAdmins: AdminAccessService.canManage() });
+  }
+
+  /**
+   * Grants or removes admin access. Changes the role in Keycloak, so it is in
+   * the person's next token and in the realm's own list of admins.
+   * Body: { admin: boolean }.
+   */
+  @put('/users/:id/admin')
+  @use(requireRole('admin'))
+  @use(authenticateAndAttachUser)
+  async setAdmin(req: AuthenticatedRequest, res: Response) {
+    return AuthController.changeRole(req, res, 'admin');
+  }
+
+  /**
+   * Grants or removes author access — creating courses and quizzes, and
+   * everything else except the Users page. Body: { author: boolean }.
+   */
+  @put('/users/:id/author')
+  @use(requireRole('admin'))
+  @use(authenticateAndAttachUser)
+  async setAuthor(req: AuthenticatedRequest, res: Response) {
+    return AuthController.changeRole(req, res, 'author');
+  }
+
+  /**
+   * Deletes somebody's account — their Keycloak login, and every record of
+   * them here: progress, quiz results, notes, completions and assignments.
+   * Content they wrote stays, uncredited. Cannot be undone.
+   */
+  @del('/users/:id')
+  @use(requireRole('admin'))
+  @use(authenticateAndAttachUser)
+  async deleteUser(req: AuthenticatedRequest, res: Response) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send({ errorMessage: 'A valid user id is required' });
+    }
+    try {
+      const result = await AdminAccessService.deleteUser(req.user!, id);
+      return res.send({
+        message: result.keycloakDeleted
+          ? 'Account and data deleted'
+          : 'Data deleted. Their Keycloak login could not be removed from here, so remove it ' +
+            'in Keycloak or they can sign in again (to an empty account).',
+        ...result,
+      });
+    } catch (error) {
+      return fail(res, error, 'Error deleting user');
+    }
+  }
+
+  private static async changeRole(req: AuthenticatedRequest, res: Response, role: ManagedRole) {
+    const id = Number(req.params.id);
+    const enabled = (req.body as Record<string, unknown>)[role];
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send({ errorMessage: 'A valid user id is required' });
+    }
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).send({ errorMessage: `${role} must be true or false` });
+    }
+    const label = role === 'admin' ? 'Admin' : 'Author';
+    try {
+      const user = await AdminAccessService.setRole(req.user!, id, role, enabled);
+      return res.send({
+        message: enabled ? `${label} access granted` : `${label} access removed`,
+        user,
+      });
+    } catch (error) {
+      return fail(res, error, `Error changing ${role} access`);
+    }
   }
 
   // get all users with 'user' role only

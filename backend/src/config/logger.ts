@@ -90,7 +90,10 @@ export type SecurityEvent =
   | 'ratelimit.exceeded'
   | 'upload.rejected'
   | 'data.exported'
-  | 'data.erased';
+  | 'data.erased'
+  | 'user.deleted'
+  | 'role.granted'
+  | 'role.revoked';
 
 /** Metadata attached to a security event. Never carries the credential itself. */
 export interface SecurityContext {

@@ -7,7 +7,7 @@
  */
 import { ConflictError, NotFoundError } from '@/controllers/http-errors';
 import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
-import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import {
   choiceEdgeIds,
@@ -897,7 +897,7 @@ export default class CourseMapService {
    * for the same reason — importing a course puts its sections in front of
    * somebody who is about to place them, which is a form of reading it.
    */
-  static async availableCourses(courseId: string, userId: number, isGlobalAuthor: boolean) {
+  static async availableCourses(courseId: string, userId: number, isGlobalAuthor: CourseReach) {
     const [editable, imports] = await Promise.all([
       CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor),
       CourseMapGateway.getImports(courseId),
@@ -938,7 +938,7 @@ export default class CourseMapService {
     courseId: string,
     sourceCourseId: string,
     userId: number,
-    isGlobalAuthor: boolean,
+    isGlobalAuthor: CourseReach,
   ) {
     if (sourceCourseId === courseId) {
       throw new Error('this course is already in staging — its content is the first group');

@@ -5,6 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-09-25
  */
+import { addCanvasImage, emptyCanvas, mergeCanvasLayout } from '@/config/canvas';
 import { logger } from '@/config/logger';
 import { normalizeUpload } from '@/config/media-upload';
 import { parseModuleColor } from '@/config/module-colors';
@@ -20,7 +21,7 @@ import {
   withinLimit,
 } from '@/config/validation';
 import { NotFoundError } from '@/controllers/http-errors';
-import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CourseMapService from '@/services/course-map-service/course-map-service';
@@ -293,11 +294,11 @@ export default class CurriculumService {
   /**
    * Author view: drafts included, and only what this person may edit.
    *
-   * `isGlobalAuthor` no longer means "everything". It admits the unowned courses
-   * that predate the ownership column and nothing more — see
-   * `CurriculumGateway.accessibleCourses`.
+   * `isGlobalAuthor` is `'all'` for an admin, who sees every course. For an
+   * author it admits the unowned courses that predate the ownership column and
+   * nothing more — see `CurriculumGateway.accessibleCourses`.
    */
-  static getCoursesForAuthor(userId: number, isGlobalAuthor: boolean) {
+  static getCoursesForAuthor(userId: number, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
@@ -484,7 +485,7 @@ export default class CurriculumService {
 
   // ---- Per-course contributors ----
 
-  static getEditableCourses(userId: number, isGlobalAuthor: boolean) {
+  static getEditableCourses(userId: number, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
@@ -517,7 +518,7 @@ export default class CurriculumService {
    * on it. A global authoring role adds only the unowned courses that predate
    * ownership being recorded.
    */
-  static canEditCourse(userId: number, courseId: string, isGlobalAuthor: boolean) {
+  static canEditCourse(userId: number, courseId: string, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.canEditCourse(userId, courseId, isGlobalAuthor);
   }
 
@@ -651,7 +652,7 @@ export default class CurriculumService {
    * what comes back can never contain something that should already have expired.
    * `index.ts` runs the same sweep on a timer for the case where nobody looks.
    */
-  static async getDeletedItems(userId: number, isGlobalAuthor: boolean) {
+  static async getDeletedItems(userId: number, isGlobalAuthor: CourseReach) {
     await CurriculumService.purgeExpired();
 
     // One access decision for the whole bin, so a course and the sections that
@@ -719,7 +720,7 @@ export default class CurriculumService {
   }
 
   /** Empties the bin back into place, for this person's courses only. */
-  static async restoreAll(userId: number, isGlobalAuthor: boolean) {
+  static async restoreAll(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
 
     // Outermost first: restoring a section whose module is still deleted would
@@ -739,7 +740,7 @@ export default class CurriculumService {
     return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
-  static async purgeAll(userId: number, isGlobalAuthor: boolean) {
+  static async purgeAll(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
 
     // Deleting a course cascades to its modules and sections, so work outward in
@@ -1256,7 +1257,10 @@ export default class CurriculumService {
       throw new Error(`type must be one of ${ELEMENT_TYPES.join(', ')}`);
     }
     const type = data.type as ElementType;
-    const { durationMinutes, ...rest } = data;
+    // Picked apart rather than spread: the route hands over the whole body, and
+    // only these fields belong on a new element.
+    const { durationMinutes, videoUrl, imageUrl, textContent } = data;
+    const rest = { videoUrl, imageUrl, textContent };
 
     // Lesson text is rendered as markup for learners, so clean it before storing.
     if (type === 'TEXT' && rest.textContent) {
@@ -1283,6 +1287,10 @@ export default class CurriculumService {
           type,
           // Only meaningful for video, and drives the "hours of video" figure.
           durationMinutes: type === 'YOUTUBE' ? validateMinutes(durationMinutes) || null : null,
+          // A canvas starts blank; pictures, text and shapes are added in the editor.
+          ...(type === 'CANVAS'
+            ? { canvasData: emptyCanvas() as unknown as Prisma.InputJsonValue }
+            : {}),
         },
         last + 1,
         db,
@@ -1323,7 +1331,7 @@ export default class CurriculumService {
     return CurriculumGateway.getSectionById(sectionId);
   }
 
-  static updateElement(
+  static async updateElement(
     id: string,
     data: Partial<{
       type: string;
@@ -1331,9 +1339,14 @@ export default class CurriculumService {
       imageUrl: string | null;
       textContent: string | null;
       durationMinutes: number | string | null;
+      canvas: unknown;
     }>,
   ) {
-    const { type, durationMinutes, ...rest } = data;
+    // Picked apart rather than spread: the route hands over the whole body, and
+    // spreading it would let a request write columns no field here names — the
+    // stored picture pool among them, which only the upload route may fill.
+    const { type, durationMinutes, canvas, videoUrl, imageUrl, textContent } = data;
+    const rest = { videoUrl, imageUrl, textContent };
 
     if (type !== undefined && !ELEMENT_TYPES.includes(type)) {
       throw new Error(`type must be one of ${ELEMENT_TYPES.join(', ')}`);
@@ -1351,12 +1364,77 @@ export default class CurriculumService {
       rest.imageUrl = safeUrl(rest.imageUrl, 'image URL') ?? null;
     }
 
+    // A canvas sends its layout only. The pictures it draws from stay as stored
+    // and are merged back in, so they never travel with an auto-save.
+    let canvasData: Prisma.InputJsonValue | undefined;
+    if (canvas !== undefined) {
+      const element = await CurriculumGateway.getElementCanvas(id);
+      if (!element) throw new NotFoundError(`Element with ID ${id} not found`);
+      if (element.type !== 'CANVAS') throw new Error('Only a canvas has a canvas layout');
+      canvasData = mergeCanvasLayout(
+        canvas,
+        element.canvasData,
+      ) as unknown as Prisma.InputJsonValue;
+    }
+
     return CurriculumGateway.updateElement(id, {
       ...rest,
       ...(type !== undefined ? { type: type as ElementType } : {}),
       ...(durationMinutes !== undefined
         ? { durationMinutes: durationMinutes === null ? null : validateMinutes(durationMinutes) }
         : {}),
+      ...(canvasData !== undefined ? { canvasData } : {}),
+    });
+  }
+
+  /**
+   * Adds an uploaded picture to a canvas's pool.
+   *
+   * Accepts exactly what a course cover photo accepts — the same upload rules,
+   * HEIC converted to JPEG, PDFs refused — because a canvas picture has to
+   * render as a picture. Returns the picture so the editor can place it without
+   * fetching the whole element again.
+   */
+  static async addCanvasImage(elementId: string, file: Express.Multer.File) {
+    const element = await CurriculumGateway.getElementCanvas(elementId);
+    if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
+    if (element.type !== 'CANVAS') throw new Error('Pictures can only be added to a canvas');
+
+    const normalized = await normalizeUpload(file);
+    if (normalized.isPdf) throw new Error('A canvas picture must be an image, not a PDF');
+
+    const upload = {
+      data: normalized.buffer.toString('base64'),
+      mimeType: normalized.mimeType,
+      fileName: file.originalname ? withinLimit(file.originalname, 'fileName', 'file name') : null,
+    };
+    const { canvas, imageId } = addCanvasImage(element.canvasData, upload);
+    await CurriculumGateway.updateElement(elementId, {
+      canvasData: canvas as unknown as Prisma.InputJsonValue,
+    });
+    return { imageId, ...canvas.images[imageId] };
+  }
+
+  /**
+   * Stores an uploaded file on an element that already exists — the image block
+   * an author added and is now filling. Same rules as a section upload: images
+   * become IMAGE (HEIC transcoded), PDFs become PDF, and any linked URL goes.
+   */
+  static async replaceUploadedFile(elementId: string, file: Express.Multer.File) {
+    const element = await CurriculumGateway.getElementCanvas(elementId);
+    if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
+    if (element.type !== 'IMAGE' && element.type !== 'PDF') {
+      throw new Error('Only an image or PDF block takes an uploaded file');
+    }
+
+    const normalized = await normalizeUpload(file);
+
+    return CurriculumGateway.updateElement(elementId, {
+      type: normalized.isPdf ? 'PDF' : 'IMAGE',
+      imageData: normalized.buffer.toString('base64'),
+      imageType: normalized.mimeType,
+      imageUrl: null,
+      fileName: file.originalname ? withinLimit(file.originalname, 'fileName', 'file name') : null,
     });
   }
 

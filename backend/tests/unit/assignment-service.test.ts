@@ -418,7 +418,7 @@ describe('resolveToken — failure reasons', () => {
   };
 
   async function expectReason(assignment: unknown, reason: string) {
-    mockGateway.findByToken.mockResolvedValue(assignment as never);
+    mockGateway.findByTokenHash.mockResolvedValue(assignment as never);
     await expect(AssignmentService.resolveToken('tok')).rejects.toMatchObject({ reason });
   }
 
@@ -427,7 +427,7 @@ describe('resolveToken — failure reasons', () => {
   });
 
   it('reports an unknown token as not-found', async () => {
-    mockGateway.findByToken.mockResolvedValue(null as never);
+    mockGateway.findByTokenHash.mockResolvedValue(null as never);
     await expect(AssignmentService.resolveToken('nope')).rejects.toMatchObject({
       reason: 'not-found',
     });
@@ -511,7 +511,7 @@ describe('resolveToken — failure reasons', () => {
   });
 
   it('accepts a link used recently', async () => {
-    mockGateway.findByToken.mockResolvedValue(baseAssignment as never);
+    mockGateway.findByTokenHash.mockResolvedValue(baseAssignment as never);
     mockGateway.touch.mockResolvedValue({} as never);
     mockAuth.getOrCreateUser.mockResolvedValue({ id: 5, email: 'ada@example.com' } as never);
 
@@ -559,7 +559,7 @@ describe('getSessionUser — closing a completed one-time link', () => {
   });
 
   it('lets them back in once, and records that it has been used', async () => {
-    mockGateway.findByToken.mockResolvedValue(completedLink as never);
+    mockGateway.findByTokenHash.mockResolvedValue(completedLink as never);
 
     await expect(AssignmentService.getSessionUser('tok')).resolves.toMatchObject({
       email: 'ada@example.com',
@@ -569,7 +569,7 @@ describe('getSessionUser — closing a completed one-time link', () => {
   });
 
   it('closes the link on the load after that, and turns the switch off', async () => {
-    mockGateway.findByToken.mockResolvedValue({
+    mockGateway.findByTokenHash.mockResolvedValue({
       ...completedLink,
       resultsSeenAt: new Date(),
     } as never);
@@ -583,7 +583,7 @@ describe('getSessionUser — closing a completed one-time link', () => {
 
   /** A link nobody has finished is left entirely alone. */
   it('does not touch a link that has not been completed', async () => {
-    mockGateway.findByToken.mockResolvedValue({ ...completedLink, completedAt: null } as never);
+    mockGateway.findByTokenHash.mockResolvedValue({ ...completedLink, completedAt: null } as never);
 
     await AssignmentService.getSessionUser('tok');
 

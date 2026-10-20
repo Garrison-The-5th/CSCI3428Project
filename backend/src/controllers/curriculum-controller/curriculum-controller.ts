@@ -14,7 +14,8 @@ import {
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
 import {
-  AUTHOR_ROLES,
+  type CourseReach,
+  courseReach,
   requireAuthor,
 } from '@/controllers/auth-controller/authorization-middleware';
 import {
@@ -45,10 +46,8 @@ function param(req: Request, name: string): string {
 }
 
 /**
- * Whether the caller holds a global authoring role.
- *
- * It no longer means "may reach every course". It widens the scoped listings by
- * exactly the courses that belong to nobody — see
+ * How far the caller reaches: every course for an admin; for an author, the
+ * scoped listings widened by exactly the courses that belong to nobody — see
  * `CurriculumGateway.accessibleCourses`.
  */
 /** Only the two scopes exist; anything else is a bad request, not a new kind. */
@@ -57,8 +56,8 @@ function parseEditScope(value: unknown): EditScope {
   throw new Error('scope must be MODULE or QUESTION');
 }
 
-function isGlobalAuthor(req: AuthenticatedRequest): boolean {
-  return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+function isGlobalAuthor(req: AuthenticatedRequest): CourseReach {
+  return courseReach(req.auth!.roles);
 }
 
 @controller('/curriculum')
@@ -78,7 +77,7 @@ export default class CurriculumController {
    * Courses this person may edit: the ones they created, plus the ones they were
    * named on. Powers the Course Editor page.
    *
-   * A global authoring role no longer widens this to the whole catalogue — it
+   * An admin gets the whole catalogue. The author role alone does not — it
    * adds only the courses left unowned by the ownership backfill.
    */
   @get('/courses/editable')
@@ -86,7 +85,9 @@ export default class CurriculumController {
   async getEditableCourses(req: AuthenticatedRequest, res: Response) {
     const global = isGlobalAuthor(req);
     const courses = await CurriculumService.getEditableCourses(req.user!.id, global);
-    return res.send({ courses, isGlobalAuthor: global });
+    // A plain boolean on the wire: the page asks `=== true`, and an admin's
+    // reach is `'all'`.
+    return res.send({ courses, isGlobalAuthor: Boolean(global) });
   }
 
   @get('/courses/:id/contributors')
@@ -843,6 +844,45 @@ export default class CurriculumController {
       return res.send({ message: 'Element updated successfully', element });
     } catch (error) {
       return fail(res, error, 'Error updating element');
+    }
+  }
+
+  /** Uploads an image or PDF into an existing image block, replacing what it held. */
+  @post('/elements/:id/file')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
+  @use(authenticateAndAttachUser)
+  async uploadElementFile(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).send({ errorMessage: 'No file uploaded' });
+      }
+      const element = await CurriculumService.replaceUploadedFile(param(req, 'id'), req.file);
+      return res.send({ message: 'File added', element });
+    } catch (error) {
+      return fail(res, error, 'Error uploading file');
+    }
+  }
+
+  /**
+   * Uploads a picture onto a canvas. Placing it is the editor's job; this only
+   * stores it, after the same checks a cover photo goes through.
+   */
+  @post('/elements/:id/canvas-images')
+  @use(enforceUploadQuota)
+  @use(mediaUpload.single('file'))
+  @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
+  @use(authenticateAndAttachUser)
+  async uploadCanvasImage(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).send({ errorMessage: 'No file uploaded' });
+      }
+      const image = await CurriculumService.addCanvasImage(param(req, 'id'), req.file);
+      return res.send({ message: 'Picture added', image });
+    } catch (error) {
+      return fail(res, error, 'Error uploading picture');
     }
   }
 

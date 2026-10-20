@@ -28,6 +28,7 @@ import {
   PencilSquareIcon,
   PhotoIcon,
   PlayCircleIcon,
+  PresentationChartBarIcon,
   QuestionMarkCircleIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
@@ -142,6 +143,8 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   const [editingBody, setEditingBody] = useState('');
   /** Modules the learner has folded away. Expanded is the default. */
   const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
+  /** Sections the learner has folded down to their heading. Expanded is the default. */
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
 
   const fetchCourse = useCallback(async () => {
     if (previewCourse || !courseId) return;
@@ -443,6 +446,12 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
         open.delete(moduleId);
         return open;
       });
+      setCollapsedSectionIds((prev) => {
+        if (!prev.has(next.sectionId)) return prev;
+        const open = new Set(prev);
+        open.delete(next.sectionId);
+        return open;
+      });
     },
     [unlockedItemIds, markViewed, course],
   );
@@ -657,6 +666,8 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       <PlayCircleIcon className="w-4 h-4 shrink-0" />
     ) : element.type === 'IMAGE' ? (
       <PhotoIcon className="w-4 h-4 shrink-0" />
+    ) : element.type === 'CANVAS' ? (
+      <PresentationChartBarIcon className="w-4 h-4 shrink-0" />
     ) : (
       <DocumentTextIcon className="w-4 h-4 shrink-0" />
     );
@@ -667,7 +678,9 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       ? plainPreview(element.textContent ?? 'Article', 45) || 'Article'
       : element.type === 'YOUTUBE'
         ? 'Video'
-        : plainPreview(element.fileName ?? element.type, 45);
+        : element.type === 'CANVAS'
+          ? 'Slide'
+          : plainPreview(element.fileName ?? element.type, 45);
 
   /** Tooltip for the prev/next buttons, so you know where they take you. */
   const navLabel = (item: NonNullable<Selection>) =>
@@ -687,6 +700,14 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       const next = new Set(prev);
       if (next.has(moduleId)) next.delete(moduleId);
       else next.add(moduleId);
+      return next;
+    });
+
+  const toggleSection = (sectionId: string) =>
+    setCollapsedSectionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
       return next;
     });
 
@@ -1014,27 +1035,45 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
                     {!collapsed &&
                       group.sections.map((section: CourseSection) => {
                         const unlocked = sectionUnlocked(section.id);
+                        const sectionCollapsed = collapsedSectionIds.has(section.id);
 
                         return (
                           <section key={section.id} className="mb-2">
-                            <div className="flex items-center gap-2 px-2 py-2">
-                              {!unlocked ? (
-                                <LockClosedIcon className="w-4 h-4 shrink-0 text-dark-gray" />
-                              ) : (
-                                sectionFinished(section) && (
-                                  <CheckCircleIcon className="w-4 h-4 shrink-0 text-green" />
-                                )
-                              )}
-                              <h3
-                                className={`min-w-0 flex-1 text-sm font-semibold
-                                ${unlocked ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                            <h3>
+                              <button
+                                type="button"
+                                onClick={() => toggleSection(section.id)}
+                                aria-expanded={!sectionCollapsed}
+                                aria-controls={`section-items-${section.id}`}
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md
+                                  px-2 py-2 text-left hover:bg-white/60"
                               >
-                                {section.number} {section.title}
-                              </h3>
-                              {isNew.section(section.id, section.moduleId) && <NewBadge />}
-                            </div>
+                                <ChevronDownIcon
+                                  className={`w-4 h-4 shrink-0 text-dark-gray transition-transform
+                                  duration-200 ${sectionCollapsed ? '-rotate-90' : ''}`}
+                                />
+                                {!unlocked ? (
+                                  <LockClosedIcon className="w-4 h-4 shrink-0 text-dark-gray" />
+                                ) : (
+                                  sectionFinished(section) && (
+                                    <CheckCircleIcon className="w-4 h-4 shrink-0 text-green" />
+                                  )
+                                )}
+                                <span
+                                  className={`min-w-0 flex-1 text-sm font-semibold
+                                  ${unlocked ? 'text-dark-gray' : 'text-dark-gray/50'}`}
+                                >
+                                  {section.number} {section.title}
+                                </span>
+                                {isNew.section(section.id, section.moduleId) && <NewBadge />}
+                              </button>
+                            </h3>
 
-                            <ul className="flex flex-col">
+                            <ul
+                              id={`section-items-${section.id}`}
+                              hidden={sectionCollapsed}
+                              className="flex flex-col"
+                            >
                               {sectionContent(section).map((item) => {
                                 const asSelection: NonNullable<Selection> =
                                   item.kind === 'element'

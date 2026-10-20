@@ -52,6 +52,7 @@ const AssignmentRoster = ({
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingRemove, setPendingRemove] = useState<Assignment | null>(null);
+  const [pendingLink, setPendingLink] = useState<Assignment | null>(null);
 
   const setBusy = (id: string, busy: boolean) =>
     setBusyIds((prev) => {
@@ -129,8 +130,19 @@ const AssignmentRoster = ({
       'Failed to change the due date',
     );
 
+  /**
+   * Links are stored only as hashes, so the one already sent cannot be shown
+   * again. Copying makes a new one — after asking, because it turns the old
+   * link off.
+   */
   const copy = async (assignment: Assignment) => {
-    const url = assignmentUrl(assignment.token);
+    let url: string;
+    try {
+      url = assignmentUrl(await assignmentApi.issueLink(assignment.id));
+    } catch {
+      onNotify('Failed to make a new link', 'error');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(url);
       setCopiedId(assignment.id);
@@ -236,10 +248,10 @@ const AssignmentRoster = ({
                       .
                     </span>
                     <Button
-                      onClick={() => copy(assignment)}
+                      onClick={() => setPendingLink(assignment)}
                       variant="outline"
                       className="h-9 gap-2 bg-white text-dark-gray hover:bg-light-gray"
-                      title="Copy the link"
+                      title="Make and copy a new link — the one they were sent stops working"
                     >
                       <ClipboardIcon className="w-4 h-4" />
                       {copiedId === assignment.id ? 'Copied' : 'Copy link'}
@@ -256,7 +268,11 @@ const AssignmentRoster = ({
                     disabled={busy}
                     variant="outline"
                     className="h-9 gap-2 bg-white text-dark-gray hover:bg-light-gray"
-                    title="Send the same email again"
+                    title={
+                      assignment.type === 'LINK'
+                        ? 'Email them a new link — the old one stops working'
+                        : 'Send the same email again'
+                    }
                   >
                     <PaperAirplaneIcon className="w-4 h-4" /> Resend
                   </Button>
@@ -316,6 +332,27 @@ const AssignmentRoster = ({
           );
         })}
       </ul>
+
+      <ConfirmDialog
+        open={pendingLink !== null}
+        tone="ask"
+        title="Copy a new link?"
+        confirmLabel="Make new link"
+        message={
+          <>
+            Links are kept only in a form that cannot be read back, so this makes a new link for{' '}
+            <span className="font-semibold">{pendingLink?.email}</span> and copies it.
+            <br />
+            The link they were sent before will stop working.
+          </>
+        }
+        onConfirm={() => {
+          const target = pendingLink;
+          setPendingLink(null);
+          if (target) void copy(target);
+        }}
+        onCancel={() => setPendingLink(null)}
+      />
 
       {/* Removing wipes progress, which is not undoable — so it asks first. */}
       <ConfirmDialog

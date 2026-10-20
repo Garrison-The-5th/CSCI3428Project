@@ -24,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import QuizSetPane from '@/pages/private/admin/editor/quiz-set-pane';
 import { Course, curriculumApi, moduleGroups, moduleTint } from '@/services/curriculum-api';
-import { QUIZ_TYPE_HINTS, QUIZ_TYPE_LABELS, quizApi, QuizType } from '@/services/quiz-api';
+import { QUIZ_TYPE_LABELS, quizApi, QuizType } from '@/services/quiz-api';
 
 interface Props {
   course: Course;
@@ -138,7 +138,6 @@ const QuizPane = ({
     <select
       value={draftFor(key).type}
       onChange={(e) => setDraft(key, { type: e.target.value as QuizType })}
-      title={QUIZ_TYPE_HINTS[draftFor(key).type]}
       className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-dark-gray"
     >
       {IN_SECTION_TYPES.map((type) => (
@@ -168,10 +167,7 @@ const QuizPane = ({
     return (
       <Card className="bg-light-gray">
         <CardContent className="py-16 text-center">
-          <p>
-            This lesson has no sections yet. Add one under Modules, then come back to build its
-            quizzes.
-          </p>
+          <p>This lesson has no sections yet.</p>
         </CardContent>
       </Card>
     );
@@ -220,9 +216,6 @@ const QuizPane = ({
                     >
                       <PlusIcon className="w-5 h-5 stroke-2" /> Add Quiz
                     </Button>
-                    <p className="w-full text-xs text-dark-gray">
-                      {QUIZ_TYPE_HINTS[draftFor(selectedSection.id).type]}
-                    </p>
                   </div>
                 </CardContent>
               )}
@@ -231,7 +224,7 @@ const QuizPane = ({
             {selectedSection.quizzes.length === 0 ? (
               <Card className="bg-light-gray">
                 <CardContent className="py-16 text-center">
-                  <p>No quizzes in this section yet. Add one above.</p>
+                  <p>No quizzes in this section yet.</p>
                 </CardContent>
               </Card>
             ) : (
@@ -325,9 +318,6 @@ const QuizPane = ({
                       className="flex flex-col gap-2 rounded-md border-2 border-dashed
                         border-navy/30 p-2"
                     >
-                      <span className="text-xs text-dark-gray">
-                        Empty module — name a quiz and its first section is made for you.
-                      </span>
                       {typePicker(group.module.id)}
                       <Input
                         value={draftFor(group.module.id).title}

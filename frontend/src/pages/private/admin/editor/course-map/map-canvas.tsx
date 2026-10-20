@@ -676,16 +676,9 @@ const MapCanvas = ({
         </form>
       </div>
 
-      <p className="mb-3 text-sm text-dark-gray">
-        {searchMiss ? (
-          <span className="font-semibold text-danger">No node on this map matches that.</span>
-        ) : (
-          <>
-            Drag the background to look around. Pull a string from a node’s right-hand circle onto
-            another node’s left-hand dot to make it follow on.
-          </>
-        )}
-      </p>
+      {searchMiss && (
+        <p className="mb-3 text-sm font-semibold text-danger">No node on this map matches that.</p>
+      )}
 
       <div
         ref={frame}

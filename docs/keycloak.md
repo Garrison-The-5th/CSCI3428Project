@@ -125,3 +125,52 @@ If you want to use different realm or client names, you'll need to update the fo
 **Important**: If you change the realm name AND plan to use Google OAuth (see Google OAuth Setup section below), you must also update:
 - The Google OAuth redirect URI in Google Cloud Console
 - The redirect URI format will change to: `http://localhost:4000/realms/YOUR_REALM_NAME/broker/oauth2/endpoint`
+
+## Admin role management
+
+The **Users** page has two switches per person, **Author access** and **Admin
+access**. They change the roles in Keycloak itself, so the change is in the
+person's next token (within a few minutes) and anyone looking at the realm sees
+the same lists. Without the setup below the page still shows who holds which
+role, but the switches are turned off.
+
+| Role | Keycloak realm role | What it allows |
+|---|---|---|
+| Author | `contributor` | Create their own courses and quizzes, assign learning, the dashboard — everything except the Users page |
+| Admin | `admin` | Everything an author can do, plus the Users page: accounts and roles |
+
+Being named as an author on one course is separate from both: it lets someone
+edit that course but not create their own, and is set on the course itself.
+
+People given a role the older way — as a client role on `learning-client` (see
+[CMS.md](CMS.md)) — are still recognised, and removing a role from the Users
+page removes both.
+
+1. **Create the realm roles** (skip any that exist): **Realm roles → Create
+   role**, name `admin`, **Save**; then again for `contributor`.
+2. **Create the service client**: **Clients → Create client**
+   - **Client ID**: `learning-admin-api`
+   - **Next** → **Client authentication**: ON · **Service accounts roles**: ✅ ·
+     untick **Standard flow** and **Direct access grants** → **Save**
+3. **Give it permission to manage users**: open the client → **Service accounts
+   roles** tab → **Assign role** → filter by **clients** → pick
+   `realm-management` roles **view-users**, **manage-users**,
+   **view-clients** and **view-realm** → **Assign**. (`view-realm` is what lets
+   it look up the `admin` and `contributor` roles; without it every switch
+   fails with a 403.)
+4. **Copy its secret**: **Credentials** tab → **Client secret**.
+5. **Give the backend the credentials** in the root `.env` (Docker) or
+   `backend/.env` (running locally):
+
+   ```bash
+   KEYCLOAK_SERVICE_CLIENT_ID=learning-admin-api
+   KEYCLOAK_SERVICE_CLIENT_SECRET=<the secret>
+   # Only when running the backend outside Docker:
+   KEYCLOAK_ADMIN_URL=http://localhost:4000
+   ```
+
+6. Recreate the backend (`docker compose up -d backend`).
+
+Someone must have signed in to the app at least once before they can be made
+an admin — until then they have no Keycloak account to give the role to. An
+admin cannot remove their own access; another admin has to.

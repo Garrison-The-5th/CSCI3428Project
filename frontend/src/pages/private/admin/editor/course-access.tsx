@@ -82,13 +82,6 @@ const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
  */
 const looksLikeEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
-/** The note that sits at the top of a column, stating its one rule. */
-const ColumnNote = ({ children }: { children: React.ReactNode }) => (
-  <p className="rounded-lg border border-navy/30 bg-navy/5 p-3 text-xs text-dark-gray">
-    {children}
-  </p>
-);
-
 const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: Props) => {
   const [authors, setAuthors] = useState<Person[]>([]);
   const [authorQuery, setAuthorQuery] = useState('');
@@ -274,9 +267,6 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-xl font-semibold text-dark-gray">{accessTitle}</h2>
-        <p className="text-sm text-dark-gray">
-          Who may edit this {noun}, and who has been given it.
-        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -284,18 +274,9 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
         <Card className="h-fit bg-light-gray shadow-sm">
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">Authors</CardTitle>
-            <p className="text-sm text-dark-gray">
-              Besides you, who can edit this {noun}. It appears on their authoring pages while they
-              are named here, and disappears again when they are removed.
-            </p>
           </CardHeader>
 
           <CardContent className="flex flex-col gap-3">
-            <ColumnNote>
-              An author must have an account. Editing happens behind a sign-in, so anybody named
-              here needs to be able to log in before they can open this {noun}.
-            </ColumnNote>
-
             {canManageAuthors ? (
               <div className="flex flex-col gap-2">
                 <div className="relative">
@@ -361,10 +342,6 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
         <Card className="h-fit bg-light-gray shadow-sm">
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">On platform</CardTitle>
-            <p className="text-sm text-dark-gray">
-              Enrolled on their account. They are emailed a sign-in link and find this {noun} on
-              their Learning page.
-            </p>
           </CardHeader>
 
           {/* A one-time link cannot be enrolled, so the column is put beyond use
@@ -374,11 +351,6 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
           <div className="relative">
             <div className={oneTimeQuiz ? 'pointer-events-none blur-sm select-none' : undefined}>
               <CardContent className="flex flex-col gap-3">
-                <ColumnNote>
-                  The person must already have an account. Only addresses that have signed in appear
-                  here — enrolling anyone else would send them to a sign-in they cannot pass.
-                </ColumnNote>
-
                 <div className="flex flex-col gap-2">
                   <div className="relative">
                     <MagnifyingGlassIcon
@@ -396,19 +368,9 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
                   {results(platformResults, (email) => assign(email, 'PLATFORM'))}
 
                   {platformQuery.trim() && platformResults.length === 0 && (
-                    <p className="text-xs text-dark-gray">
-                      Nobody with an account matches that. If they have never signed in, send them a
-                      link instead.
-                    </p>
+                    <p className="text-xs text-dark-gray">Nobody with an account matches that.</p>
                   )}
                 </div>
-
-                <hr className="h-px border-t-0 bg-gray-300" />
-
-                <p className="text-xs text-dark-gray">
-                  Pick somebody from the search to enrol them. Their deadline comes from the days
-                  remaining set on this {noun}, counted from today.
-                </p>
               </CardContent>
             </div>
 
@@ -418,8 +380,7 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
                   className="rounded-lg border-2 border-navy/30 bg-white/95 p-4 text-center text-sm
                     font-medium text-dark-gray shadow-sm"
                 >
-                  &ldquo;{oneTimeQuiz.title}&rdquo; is a one-time link. It is reached only through
-                  the URL you send, so it can only be handed over by email — use Link only.
+                  &ldquo;{oneTimeQuiz.title}&rdquo; is a one-time link — use Link only.
                 </p>
               </div>
             )}
@@ -430,18 +391,9 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
         <Card className="h-fit bg-light-gray shadow-sm">
           <CardHeader className="p-4">
             <CardTitle className="text-lg text-dark-gray">Link only</CardTitle>
-            <p className="text-sm text-dark-gray">
-              One private URL that opens this {noun} without signing in. It stays off any account.
-            </p>
           </CardHeader>
 
           <CardContent className="flex flex-col gap-3">
-            <ColumnNote>
-              This column takes an email address and nothing else — it does not search the people
-              already here. An address that already has an account is refused: they should be given
-              it on the platform instead.
-            </ColumnNote>
-
             <div className="flex flex-col gap-2">
               <Input
                 type="email"
@@ -473,13 +425,6 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
                 <UserPlusIcon className="w-5 h-5" /> Send link
               </Button>
             </div>
-
-            <hr className="h-px border-t-0 bg-gray-300" />
-
-            <p className="text-xs text-dark-gray">
-              The link is the credential — anyone holding it counts as that person, so treat it like
-              a password.
-            </p>
           </CardContent>
         </Card>
       </div>
@@ -488,10 +433,6 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
       <Card className="bg-light-gray shadow-sm">
         <CardHeader className="p-4">
           <CardTitle className="text-lg text-dark-gray">Assigned</CardTitle>
-          <p className="text-sm text-dark-gray">
-            Everyone this {noun} has been handed to, however they got it. Link assignments have a
-            URL to copy; platform ones do not.
-          </p>
         </CardHeader>
 
         <CardContent className="flex flex-col gap-3">

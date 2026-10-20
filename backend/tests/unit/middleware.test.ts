@@ -449,19 +449,21 @@ describe('requireCourseEditor — the unpublished-changes marker', () => {
 /**
  * Who may reach one particular course.
  *
- * The bug this exists to stop: authoring rights followed from the Keycloak role
- * alone, so holding `admin` opened every other admin's lessons and quizzes. The
- * role now says a person may write content, and the course says whose it is.
+ * The bug this exists to stop: authoring rights followed from the author role
+ * alone, so holding it opened every other author's lessons and quizzes. The
+ * role says a person may write content, and the course says whose it is. Admins
+ * are the exception: they reach every course.
  */
 describe('requireCourseEditor — whose course it is', () => {
   // GET throughout: opening somebody else's lesson is the thing that has to be
   // refused, and a read skips the draft marker, so the plain response double is
   // enough here.
-  const admin = {
-    auth: { roles: ['admin'], email: 'a@b.c', name: 'A' },
+  const author = {
+    auth: { roles: ['contributor'], email: 'a@b.c', name: 'A' },
     user: { id: 1, email: 'a@b.c' },
     method: 'GET',
   };
+  const admin = { ...author, auth: { ...author.auth, roles: ['admin'] } };
 
   const resolve = async () => 'course-1';
 
@@ -470,12 +472,12 @@ describe('requireCourseEditor — whose course it is', () => {
     curriculum.touchDraft.mockResolvedValue({} as never);
   });
 
-  it('refuses an admin who neither made the course nor was named on it', async () => {
+  it('refuses an author who neither made the course nor was named on it', async () => {
     curriculum.canEditCourse.mockResolvedValue(false);
     const res = responseDouble();
     const next = jest.fn() as NextFunction;
 
-    await requireCourseEditor(resolve)(requestDouble(admin) as never, res, next);
+    await requireCourseEditor(resolve)(requestDouble(author) as never, res, next);
 
     expect(res.statusCode).toBe(403);
     expect(next).not.toHaveBeenCalled();
@@ -486,7 +488,7 @@ describe('requireCourseEditor — whose course it is', () => {
     const next = jest.fn() as NextFunction;
 
     await requireCourseEditor(resolve)(
-      requestDouble({ ...admin, auth: { roles: [], email: 'c@d.e' } }) as never,
+      requestDouble({ ...author, auth: { roles: [], email: 'c@d.e' } }) as never,
       responseDouble(),
       next,
     );
@@ -495,10 +497,22 @@ describe('requireCourseEditor — whose course it is', () => {
   });
 
   /**
-   * The one thing the role still buys: courses that predate ownership being
-   * recorded carry no creator, so somebody has to be able to reach them.
+   * The one thing the author role still buys: courses that predate ownership
+   * being recorded carry no creator, so somebody has to be able to reach them.
    */
   it('passes the global-author flag through, so unowned courses stay reachable', async () => {
+    curriculum.canEditCourse.mockResolvedValue(true);
+
+    await requireCourseEditor(resolve)(
+      requestDouble(author) as never,
+      responseDouble(),
+      jest.fn() as NextFunction,
+    );
+
+    expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', true);
+  });
+
+  it('gives an admin reach over every course', async () => {
     curriculum.canEditCourse.mockResolvedValue(true);
 
     await requireCourseEditor(resolve)(
@@ -507,18 +521,40 @@ describe('requireCourseEditor — whose course it is', () => {
       jest.fn() as NextFunction,
     );
 
-    expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', true);
+    expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', 'all');
   });
 
   it('does not extend that flag to someone without an authoring role', async () => {
     curriculum.canEditCourse.mockResolvedValue(true);
 
     await requireCourseEditor(resolve)(
-      requestDouble({ ...admin, auth: { roles: [], email: 'c@d.e' } }) as never,
+      requestDouble({ ...author, auth: { roles: [], email: 'c@d.e' } }) as never,
       responseDouble(),
       jest.fn() as NextFunction,
     );
 
     expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', false);
+  });
+});
+
+describe('CurriculumGateway.accessibleCourses', () => {
+  const { default: RealGateway } = jest.requireActual<{
+    default: typeof CurriculumGateway;
+  }>('@/gateways/curriculum-gateway/curriculum-gateway');
+
+  it('puts no limit on an admin', () => {
+    expect(RealGateway.accessibleCourses(1, 'all')).toEqual({});
+  });
+
+  it('limits an author to their own, ones they are named on, and unowned ones', () => {
+    expect(RealGateway.accessibleCourses(1, true)).toEqual({
+      OR: [{ createdById: 1 }, { contributors: { some: { id: 1 } } }, { createdById: null }],
+    });
+  });
+
+  it('limits anyone else to their own and ones they are named on', () => {
+    expect(RealGateway.accessibleCourses(1, false)).toEqual({
+      OR: [{ createdById: 1 }, { contributors: { some: { id: 1 } } }],
+    });
   });
 });

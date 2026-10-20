@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-09-25
  */
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 import { logSecurityEvent } from '@/config/logger';
 import {
@@ -17,7 +17,7 @@ import {
 } from '@/config/validation';
 import { NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
-import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CourseMapService from '@/services/course-map-service/course-map-service';
@@ -108,6 +108,31 @@ export default class AssignmentService {
   }
 
   /**
+   * What is stored in place of a token. A plain hash is enough — the token is
+   * 256 random bits, so there is nothing to guess and nothing for a salt to
+   * protect against — and it lets a token be found by its hash directly.
+   */
+  static hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Gives a link a fresh token and returns it. The previous URL stops working:
+   * only a hash is kept, so the old token cannot be handed out again, and a
+   * link that has to be shared again is safer replaced than repeated.
+   */
+  static async issueNewLink(id: string): Promise<string> {
+    const assignment = await AssignmentGateway.findById(id);
+    if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);
+    if (assignment.type !== 'LINK') {
+      throw new Error('This person signs in to reach it, so there is no link to share');
+    }
+    const token = AssignmentService.generateToken();
+    await AssignmentGateway.setTokenHash(id, AssignmentService.hashToken(token));
+    return token;
+  }
+
+  /**
    * Refuses to hand out something the recipient could not open.
    *
    * `resolveToken` turns unpublished content into "This training is not
@@ -184,10 +209,22 @@ export default class AssignmentService {
 
     // An explicit type still wins, so the API stays usable directly; the UI
     // stopped sending one and lets this decide.
+    const suited = await AssignmentService.chooseType(email);
     let type =
       data.type === undefined || data.type === null || data.type === ''
-        ? await AssignmentService.chooseType(email)
+        ? suited
         : AssignmentService.parseType(data.type);
+
+    // A link acts as whoever owns the address. For somebody who signs in, that
+    // would make a forwardable URL a second key to their account, so they are
+    // given the work on their account instead. (A one-time quiz still goes by
+    // link below — it has no other way in — and such a link cannot reach their
+    // notes; see `notesOpenTo`.)
+    if (type === 'LINK' && suited === 'PLATFORM') {
+      throw new Error(
+        `${email} has an account — assign it on the platform and they will find it when they sign in`,
+      );
+    }
     const courseId = data.courseId || null;
     const quizId = data.quizId || null;
 
@@ -251,9 +288,11 @@ export default class AssignmentService {
     // Progress is keyed on the User row for this address; make sure it exists.
     await AuthService.getOrCreateUser(email);
 
+    // Kept in memory for the email and the reply; only its hash is stored.
+    const token = AssignmentService.generateToken();
     const assignment = await AssignmentGateway.create({
       type,
-      token: AssignmentService.generateToken(),
+      tokenHash: AssignmentService.hashToken(token),
       email,
       courseId,
       quizId,
@@ -269,18 +308,26 @@ export default class AssignmentService {
       type,
       title,
       kind: courseId ? 'course' : 'quiz',
-      token: assignment.token,
+      token,
       dueDate: assignment.dueDate,
       baseUrl,
     });
 
+    // The token goes back to the author this once, so a link can be copied the
+    // moment it is made. It cannot be read back later.
+    const created: Omit<typeof assignment, 'tokenHash'> & { tokenHash?: string } = {
+      ...assignment,
+    };
+    delete created.tokenHash;
+    const link = type === 'LINK' ? { token } : {};
+
     if (delivery.sent) {
       const now = new Date();
       await AssignmentGateway.markNotified(assignment.id, now, 1);
-      return { ...assignment, notifiedAt: now, delivery };
+      return { ...created, ...link, notifiedAt: now, delivery };
     }
 
-    return { ...assignment, delivery };
+    return { ...created, ...link, delivery };
   }
 
   /**
@@ -404,12 +451,20 @@ export default class AssignmentService {
       title = quiz.title;
     }
 
+    // Only a hash of the old token is kept, so a link is re-sent as a new one;
+    // the URL in the earlier email stops working. A platform assignment's email
+    // carries no token, so its stored one is left alone.
+    const token =
+      assignment.type === 'LINK'
+        ? await AssignmentService.issueNewLink(id)
+        : AssignmentService.generateToken();
+
     const delivery = await EmailService.sendAssignmentEmail({
       to: assignment.email,
       type: assignment.type,
       title,
       kind: assignment.courseId ? 'course' : 'quiz',
-      token: assignment.token,
+      token,
       dueDate: assignment.dueDate,
       resend: true,
       baseUrl,
@@ -470,7 +525,7 @@ export default class AssignmentService {
   static async resolveToken(token: string) {
     if (!token) throw new AssignmentError('not-found');
 
-    const assignment = await AssignmentGateway.findByToken(token);
+    const assignment = await AssignmentGateway.findByTokenHash(AssignmentService.hashToken(token));
     if (!assignment) throw new AssignmentError('not-found');
 
     // A platform assignment's token is an internal handle, not a credential. It
@@ -813,9 +868,26 @@ export default class AssignmentService {
 
   // ---- Notes, for the holder of a course link ----
 
+  /**
+   * Whether a link session may touch notes. Not when the address belongs to
+   * somebody who signs in: a link acts as that person's record, and their notes
+   * are private to their account — anyone forwarded the link could otherwise
+   * read or rewrite them. They see their notes when they sign in.
+   */
+  private static notesOpenTo(user: { lastSignInAt: Date | null }): boolean {
+    return user.lastSignInAt === null;
+  }
+
+  private static assertNotesOpen(user: { lastSignInAt: Date | null }) {
+    if (!AssignmentService.notesOpenTo(user)) {
+      throw new Error('Your notes are kept on your account — sign in to see and edit them.');
+    }
+  }
+
   /** The guest's own notes on one of their assigned courses. */
   static async getNotes(token: string, courseId: string) {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
+    if (!AssignmentService.notesOpenTo(user)) return [];
     if (!courses.some((course) => course.id === courseId)) return [];
     return CurriculumGateway.getNotes(user.id, courseId);
   }
@@ -827,6 +899,7 @@ export default class AssignmentService {
     sectionId?: string | null,
   ) {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
+    AssignmentService.assertNotesOpen(user);
     if (!courses.some((course) => course.id === courseId)) {
       throw new Error('that course is not part of your assigned learning');
     }
@@ -842,6 +915,7 @@ export default class AssignmentService {
 
   static async updateNote(token: string, noteId: string, body: string) {
     const { user } = await AssignmentService.resolveToken(token);
+    AssignmentService.assertNotesOpen(user);
     if (!body?.trim()) throw new Error('note cannot be empty');
     // Scoped by userId, so a link cannot edit anyone else's note.
     const { count } = await CurriculumGateway.updateNote(noteId, user.id, body.trim());
@@ -850,6 +924,7 @@ export default class AssignmentService {
 
   static async deleteNote(token: string, noteId: string) {
     const { user } = await AssignmentService.resolveToken(token);
+    AssignmentService.assertNotesOpen(user);
     // Scoped by userId, so a link cannot delete anyone else's note.
     const { count } = await CurriculumGateway.deleteNote(noteId, user.id);
     if (count === 0) throw new NotFoundError(`Note with ID ${noteId} not found`);
@@ -1016,7 +1091,7 @@ export default class AssignmentService {
    * Scoped by the same rule as the course itself: someone else's programme is
    * not summarised on your dashboard.
    */
-  static async listAssignedCourses(userId: number, isGlobalAuthor: boolean) {
+  static async listAssignedCourses(userId: number, isGlobalAuthor: CourseReach) {
     const [assigned, reachable] = await Promise.all([
       AssignmentGateway.listAssignedCourseIds(),
       CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor),

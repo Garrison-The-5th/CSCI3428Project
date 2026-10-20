@@ -47,6 +47,9 @@ const ALLOWED_TAGS = [
   'td',
 ];
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const RGB_COLOR = /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/i;
+
 export function sanitizeRichText(html: string): string {
   return sanitizeHtml(html, {
     allowedTags: ALLOWED_TAGS,
@@ -66,15 +69,24 @@ export function sanitizeRichText(html: string): string {
       th: ['colspan', 'rowspan', 'style'],
     },
     // Only these style properties survive, so style="" cannot smuggle anything.
+    // Colours are hex or rgb() only — no url(), no expression(), no keywords
+    // beyond `transparent`, which is how a table's lines are hidden.
     allowedStyles: {
       '*': {
-        'font-size': [/^\d+(?:\.\d+)?(?:px|em|rem|%)$/],
+        'font-size': [/^\d+(?:\.\d+)?(?:px|pt|em|rem|%)$/],
+        color: [HEX_COLOR, RGB_COLOR],
+        'background-color': [HEX_COLOR, RGB_COLOR],
+        'border-color': [HEX_COLOR, RGB_COLOR, /^transparent$/],
         'font-family': [/^[\w\s,'"-]+$/],
         'font-weight': [/^(?:bold|normal|[1-9]00)$/],
         'font-style': [/^(?:italic|normal)$/],
         'text-align': [/^(?:left|right|center|justify)$/],
         'text-decoration': [/^(?:underline|line-through|none)$/],
       },
+      // Columns and rows the author has dragged to a size.
+      ...Object.fromEntries(
+        ['td', 'th'].map((tag) => [tag, { width: [/^\d{1,4}px$/], height: [/^\d{1,4}px$/] }]),
+      ),
     },
     allowedSchemes: ['http', 'https', 'mailto'],
     // Anything opened in a new tab must not be able to reach back at us.

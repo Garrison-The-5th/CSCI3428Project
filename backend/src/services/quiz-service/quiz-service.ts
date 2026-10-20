@@ -15,7 +15,7 @@ import {
 } from '@/config/validation';
 import { ConflictError, NotFoundError } from '@/controllers/http-errors';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
-import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import CourseMapService from '@/services/course-map-service/course-map-service';
 import EnrolmentService, { dueFor } from '@/services/enrolment-service/enrolment-service';
@@ -485,15 +485,15 @@ export default class QuizService {
    * sits in — so the access decision is made once over courses and the quiz
    * queries are scoped to what comes back.
    */
-  static async getQuizzesForAuthor(userId: number, isGlobalAuthor: boolean) {
+  static async getQuizzesForAuthor(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    return QuizGateway.getQuizzesForAuthor(courseIds, isGlobalAuthor);
+    return QuizGateway.getQuizzesForAuthor(courseIds, Boolean(isGlobalAuthor));
   }
 
   /** The quizzes in this person's recycle bin. */
-  static async getDeletedQuizzes(userId: number, isGlobalAuthor: boolean) {
+  static async getDeletedQuizzes(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    return QuizGateway.getDeletedQuizzes(courseIds, isGlobalAuthor);
+    return QuizGateway.getDeletedQuizzes(courseIds, Boolean(isGlobalAuthor));
   }
 
   static getQuizById(id: string, live = false) {
@@ -504,6 +504,56 @@ export default class QuizService {
    * One quiz, if this person can reach it — answers stripped. Unreachable is
    * reported as not found, so this cannot be used to enumerate quizzes.
    */
+  /**
+   * Refuses a quiz run to somebody it was never given.
+   *
+   * Opening, starting and submitting used to check only that the quiz was
+   * published, so anyone signed in who knew a quiz's id could sit it — a
+   * one-time quiz meant for one person, or an exam that shows its answer key
+   * afterwards. A run is now allowed only for:
+   *
+   * - a quiz assigned to them on its own;
+   * - a quiz inside a course assigned to them, as that course is published;
+   * - a quiz they could edit — so an author can try their own work. A quiz in
+   *   a course follows that course's editors; a standalone one, global authors,
+   *   matching the rule for editing it.
+   *
+   * Answered as "not found" either way, so the check does not confirm the id.
+   */
+  static async assertCanRun(
+    user: { id: number; email: string },
+    quizId: string,
+    isGlobalAuthor: CourseReach,
+  ) {
+    const enrolment = await EnrolmentService.forEmail(user.email);
+    if (enrolment.quizIds.has(quizId)) return;
+
+    const snapshots = await PublicationService.getLiveSnapshots([...enrolment.courseIds]);
+    const inAssignedCourse = snapshots.some((snapshot) =>
+      snapshot.sections.some((section) =>
+        (section.quizzes ?? []).some((quiz) => quiz.id === quizId),
+      ),
+    );
+    if (inAssignedCourse) return;
+
+    const quiz = await QuizGateway.getQuizById(quizId, true);
+    if (quiz) {
+      if (!quiz.sectionId) {
+        if (isGlobalAuthor) return;
+      } else {
+        const section = await CurriculumGateway.getSectionById(quiz.sectionId);
+        if (
+          section &&
+          (await CurriculumGateway.canEditCourse(user.id, section.courseId, isGlobalAuthor))
+        ) {
+          return;
+        }
+      }
+    }
+
+    throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+  }
+
   static async getQuizForLearner(email: string, id: string) {
     const reachable = await QuizService.getQuizzesForLearner(email);
     return reachable.find((quiz) => quiz.id === id) ?? null;
@@ -758,15 +808,15 @@ export default class QuizService {
     return QuizGateway.hardDeleteQuiz(id);
   }
 
-  static async restoreAllQuizzes(userId: number, isGlobalAuthor: boolean) {
+  static async restoreAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    const { count } = await QuizGateway.restoreAllQuizzes(courseIds, isGlobalAuthor);
+    const { count } = await QuizGateway.restoreAllQuizzes(courseIds, Boolean(isGlobalAuthor));
     return count;
   }
 
-  static async purgeAllQuizzes(userId: number, isGlobalAuthor: boolean) {
+  static async purgeAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    const { count } = await QuizGateway.purgeQuizzes(courseIds, isGlobalAuthor);
+    const { count } = await QuizGateway.purgeQuizzes(courseIds, Boolean(isGlobalAuthor));
     return count;
   }
 

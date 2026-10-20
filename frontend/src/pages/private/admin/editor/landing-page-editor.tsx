@@ -220,7 +220,6 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
             onChange={(e) => setDraft({ ...draft, shortDescription: e.target.value })}
             className={inputClass}
           />,
-          'The single line shown under the title.',
         )}
 
         {field(
@@ -308,10 +307,8 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
               className={`${inputClass} max-w-32`}
             />
             <span className="max-w-56 text-xs font-normal text-dark-gray">
-              How long a learner gets once this is assigned to them. Covers every quiz inside it too
-              — they fall due with the course.
               {dueIfAssignedToday(draft.daysRemaining) &&
-                ` Assigned today, it would be due ${dueIfAssignedToday(draft.daysRemaining)}` +
+                `Assigned today, it would be due ${dueIfAssignedToday(draft.daysRemaining)}` +
                   ' at 11:59 PM.'}
             </span>
           </label>
@@ -336,7 +333,6 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
               )
             }
             label="Lock after the due date"
-            hint="Off, and it is still marked overdue but can still be finished"
           />
 
           {/*
@@ -361,7 +357,6 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
                 )
               }
               label="Unlock sections in order"
-              hint="Each section stays locked until the one before is finished"
             />
           )}
         </div>

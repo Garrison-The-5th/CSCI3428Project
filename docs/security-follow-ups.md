@@ -193,3 +193,28 @@ has no field for it.
 
 Adding `altText` to `Element` is a migration and an editor field, and is
 prerequisite to any real accessibility claim.
+
+## 10. October 2026 security sweep
+
+Fixed in code:
+
+- **Identity is bound to Keycloak's `sub`, not the email.** `User.keycloakSubject`
+  is set on first sign-in; an email changed in Keycloak only follows when
+  verified and unclaimed. A sign-in whose email belongs to another bound account
+  gets a 403. `REQUIRE_VERIFIED_EMAIL=true` also refuses unverified claims on
+  never-signed-in records — turn it on once the realm verifies emails.
+- **Only `learning-client` tokens are accepted** (`KEYCLOAK_CLIENT_ID`).
+- **Quiz runs require an assignment** (or edit rights on the quiz).
+- **Assignment links are stored as SHA-256 hashes.** Copy link and Resend issue a
+  new link; the old one stops working. Existing links were hashed in place.
+- **No links to account holders**, and a one-time-quiz link for one cannot reach
+  their notes.
+- **Production email links** use `APP_BASE_URL`, or a request host listed in
+  `APP_ALLOWED_HOSTS` — never an arbitrary Host header.
+- **Page security headers:** a build-time CSP meta tag (vite.config.ts) and
+  `frame-ancestors`/`X-Frame-Options`/`nosniff` from nginx.
+- **Postgres** is published on 127.0.0.1 only. **`npm audit fix`** applied.
+
+Still open: Keycloak realm settings (email editing and verification, brute-force
+detection, direct access grants, production mode) and the low-severity items —
+tracked outside the repo.

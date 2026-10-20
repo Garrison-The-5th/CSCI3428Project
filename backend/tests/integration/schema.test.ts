@@ -122,15 +122,15 @@ describeWithDatabase('schema validation', () => {
     await expect(prisma.user.create({ data: { email: 'unique@example.com' } })).rejects.toThrow();
   });
 
-  it('enforces one assignment token globally', async () => {
+  it('enforces one assignment token hash globally', async () => {
     const course = await prisma.course.create({ data: { title: 'Token test' } });
     await prisma.assignment.create({
-      data: { token: 'shared-token', email: 'a@example.com', courseId: course.id },
+      data: { tokenHash: 'shared-token', email: 'a@example.com', courseId: course.id },
     });
 
     await expect(
       prisma.assignment.create({
-        data: { token: 'shared-token', email: 'b@example.com', courseId: course.id },
+        data: { tokenHash: 'shared-token', email: 'b@example.com', courseId: course.id },
       }),
     ).rejects.toThrow();
   });
@@ -251,7 +251,7 @@ describeWithDatabase('foreign key integrity', () => {
     const course = await prisma.course.create({ data: { title: 'Assigner test' } });
     const assignment = await prisma.assignment.create({
       data: {
-        token: 'assigner-token',
+        tokenHash: 'assigner-token',
         email: 'learner@example.com',
         courseId: course.id,
         assignedById: assigner.id,

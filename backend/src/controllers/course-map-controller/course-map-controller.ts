@@ -11,7 +11,10 @@ import {
   authenticateAndAttachUser,
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
-import { AUTHOR_ROLES } from '@/controllers/auth-controller/authorization-middleware';
+import {
+  type CourseReach,
+  courseReach,
+} from '@/controllers/auth-controller/authorization-middleware';
 import {
   fromCourseParam,
   fromNodeParam,
@@ -37,8 +40,8 @@ function param(req: Request, name: string): string {
   return String(req.params[name]);
 }
 
-function isGlobalAuthor(req: AuthenticatedRequest): boolean {
-  return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+function isGlobalAuthor(req: AuthenticatedRequest): CourseReach {
+  return courseReach(req.auth!.roles);
 }
 
 @controller('/course-map')
