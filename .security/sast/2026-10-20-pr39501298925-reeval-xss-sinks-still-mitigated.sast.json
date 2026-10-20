@@ -1,0 +1,67 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-10-20-pr39501298925-reeval-xss-sinks-still-mitigated.sast.json",
+  "version": 1,
+  "timestamp": "2026-10-20T21:43:30.013Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "39501298925"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:ad1daf9f0a2c",
+        "location": {
+          "file": "frontend/src/components/common/element-view.tsx",
+          "start_line": 312,
+          "end_line": 312,
+          "commit_sha": "24a97c3ebac527dbb5a58ebca6d831d0b4a9680a"
+        }
+      },
+      "status": "not_affected",
+      "justification": "inline_mitigations_already_exist",
+      "impact_statement": "REEVALUATE (touched): merged PR #44 edited element-view.tsx, so the finding resurfaced. Re-verified against current code: the dangerouslySetInnerHTML sink at element-view.tsx:312 still reads `element.textContent`, and the openLinksInNewTab click handler added in this file only calls `window.open(link.href, '_blank', 'noopener,noreferrer')` on anchor clicks — it does not construct HTML or widen attacker reach. The inline mitigation that justified the prior disposition is still in place: lesson text passes through `sanitizeRichText` (backend/src/config/rich-text.ts:53, backed by `sanitize-html`) on write — called from curriculum-service.ts:1267 and :1356 before storage. Re-confirmed not_affected with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-01-18",
+      "references": [
+        "https://semgrep.dev/r/typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml"
+      ]
+    },
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 533,
+          "end_line": 533,
+          "commit_sha": "24a97c3ebac527dbb5a58ebca6d831d0b4a9680a"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "REEVALUATE (touched): merged PR #44 edited curriculum-controller.ts, so the finding resurfaced. Re-verified against current code at line 533: `res.send(result)` where `result` is the return value of EditLeaseService.release or EditLeaseService.releaseAll (edit-lease-service.ts:82-91). release returns `{released: boolean}` (`count > 0`), releaseAll returns `{released: number}` (Prisma updateMany count). Neither payload contains any user-supplied string — the two literal keys and primitive values are entirely server-constructed. `res.send` on an object auto-serialises to JSON with Content-Type application/json, which a browser cannot render as HTML. Original disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-01-18",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
