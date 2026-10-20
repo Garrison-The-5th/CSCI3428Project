@@ -16,6 +16,11 @@ datasource db {
 model User {
   id                Int                 @id @default(autoincrement())
   email             String              @unique
+  /// Keycloak's fixed id for this person (the token's `sub`), set on their
+  /// first sign-in. Identity is matched on this, never on the email alone: a
+  /// Keycloak user can edit their own email, and matching on it would let them
+  /// step into anyone else's record by typing that person's address.
+  keycloakSubject   String?             @unique
   name              String?
   role              String?             @default("user")
   subscribed        Boolean             @default(false)
@@ -296,9 +301,11 @@ enum AssignmentType {
 model Assignment {
   id                String         @id @default(uuid())
   type              AssignmentType @default(LINK)
-  /// High-entropy random string. Appears in the public URL for a LINK assignment;
-  /// held but never published for a PLATFORM one.
-  token             String         @unique
+  /// SHA-256 (hex) of the link's token. The token itself appears only in the
+  /// URL that is emailed or copied, and is never stored: a copy of this table
+  /// must not be a working key to every guest's training. A link can be
+  /// re-issued, which replaces this and turns the old URL off.
+  tokenHash         String         @unique
   email             String
   courseId          String?
   course            Course?        @relation(fields: [courseId], references: [id], onDelete: Cascade)

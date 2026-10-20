@@ -280,17 +280,6 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
             <h2 className="text-lg font-semibold text-dark-gray">Directed learning</h2>
           </div>
 
-          <p className="max-w-2xl text-sm text-dark-gray">
-            Turn this on and the course stops reading straight through. You arrange its sections
-            into nodes on a map, and each layer gets a quiz asking the learner which branches apply
-            to them — so two people on this course can be given entirely different training.
-          </p>
-          <p className="max-w-2xl text-sm text-dark-gray">
-            Once it is on, every section in this course has to be placed on the map before the
-            course can be published. Sections you bring in from other courses do not: taking three
-            of a course’s four sections is the point of bringing one in.
-          </p>
-
           <ToggleSwitch
             checked={false}
             label="Build this course from a map"
@@ -315,7 +304,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
             <p className="text-sm text-dark-gray">
               {map.stagedAt
                 ? `Last staged ${new Date(map.stagedAt).toLocaleString()}`
-                : 'Not staged yet — press Stage to course mapping to bring your content across.'}
+                : 'Not staged yet'}
               {map.stagedAt && map.needsStaging && (
                 <>
                   {' · '}

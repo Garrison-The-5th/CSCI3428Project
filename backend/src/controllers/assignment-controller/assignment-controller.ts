@@ -12,10 +12,7 @@ import {
   authenticateAndAttachUser,
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
-import {
-  AUTHOR_ROLES,
-  requireAuthor,
-} from '@/controllers/auth-controller/authorization-middleware';
+import { courseReach, requireAuthor } from '@/controllers/auth-controller/authorization-middleware';
 import {
   fromAssignmentParam,
   fromCourseOrQuizBody,
@@ -73,7 +70,7 @@ export default class AssignmentController {
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
   async assignedCourses(req: AuthenticatedRequest, res: Response) {
-    const global = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+    const global = courseReach(req.auth!.roles);
     const courses = await AssignmentService.listAssignedCourses(req.user!.id, global);
     return res.send({ courses });
   }
@@ -206,6 +203,23 @@ export default class AssignmentController {
   }
 
   /** Sends the same message again, on demand. */
+  /**
+   * Issues a fresh link for a guest and returns its token, for the roster's
+   * Copy link button. Links are stored only as hashes, so the old one cannot be
+   * shown again; it stops working the moment this one is made.
+   */
+  @post('/:id/link')
+  @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
+  @use(authenticateAndAttachUser)
+  async issueLink(req: AuthenticatedRequest, res: Response) {
+    try {
+      const token = await AssignmentService.issueNewLink(param(req as Request, 'id'));
+      return res.send({ message: 'New link issued', token });
+    } catch (error) {
+      return fail(res, error, 'Error issuing a new link');
+    }
+  }
+
   @post('/:id/resend')
   @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)

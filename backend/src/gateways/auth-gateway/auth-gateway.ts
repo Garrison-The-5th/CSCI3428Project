@@ -124,6 +124,20 @@ export default class AuthGateway {
     return prisma.user.update({ where: { id }, data: { role } });
   }
 
+  /**
+   * Deletes the person and everything that is theirs. Progress, attempts,
+   * sessions, notes, completions, choices and edit leases cascade from the row;
+   * assignments are keyed by address rather than by row, so they go explicitly.
+   * Content they wrote or published stays, with the credit set to nobody.
+   */
+  static async deleteUser(id: number, email: string) {
+    const [assignments] = await prisma.$transaction([
+      prisma.assignment.deleteMany({ where: { email: { equals: email, mode: 'insensitive' } } }),
+      prisma.user.delete({ where: { id } }),
+    ]);
+    return { assignmentsDeleted: assignments.count };
+  }
+
   static markSignedIn(id: number) {
     return prisma.user.update({ where: { id }, data: { lastSignInAt: new Date() } });
   }
@@ -134,7 +148,24 @@ export default class AuthGateway {
     });
   }
 
-  static async createUser(data: { email: string; name: string | null }): Promise<User> {
+  static getUserBySubject(keycloakSubject: string): Promise<User | null> {
+    return prisma.user.findUnique({ where: { keycloakSubject } });
+  }
+
+  /** Ties a row to the Keycloak account that signed in as it, for good. */
+  static bindSubject(id: number, keycloakSubject: string): Promise<User> {
+    return prisma.user.update({ where: { id }, data: { keycloakSubject } });
+  }
+
+  static setEmail(id: number, email: string): Promise<User> {
+    return prisma.user.update({ where: { id }, data: { email } });
+  }
+
+  static async createUser(data: {
+    email: string;
+    name: string | null;
+    keycloakSubject?: string;
+  }): Promise<User> {
     return await prisma.user.create({
       data,
     });

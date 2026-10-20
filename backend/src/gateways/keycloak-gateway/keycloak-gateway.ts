@@ -228,6 +228,17 @@ export default class KeycloakGateway {
     return match?.id ?? null;
   }
 
+  /**
+   * Removes the account from the realm, so it can no longer sign in. An account
+   * that is already gone counts as done: a retry after a half-finished delete
+   * must not fail on the half that worked.
+   */
+  static async deleteUser(userId: string): Promise<void> {
+    await KeycloakGateway.optional(() =>
+      KeycloakGateway.api(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+    );
+  }
+
   /** The realm roles a user holds directly, by name. */
   static async userRealmRoles(userId: string): Promise<string[]> {
     const roles = await KeycloakGateway.api<RoleRepresentation[]>(

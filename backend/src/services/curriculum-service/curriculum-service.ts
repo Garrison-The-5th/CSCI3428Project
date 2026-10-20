@@ -21,7 +21,7 @@ import {
   withinLimit,
 } from '@/config/validation';
 import { NotFoundError } from '@/controllers/http-errors';
-import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CourseMapService from '@/services/course-map-service/course-map-service';
@@ -294,11 +294,11 @@ export default class CurriculumService {
   /**
    * Author view: drafts included, and only what this person may edit.
    *
-   * `isGlobalAuthor` no longer means "everything". It admits the unowned courses
-   * that predate the ownership column and nothing more — see
-   * `CurriculumGateway.accessibleCourses`.
+   * `isGlobalAuthor` is `'all'` for an admin, who sees every course. For an
+   * author it admits the unowned courses that predate the ownership column and
+   * nothing more — see `CurriculumGateway.accessibleCourses`.
    */
-  static getCoursesForAuthor(userId: number, isGlobalAuthor: boolean) {
+  static getCoursesForAuthor(userId: number, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
@@ -485,7 +485,7 @@ export default class CurriculumService {
 
   // ---- Per-course contributors ----
 
-  static getEditableCourses(userId: number, isGlobalAuthor: boolean) {
+  static getEditableCourses(userId: number, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
@@ -518,7 +518,7 @@ export default class CurriculumService {
    * on it. A global authoring role adds only the unowned courses that predate
    * ownership being recorded.
    */
-  static canEditCourse(userId: number, courseId: string, isGlobalAuthor: boolean) {
+  static canEditCourse(userId: number, courseId: string, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.canEditCourse(userId, courseId, isGlobalAuthor);
   }
 
@@ -652,7 +652,7 @@ export default class CurriculumService {
    * what comes back can never contain something that should already have expired.
    * `index.ts` runs the same sweep on a timer for the case where nobody looks.
    */
-  static async getDeletedItems(userId: number, isGlobalAuthor: boolean) {
+  static async getDeletedItems(userId: number, isGlobalAuthor: CourseReach) {
     await CurriculumService.purgeExpired();
 
     // One access decision for the whole bin, so a course and the sections that
@@ -720,7 +720,7 @@ export default class CurriculumService {
   }
 
   /** Empties the bin back into place, for this person's courses only. */
-  static async restoreAll(userId: number, isGlobalAuthor: boolean) {
+  static async restoreAll(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
 
     // Outermost first: restoring a section whose module is still deleted would
@@ -740,7 +740,7 @@ export default class CurriculumService {
     return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
-  static async purgeAll(userId: number, isGlobalAuthor: boolean) {
+  static async purgeAll(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
 
     // Deleting a course cascades to its modules and sections, so work outward in
@@ -1413,6 +1413,29 @@ export default class CurriculumService {
       canvasData: canvas as unknown as Prisma.InputJsonValue,
     });
     return { imageId, ...canvas.images[imageId] };
+  }
+
+  /**
+   * Stores an uploaded file on an element that already exists — the image block
+   * an author added and is now filling. Same rules as a section upload: images
+   * become IMAGE (HEIC transcoded), PDFs become PDF, and any linked URL goes.
+   */
+  static async replaceUploadedFile(elementId: string, file: Express.Multer.File) {
+    const element = await CurriculumGateway.getElementCanvas(elementId);
+    if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
+    if (element.type !== 'IMAGE' && element.type !== 'PDF') {
+      throw new Error('Only an image or PDF block takes an uploaded file');
+    }
+
+    const normalized = await normalizeUpload(file);
+
+    return CurriculumGateway.updateElement(elementId, {
+      type: normalized.isPdf ? 'PDF' : 'IMAGE',
+      imageData: normalized.buffer.toString('base64'),
+      imageType: normalized.mimeType,
+      imageUrl: null,
+      fileName: file.originalname ? withinLimit(file.originalname, 'fileName', 'file name') : null,
+    });
   }
 
   static deleteElement(id: string) {

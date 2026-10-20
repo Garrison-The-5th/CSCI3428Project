@@ -1250,16 +1250,9 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
               justify-center gap-1 text-center text-sm text-dark-gray/70"
           >
             <p className="font-semibold">An empty canvas</p>
-            <p>Drag pictures here, or add a text box or a shape from the toolbar.</p>
           </div>
         )}
       </div>
-
-      <p className="text-xs text-dark-gray">
-        Drag to move · drag a node to resize (Shift{' '}
-        {selected?.kind === 'image' ? 'frees the proportions' : 'keeps the proportions'}) · drag the
-        round node to rotate · double-click text to edit · arrows nudge · Delete removes
-      </p>
     </div>
   );
 };

@@ -10,7 +10,7 @@ import { NextFunction, Response } from 'express';
 import { clientAddress } from '@/config/client-address';
 import { logger, logSecurityEvent } from '@/config/logger';
 import { AuthenticatedRequest } from '@/controllers/auth-controller/auth-middleware';
-import { AUTHOR_ROLES } from '@/controllers/auth-controller/authorization-middleware';
+import { courseReach } from '@/controllers/auth-controller/authorization-middleware';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
@@ -23,11 +23,11 @@ import EditAttributionService, {
  * Guards access to a course's content, whether reading it in the editor or
  * changing it.
  *
- * Two ways to pass: you created the course, or you were named on it as an
- * author. A Keycloak role is not one of them — `admin` says this person may
- * write learning content, not that they may open somebody else's. What the role
- * still buys is the courses that predate ownership being recorded and could not
- * be attributed to anyone; see `CurriculumGateway.accessibleCourses`.
+ * Three ways to pass: you created the course, you were named on it as an
+ * author, or you are an admin, who reaches every course. The author role alone
+ * is not enough — it says this person may write learning content, not that they
+ * may open somebody else's. What it still buys is the courses that predate
+ * ownership being recorded; see `CurriculumGateway.accessibleCourses`.
  *
  * Every mutation names something inside a course — a section, an element, a quiz —
  * so the caller supplies a resolver that maps the request back to a course id.
@@ -212,7 +212,7 @@ export function requireCourseEditor(
       return res.status(401).send({ errorMessage: 'Unauthorized Request' });
     }
 
-    const isGlobalAuthor = AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+    const isGlobalAuthor = courseReach(req.auth!.roles);
 
     try {
       // Resolved even for a global author, who needs no permission check: the

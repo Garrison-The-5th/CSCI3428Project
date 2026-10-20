@@ -10,6 +10,9 @@ import { NextFunction, Response } from 'express';
 import { clientAddress } from '@/config/client-address';
 import { logSecurityEvent } from '@/config/logger';
 import { AuthenticatedRequest } from '@/controllers/auth-controller/auth-middleware';
+import type { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
+
+export type { CourseReach };
 
 export function requireRole(requiredRole: string) {
   return requireAnyRole([requiredRole]);
@@ -64,3 +67,12 @@ export const AUTHOR_ROLES = ['admin', 'contributor'];
  * contributor on that one course but holding no global role.
  */
 export const requireAuthor = () => requireAnyRole(AUTHOR_ROLES);
+
+/**
+ * How far past their own courses somebody reaches: every course for an admin,
+ * the unowned ones too for an author. See `CourseReach`.
+ */
+export function courseReach(roles: string[]): CourseReach {
+  if (roles.includes('admin')) return 'all';
+  return AUTHOR_ROLES.some((role) => roles.includes(role));
+}

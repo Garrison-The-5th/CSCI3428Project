@@ -12,7 +12,7 @@ import {
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
 import { requireAuthor, requireRole } from '@/controllers/auth-controller/authorization-middleware';
-import { controller, get, post, put, use } from '@/controllers/decorators';
+import { controller, del, get, post, put, use } from '@/controllers/decorators';
 import { fail } from '@/controllers/http-errors';
 import { rateLimit } from '@/controllers/middleware/rate-limit';
 import AdminAccessService, {
@@ -58,6 +58,33 @@ export default class AuthController {
   @use(authenticateAndAttachUser)
   async setAuthor(req: AuthenticatedRequest, res: Response) {
     return AuthController.changeRole(req, res, 'author');
+  }
+
+  /**
+   * Deletes somebody's account — their Keycloak login, and every record of
+   * them here: progress, quiz results, notes, completions and assignments.
+   * Content they wrote stays, uncredited. Cannot be undone.
+   */
+  @del('/users/:id')
+  @use(requireRole('admin'))
+  @use(authenticateAndAttachUser)
+  async deleteUser(req: AuthenticatedRequest, res: Response) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send({ errorMessage: 'A valid user id is required' });
+    }
+    try {
+      const result = await AdminAccessService.deleteUser(req.user!, id);
+      return res.send({
+        message: result.keycloakDeleted
+          ? 'Account and data deleted'
+          : 'Data deleted. Their Keycloak login could not be removed from here, so remove it ' +
+            'in Keycloak or they can sign in again (to an empty account).',
+        ...result,
+      });
+    } catch (error) {
+      return fail(res, error, 'Error deleting user');
+    }
   }
 
   private static async changeRole(req: AuthenticatedRequest, res: Response, role: ManagedRole) {

@@ -91,6 +91,7 @@ export type SecurityEvent =
   | 'upload.rejected'
   | 'data.exported'
   | 'data.erased'
+  | 'user.deleted'
   | 'role.granted'
   | 'role.revoked';
 

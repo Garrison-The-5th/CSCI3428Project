@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     ports:
-      - '${DB_PORT}:5432'
+      - '127.0.0.1:${DB_PORT}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -76,6 +76,14 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-learningapp}
       KEYCLOAK_SERVICE_CLIENT_ID: ${KEYCLOAK_SERVICE_CLIENT_ID:-}
       KEYCLOAK_SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICE_CLIENT_SECRET:-}
+      # Security switches — see docs/security-follow-ups.md.
+      # Refuse a sign-in that would claim a never-used record with an unverified
+      # email. Turn on once Keycloak verifies emails.
+      REQUIRE_VERIFIED_EMAIL: ${REQUIRE_VERIFIED_EMAIL:-false}
+      # In production, email links use APP_BASE_URL, or a request host listed here.
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}
+      # Only tokens issued to this Keycloak client are accepted.
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-learning-client}
 
 
   frontend:

@@ -215,3 +215,65 @@ describe('AdminAccessService.syncFromToken', () => {
     expect(auth.setRole).not.toHaveBeenCalled();
   });
 });
+
+describe('AdminAccessService.deleteUser', () => {
+  beforeEach(() => {
+    auth.deleteUser.mockReset();
+    auth.deleteUser.mockResolvedValue({ assignmentsDeleted: 2 });
+  });
+
+  it('refuses to let an admin delete themselves', async () => {
+    auth.getUserById.mockResolvedValue(signedIn({ id: 1, email: 'Boss@example.com' }));
+    await expect(AdminAccessService.deleteUser(actor, 1)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(auth.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('says so when the user does not exist', async () => {
+    auth.getUserById.mockResolvedValue(null);
+    await expect(AdminAccessService.deleteUser(actor, 9)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('deletes the bound Keycloak account, then the data', async () => {
+    auth.getUserById.mockResolvedValue(signedIn({ keycloakSubject: 'kc-2' }));
+    const calls = fakeKeycloak({});
+
+    await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toEqual({
+      id: 2,
+      keycloakDeleted: true,
+      assignmentsDeleted: 2,
+    });
+    expect(calls).toEqual([expect.objectContaining({ method: 'DELETE' })]);
+    expect(calls[0].url).toMatch(/\/users\/kc-2$/);
+    expect(auth.deleteUser).toHaveBeenCalledWith(2, 'ada@example.com');
+  });
+
+  it('keeps the data when Keycloak refuses, so nothing is half-deleted', async () => {
+    auth.getUserById.mockResolvedValue(signedIn({ keycloakSubject: 'kc-2' }));
+    global.fetch = jest.fn(async (input: string | URL | Request) =>
+      String(input).endsWith('/openid-connect/token')
+        ? new Response(JSON.stringify({ access_token: 't', expires_in: 300 }))
+        : new Response('', { status: 403 }),
+    ) as typeof fetch;
+
+    await expect(AdminAccessService.deleteUser(actor, 2)).rejects.toThrow(/Keycloak/);
+    expect(auth.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('skips Keycloak for somebody who never signed in', async () => {
+    auth.getUserById.mockResolvedValue(signedIn({ lastSignInAt: null, keycloakSubject: null }));
+    const calls = fakeKeycloak({});
+    await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toMatchObject({
+      keycloakDeleted: true,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('still deletes the data without Keycloak admin access, and says the login remains', async () => {
+    delete process.env.KEYCLOAK_SERVICE_CLIENT_ID;
+    auth.getUserById.mockResolvedValue(signedIn({ keycloakSubject: 'kc-2' }));
+    await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toMatchObject({
+      keycloakDeleted: false,
+    });
+    expect(auth.deleteUser).toHaveBeenCalled();
+  });
+});

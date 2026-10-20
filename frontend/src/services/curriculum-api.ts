@@ -879,6 +879,13 @@ export const curriculumApi = {
     },
   ) => HttpHelper.put(`curriculum/elements/${elementId}`, data),
 
+  /** Uploads an image or PDF into an existing image block. */
+  uploadElementFile: (elementId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return HttpHelper.postFormData(`curriculum/elements/${elementId}/file`, form);
+  },
+
   /** Stores a picture on a canvas. Same rules as a cover photo; placing it is up to the editor. */
   uploadCanvasImage: async (
     elementId: string,

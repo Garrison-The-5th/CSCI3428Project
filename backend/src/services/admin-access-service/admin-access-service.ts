@@ -99,7 +99,9 @@ export default class AdminAccessService {
 
     let remaining: string[];
     try {
-      const keycloakId = await KeycloakGateway.findUserId(target.email);
+      // The account bound at sign-in, not whichever one holds this email now —
+      // a Keycloak user can change their email, and a role must not follow it.
+      const keycloakId = target.keycloakSubject ?? (await KeycloakGateway.findUserId(target.email));
       if (!keycloakId) {
         throw new ConflictError(`${target.email} has no matching account in Keycloak.`);
       }
@@ -131,6 +133,58 @@ export default class AdminAccessService {
       isAdmin: remaining.includes(ADMIN_ROLE),
       hasAuthorRole: remaining.includes(AUTHOR_ROLE),
     };
+  }
+
+  /**
+   * Deletes somebody's account and all of their data, for good.
+   *
+   * Keycloak goes first: if it refuses, nothing here has changed and the admin
+   * can try again. The other way round, a failure would leave a login with no
+   * record behind it, which signs straight back in as a fresh, empty person.
+   *
+   * Without Keycloak admin access the data is still deleted, and the answer says
+   * the login is still there — the person could sign in again, but with nothing.
+   * Refused for the caller themselves, so an admin cannot delete their own way
+   * in by mistake.
+   */
+  static async deleteUser(actor: { id: number; email: string }, targetId: number) {
+    const target = await AuthGateway.getUserById(targetId);
+    if (!target) throw new NotFoundError(`User with ID ${targetId} not found`);
+
+    if (target.id === actor.id || target.email.toLowerCase() === actor.email.toLowerCase()) {
+      throw new ForbiddenError('You cannot delete your own account. Ask another admin to do it.');
+    }
+
+    let keycloakDeleted = false;
+    // Somebody who has never signed in has no login to remove.
+    if (target.lastSignInAt !== null || target.keycloakSubject) {
+      if (KeycloakGateway.isConfigured()) {
+        try {
+          const keycloakId =
+            target.keycloakSubject ?? (await KeycloakGateway.findUserId(target.email));
+          if (keycloakId) await KeycloakGateway.deleteUser(keycloakId);
+          keycloakDeleted = true;
+        } catch (error) {
+          if (error instanceof KeycloakError) {
+            logger.error({ err: error, target: target.email }, 'Keycloak account delete failed');
+            throw new Error(`Keycloak did not delete the account: ${error.message}`);
+          }
+          throw error;
+        }
+      }
+    } else {
+      keycloakDeleted = true;
+    }
+
+    const { assignmentsDeleted } = await AuthGateway.deleteUser(target.id, target.email);
+    logSecurityEvent('user.deleted', {
+      userId: actor.id,
+      email: target.email,
+      resource: `user:${target.id}`,
+      reason: keycloakDeleted ? 'account and data deleted' : 'data deleted; Keycloak login kept',
+    });
+
+    return { id: target.id, keycloakDeleted, assignmentsDeleted };
   }
 
   /**

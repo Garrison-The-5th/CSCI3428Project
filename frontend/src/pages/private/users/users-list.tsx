@@ -1,6 +1,6 @@
 /**
  * File: users-list.tsx
- * Description: Users list for the learning platform — search, filter by role, and manage admin and author access.
+ * Description: Users list for the learning platform — search, filter by role, manage admin and author access, and delete accounts.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-10-16
@@ -147,6 +147,9 @@ const UsersList = () => {
   const [adminSaving, setAdminSaving] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
+  /** Whether the delete-account confirm pop-up is showing. */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMailDialogOpen, setIsMailDialogOpen] = useState(false);
@@ -193,7 +196,33 @@ const UsersList = () => {
   const closeUser = () => {
     setOpenUserId(null);
     setPending(null);
+    setConfirmingDelete(false);
     setAdminError(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!openUser || deleting) return;
+    const target = openUser;
+    setDeleting(true);
+    setAdminError(null);
+    try {
+      const response = await HttpHelper.delete(`auth/users/${target.id}`);
+      setUsers((current) => current.filter((candidate) => candidate.id !== target.id));
+      const who = target.name || target.email;
+      setAdminNotice(
+        response?.keycloakDeleted === false
+          ? `${who}'s data has been deleted, but their Keycloak login is still there. ` +
+              'Remove it in Keycloak, or they can sign in again to an empty account.'
+          : `${who}'s account and all of their data have been deleted.`,
+      );
+      setConfirmingDelete(false);
+      setOpenUserId(null);
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Could not delete their account.');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   /** Why a role switch is off for this person, or null when it can be used. */
@@ -522,6 +551,31 @@ const UsersList = () => {
                   {adminError}
                 </p>
               )}
+
+              {!isMe(openUser) && (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border
+                    border-destructive/40 p-4"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-dark-gray">Delete account</p>
+                    <p className="text-xs text-dark-gray">
+                      Removes their login and all of their data. This cannot be undone.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={deleting}
+                    onClick={() => {
+                      setAdminError(null);
+                      setConfirmingDelete(true);
+                    }}
+                  >
+                    Delete account
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -558,6 +612,28 @@ const UsersList = () => {
         }
         onConfirm={() => void confirmRoleChange()}
         onCancel={() => setPending(null)}
+      />
+
+      <ConfirmDialog
+        open={openUser !== null && confirmingDelete}
+        title="Delete this account?"
+        message={
+          openUser && (
+            <>
+              <p>
+                <strong>{openUser.name || openUser.email}</strong> will be deleted for good: their
+                Keycloak login, assignments, progress, quiz results, course completions and notes.
+              </p>
+              <p className="mt-2 text-sm">
+                Courses and quizzes they created stay, with no author credited. This cannot be
+                undone.
+              </p>
+            </>
+          )
+        }
+        confirmLabel={deleting ? 'Deleting…' : 'Delete account'}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setConfirmingDelete(false)}
       />
 
       {isMailDialogOpen && (

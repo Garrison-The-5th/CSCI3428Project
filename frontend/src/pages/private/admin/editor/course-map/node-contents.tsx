@@ -216,11 +216,7 @@ const NodeContents = ({
 
         {linked && (
           <p className="mt-1 text-xs font-semibold text-danger">
-            Linked from {linked.sourceTitle} — edit it there, and changes follow here automatically.
-            Removing this node removes the whole linked map.
-            {linked.entry
-              ? ' Your nodes can lead into this one.'
-              : ' If nothing in the linked map leads on from here, it can lead on to your nodes.'}
+            Linked from {linked.sourceTitle} — edit it there.
           </p>
         )}
 
@@ -233,9 +229,7 @@ const NodeContents = ({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
         {node.items.length === 0 ? (
-          <p className="text-sm text-dark-gray">
-            Nothing here yet — drag content across from the staging manager.
-          </p>
+          <p className="text-sm text-dark-gray">Nothing here yet.</p>
         ) : (
           <ul className="flex flex-col gap-1">
             {node.items.map((item) => {

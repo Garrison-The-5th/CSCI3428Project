@@ -261,27 +261,19 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
         <h2 className="flex items-center gap-2 text-lg font-semibold text-dark-gray">
           <ArchiveBoxIcon className="w-5 h-5" /> Archive
         </h2>
-        <p className="text-sm text-dark-gray">
-          Every publish freezes the course as it stood. Open a version to see it against the one
-          learners are reading now.
-        </p>
       </div>
 
       {/* Kept versions first, because they are the ones somebody chose. */}
       <section>
-        <h3 className="mb-1 font-semibold text-dark-gray">
+        <h3 className="mb-3 font-semibold text-dark-gray">
           Kept permanently{kept.length > 0 && ` (${kept.length})`}
         </h3>
-        <p className="mb-3 text-sm text-dark-gray">
-          Never deleted, however old. Move one back to version history to start its {ARCHIVE_DAYS}
-          -day countdown again — that is not a delete, and it can be kept again afterwards.
-        </p>
         {kept.length === 0 ? (
           <p
             className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-center text-sm
               text-dark-gray"
           >
-            Nothing kept yet. Use Keep on a replaced version below to hold it for good.
+            Nothing kept yet.
           </p>
         ) : (
           <div className="flex flex-col gap-2">{kept.map(card)}</div>
@@ -289,18 +281,11 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
       </section>
 
       <section>
-        <h3 className="mb-1 font-semibold text-dark-gray">
+        <h3 className="mb-3 font-semibold text-dark-gray">
           Version history{history.length > 0 && ` (${history.length})`}
         </h3>
-        <p className="mb-3 text-sm text-dark-gray">
-          The version learners are reading is kept for as long as it is live. Replaced versions are
-          held for {ARCHIVE_DAYS} days and then cleared automatically — the countdown on each one
-          says how long is left.
-        </p>
         {history.length === 0 ? (
-          <p className="py-8 text-center text-dark-gray">
-            Never published. The first publish becomes version 1.
-          </p>
+          <p className="py-8 text-center text-dark-gray">Never published.</p>
         ) : (
           <div className="flex flex-col gap-2">{history.map(card)}</div>
         )}

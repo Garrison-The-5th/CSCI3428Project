@@ -134,6 +134,19 @@ function isLoopbackOrigin(origin: string): boolean {
  * it is sent from a background job with no request in scope at all, which is
  * exactly the case the `APP_BASE_URL` fallback is for.
  */
+/** Hosts production may build links from, from APP_ALLOWED_HOSTS (comma-separated). */
+function isAllowedHost(origin: string): boolean {
+  const allowed = (process.env.APP_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  try {
+    return allowed.includes(new URL(origin).host.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export function appBaseUrl(requestOrigin?: string | null): string {
   const configured = configuredBaseUrl();
   if (configured) return configured;
@@ -145,14 +158,27 @@ export function appBaseUrl(requestOrigin?: string | null): string {
    * port. Deployed, the two are one origin behind the ingress and the host is
    * the app's — which is the case this whole fallback exists for.
    */
+  /*
+   * In production the host is only believed when it is on APP_ALLOWED_HOSTS.
+   * It comes from the request, which the caller writes: a forged Host (or a
+   * proxy passing one through) would otherwise put real link tokens into
+   * emails pointing at somebody else's site.
+   */
   if (requestOrigin && !isLoopbackOrigin(requestOrigin)) {
-    return stripTrailingSlashes(requestOrigin);
+    if (process.env.NODE_ENV !== 'production' || isAllowedHost(requestOrigin)) {
+      return stripTrailingSlashes(requestOrigin);
+    }
+    logger.error(
+      { requestOrigin },
+      'request host is not in APP_ALLOWED_HOSTS, so links were not built from it',
+    );
   }
 
   if (process.env.NODE_ENV === 'production') {
-    logger.warn(
+    logger.error(
       { fallback: DEV_FALLBACK, requestOrigin },
-      'no APP_BASE_URL and no usable request host: this link points at the local dev host',
+      'no APP_BASE_URL and no allowed request host: this link points at the local dev host. ' +
+        'Set APP_BASE_URL (or APP_ALLOWED_HOSTS).',
     );
   }
 

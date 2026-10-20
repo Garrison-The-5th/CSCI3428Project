@@ -20,9 +20,12 @@
  *
  * The preview underneath is the same component the learner sees, so what you are
  * looking at is what gets published.
+ *
+ * It is the one thing in the main editor, so it is always open: picking another
+ * piece of content in the course structure is how an author moves between them.
  */
-import { Bars3Icon, CheckIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline';
-import { useEffect, useState } from 'react';
+import { ArrowUpTrayIcon, CheckIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { useEffect, useRef, useState } from 'react';
 
 import CanvasEditor from '@/components/canvas/canvas-editor';
 import { CanvasImageAsset, layoutOf } from '@/components/canvas/canvas-model';
@@ -31,16 +34,16 @@ import ElementView, { plainPreview } from '@/components/common/element-view';
 import RichTextEditor from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import Spinner from '@/components/ui/spinner';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
-import { curriculumApi, EditMark, SectionElement } from '@/services/curriculum-api';
+import { curriculumApi, EditMark, SectionElement, UPLOAD_ACCEPT } from '@/services/curriculum-api';
 
 interface ElementEditorProps {
   element: SectionElement;
   onDelete: () => void;
   /** Refresh the parent once a save lands, so counts and previews stay true. */
-  onSaved: () => void;
-  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
-  dragging?: boolean;
+  onSaved: () => void | Promise<void>;
+  onNotify?: (message: string, type?: 'success' | 'error') => void;
   /**
    * Set when this element has been changed since the last publish, naming who
    * changed it. Absent is the common case and draws nothing.
@@ -67,14 +70,55 @@ function canvasSummary(items: Array<{ kind: string }>): string {
     .join(', ');
 }
 
+/** What a block says about itself while it holds nothing yet. */
+const EMPTY_SUMMARY: Record<SectionElement['type'], string> = {
+  TEXT: 'Empty text',
+  YOUTUBE: 'No link yet',
+  IMAGE: 'No image yet',
+  CANVAS: 'Empty canvas',
+  PDF: 'Uploaded PDF',
+};
+
+/**
+ * The one-line description of a block — the course structure lists content by
+ * it, and the editor heads the open block with it.
+ */
+export function elementSummary(
+  element: SectionElement,
+  draft?: {
+    textContent: string;
+    videoUrl: string;
+    imageUrl: string;
+    canvas?: { items: Array<{ kind: string }> };
+  },
+): string {
+  const text = draft?.textContent ?? element.textContent ?? '';
+  const video = draft?.videoUrl ?? element.videoUrl ?? '';
+  const image = draft?.imageUrl ?? element.imageUrl ?? '';
+  switch (element.type) {
+    case 'TEXT':
+      return plainPreview(text) || EMPTY_SUMMARY.TEXT;
+    case 'YOUTUBE':
+      return video || EMPTY_SUMMARY.YOUTUBE;
+    case 'CANVAS':
+      return canvasSummary(draft?.canvas?.items ?? layoutOf(element.canvasData).items);
+    case 'PDF':
+      return element.fileName ?? EMPTY_SUMMARY.PDF;
+    default:
+      return element.fileName ?? (image || EMPTY_SUMMARY.IMAGE);
+  }
+}
+
 const ElementEditor = ({
   element,
   onDelete,
   onSaved,
-  dragHandleProps,
-  dragging,
+  onNotify,
   editedMark,
 }: ElementEditorProps) => {
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
   /** What is actually stored, in the shape the form holds it. */
   const stored = {
     textContent: element.textContent ?? '',
@@ -87,7 +131,6 @@ const ElementEditor = ({
   };
 
   const [draft, setDraft] = useState(stored);
-  const [open, setOpen] = useState(false);
 
   /**
    * Pictures uploaded onto a canvas since the element was last fetched. The
@@ -139,44 +182,68 @@ const ElementEditor = ({
     durationMinutes: Number(draft.durationMinutes) || null,
   };
 
-  const summary =
-    element.type === 'TEXT'
-      ? plainPreview(draft.textContent) || 'Empty text'
-      : element.type === 'YOUTUBE'
-        ? draft.videoUrl || 'No link yet'
-        : element.type === 'CANVAS'
-          ? canvasSummary(draft.canvas.items)
-          : (element.fileName ?? draft.imageUrl ?? 'Uploaded file');
+  const summary = elementSummary(element, draft);
+
+  /** Puts a file from the author's computer into this block, replacing what it held. */
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      await curriculumApi.uploadElementFile(element.id, file);
+      await onSaved();
+      onNotify?.('File added');
+    } catch (err) {
+      onNotify?.(err instanceof Error && err.message ? err.message : 'Failed to upload', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const takesUpload = element.type === 'IMAGE' || element.type === 'PDF';
+  const uploadButton = takesUpload && (
+    <>
+      <input
+        ref={uploadRef}
+        type="file"
+        accept={UPLOAD_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Cleared first, so picking the same file again after a failure still fires.
+          e.target.value = '';
+          if (file) upload(file);
+        }}
+      />
+      <Button
+        onClick={() => uploadRef.current?.click()}
+        disabled={uploading}
+        variant="outline"
+        className="bg-white text-dark-gray hover:bg-light-gray"
+      >
+        {uploading ? (
+          <>
+            <Spinner className="w-5 h-5" /> Uploading…
+          </>
+        ) : (
+          <>
+            <ArrowUpTrayIcon className="w-5 h-5" /> Upload
+          </>
+        )}
+      </Button>
+    </>
+  );
 
   return (
     <div
-      className={`rounded-lg border bg-white ${dragging ? 'opacity-50' : ''}
+      className={`rounded-lg border bg-white
         ${element.type === 'PDF' ? 'border-navy/30' : 'border-gray-300'}`}
     >
       <div className="flex items-center gap-2 px-3 py-2">
-        <div {...dragHandleProps} className="cursor-grab p-1" title="Drag to reorder">
-          <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
-        </div>
-
-        {/* The tag goes under the summary rather than beside it: a long name
-            beside it pushed the save button and the bin past the right edge,
-            and an unreachable delete is worse than a taller row. */}
-        <button
-          onClick={() => setOpen(!open)}
-          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-left"
-          aria-expanded={open}
-        >
-          <ChevronDownIcon
-            className={`w-4 h-4 shrink-0 text-dark-gray transition-transform duration-200
-              ${open ? 'rotate-180' : ''}`}
-          />
-          <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-            <span className="w-full truncate text-sm text-dark-gray">
-              <span className="font-semibold">{element.type}</span> {summary}
-            </span>
-            <EditedTag mark={editedMark} />
+        <span className="flex min-h-10 min-w-0 flex-1 flex-col justify-center gap-1">
+          <span className="w-full truncate text-sm text-dark-gray">
+            <span className="font-semibold">{element.type}</span> {summary}
           </span>
-        </button>
+          <EditedTag mark={editedMark} />
+        </span>
 
         <span className="shrink-0 text-xs text-dark-gray">{saveStatus(state, dirty)}</span>
 
@@ -202,73 +269,81 @@ const ElementEditor = ({
         </Button>
       </div>
 
-      {open && (
-        <div className="flex flex-col gap-4 border-t border-gray-300 p-4">
-          {element.type === 'TEXT' && (
-            <RichTextEditor
-              value={draft.textContent}
-              onChange={(html) => setDraft({ ...draft, textContent: html })}
-              placeholder="Write the lesson text..."
+      <div className="flex flex-col gap-4 border-t border-gray-300 p-4">
+        {element.type === 'TEXT' && (
+          <RichTextEditor
+            value={draft.textContent}
+            onChange={(html) => setDraft({ ...draft, textContent: html })}
+            placeholder="Write the lesson text..."
+          />
+        )}
+
+        {element.type === 'YOUTUBE' && (
+          <div className="flex flex-wrap gap-3">
+            <Input
+              value={draft.videoUrl}
+              onChange={(e) => setDraft({ ...draft, videoUrl: e.target.value })}
+              placeholder="YouTube video URL"
+              className={`${inputClass} min-w-60 flex-1`}
             />
-          )}
+            <Input
+              value={draft.durationMinutes}
+              onChange={(e) => setDraft({ ...draft, durationMinutes: e.target.value })}
+              placeholder="Length (min)"
+              className={`${inputClass} max-w-36`}
+            />
+          </div>
+        )}
 
-          {element.type === 'YOUTUBE' && (
-            <div className="flex flex-wrap gap-3">
-              <Input
-                value={draft.videoUrl}
-                onChange={(e) => setDraft({ ...draft, videoUrl: e.target.value })}
-                placeholder="YouTube video URL"
-                className={`${inputClass} min-w-60 flex-1`}
-              />
-              <Input
-                value={draft.durationMinutes}
-                onChange={(e) => setDraft({ ...draft, durationMinutes: e.target.value })}
-                placeholder="Length (min)"
-                className={`${inputClass} max-w-36`}
-              />
-            </div>
-          )}
-
-          {element.type === 'IMAGE' && !element.imageData && (
+        {element.type === 'IMAGE' && !element.imageData && (
+          <div className="flex flex-wrap gap-3">
             <Input
               value={draft.imageUrl}
               onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })}
-              placeholder="Image URL"
-              className={inputClass}
+              placeholder="Paste an image URL, or upload one"
+              className={`${inputClass} min-w-60 flex-1`}
             />
-          )}
+            {uploadButton}
+          </div>
+        )}
 
-          {element.type === 'IMAGE' && element.imageData && (
-            <p className="text-sm text-dark-gray">
-              Uploaded image. Delete this item and upload again to replace it.
+        {element.type === 'IMAGE' && element.imageData && (
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="min-w-0 flex-1 truncate text-sm text-dark-gray">
+              {element.fileName ?? 'Uploaded image'}
             </p>
-          )}
+            {uploadButton}
+          </div>
+        )}
 
-          {element.type === 'CANVAS' && (
-            <CanvasEditor
-              layout={draft.canvas}
-              onChange={(canvas) => setDraft((prev) => ({ ...prev, canvas }))}
-              images={canvasImages}
-              onUpload={async (file) => {
-                const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(
-                  element.id,
-                  file,
-                );
-                setUploaded((prev) => ({ ...prev, [imageId]: asset }));
-                return { imageId, asset };
-              }}
-            />
-          )}
+        {element.type === 'CANVAS' && (
+          <CanvasEditor
+            layout={draft.canvas}
+            onChange={(canvas) => setDraft((prev) => ({ ...prev, canvas }))}
+            images={canvasImages}
+            onUpload={async (file) => {
+              const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(element.id, file);
+              setUploaded((prev) => ({ ...prev, [imageId]: asset }));
+              return { imageId, asset };
+            }}
+          />
+        )}
 
-          {element.type === 'PDF' && (
-            <p className="text-sm text-dark-gray">
-              Uploaded PDF{element.fileName ? `: ${element.fileName}` : ''}.
+        {element.type === 'PDF' && (
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="min-w-0 flex-1 truncate text-sm text-dark-gray">
+              {element.fileName ?? 'Uploaded PDF'}
             </p>
-          )}
+            {uploadButton}
+          </div>
+        )}
 
-          {/* A canvas is built on the slide itself, so a second copy underneath
-              would only repeat it. */}
-          {element.type !== 'CANVAS' && (
+        {/* A canvas is built on the slide itself and the text editor already
+            shows text as it will look, so a second copy underneath would only
+            repeat them. A block with nothing in it has nothing to show. */}
+        {element.type !== 'CANVAS' &&
+          element.type !== 'TEXT' &&
+          summary !== EMPTY_SUMMARY[element.type] && (
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-dark-gray">
                 Preview
@@ -278,8 +353,7 @@ const ElementEditor = ({
               </div>
             </div>
           )}
-        </div>
-      )}
+      </div>
     </div>
   );
 };

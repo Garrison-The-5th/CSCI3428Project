@@ -6,7 +6,7 @@
  * Date: 2026-08-10
  */
 // Service is useful for adding business logic/error handling
-import { logger } from '@/config/logger';
+import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
 import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 
@@ -21,6 +21,9 @@ import { User } from '../../../generated/prisma';
  * existing proves nothing about whether they have an account. `lastSignInAt` is
  * the only reliable answer to that, and `markSignedIn` is what maintains it.
  */
+/** A sign-in that would land on somebody else's record. Answered with a 403. */
+export class IdentityConflictError extends Error {}
+
 export default class AuthService {
   static async getAll(): Promise<User[]> {
     try {
@@ -187,6 +190,91 @@ export default class AuthService {
   /** Whether this exact address belongs to somebody who has signed in. */
   static hasAccount(email: string) {
     return AuthGateway.hasAccount(email);
+  }
+
+  /**
+   * The User a signed-in Keycloak account is, matched on Keycloak's fixed id
+   * (`sub`) rather than the email in the token.
+   *
+   * A Keycloak user can change their own email. Matching on it meant typing
+   * someone else's address into the account page and signing in again was
+   * enough to become them here — their assignments, progress, results, notes
+   * and course-editing rights. So:
+   *
+   * - A row already bound to this `sub` is this person, whatever the token now
+   *   says the email is. A changed email is only carried over when Keycloak
+   *   has verified it and nobody else here has it; otherwise the row keeps the
+   *   address it had, and with it only what was always theirs.
+   * - A row found by email that is bound to a *different* `sub` is somebody
+   *   else's, and the sign-in is refused.
+   * - A row found by email and bound to nobody is claimed. If it has never
+   *   been signed into — a placeholder made by assigning work to an address —
+   *   claiming it with an unverified email is exactly the takeover above, so
+   *   with REQUIRE_VERIFIED_EMAIL=true it is refused; until then it is allowed
+   *   and logged, because realms without email verification would otherwise
+   *   lock out every new starter who was assigned work first.
+   */
+  static async resolveSignedInUser(claims: {
+    subject: string;
+    email: string;
+    emailVerified: boolean;
+    name?: string;
+  }): Promise<User> {
+    const email = claims.email.toLowerCase();
+    const name = claims.name?.trim() || null;
+
+    const bound = await AuthGateway.getUserBySubject(claims.subject);
+    if (bound) {
+      let user = bound;
+      if (user.email !== email) {
+        const taken = await AuthGateway.getUserByEmail(email);
+        if (claims.emailVerified && !taken) {
+          user = await AuthGateway.setEmail(user.id, email);
+        } else {
+          logSecurityEvent('auth.failure', {
+            userId: user.id,
+            email: safeForLog(email, 120),
+            reason: 'token email differs from the bound account; kept the bound email',
+          });
+        }
+      }
+      if (name && user.name !== name) user = await AuthGateway.updateUser(user.id, { name });
+      return user;
+    }
+
+    const existing = await AuthGateway.getUserByEmail(email);
+    if (!existing) {
+      return AuthGateway.createUser({ email, name, keycloakSubject: claims.subject });
+    }
+
+    if (existing.keycloakSubject && existing.keycloakSubject !== claims.subject) {
+      logSecurityEvent('auth.failure', {
+        userId: existing.id,
+        email: safeForLog(email, 120),
+        reason: 'email belongs to a different Keycloak account',
+      });
+      throw new IdentityConflictError(
+        'This email address is linked to a different account. Contact an administrator.',
+      );
+    }
+
+    if (existing.lastSignInAt === null && !claims.emailVerified) {
+      if (process.env.REQUIRE_VERIFIED_EMAIL === 'true') {
+        throw new IdentityConflictError(
+          'Verify your email address in your account settings, then sign in again.',
+        );
+      }
+      logSecurityEvent('auth.failure', {
+        userId: existing.id,
+        email: safeForLog(email, 120),
+        reason:
+          'unverified email claimed a never-signed-in record (allowed: REQUIRE_VERIFIED_EMAIL off)',
+      });
+    }
+
+    let user = await AuthGateway.bindSubject(existing.id, claims.subject);
+    if (name && user.name !== name) user = await AuthGateway.updateUser(user.id, { name });
+    return user;
   }
 
   static async getOrCreateUser(email: string, name?: string): Promise<User> {

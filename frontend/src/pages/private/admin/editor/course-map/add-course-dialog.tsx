@@ -77,13 +77,7 @@ const AddCourseDialog = ({ open, courseId, onClose, onAdd }: AddCourseDialogProp
       >
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-dark-gray">Add a course to staging</h2>
-              <p className="text-sm text-dark-gray">
-                Its sections — or, for a quiz set, its exams — become available to place. They stay
-                owned and edited by that course. One-time links are never offered.
-              </p>
-            </div>
+            <h2 className="text-lg font-semibold text-dark-gray">Add a course to staging</h2>
             <Button onClick={onClose} variant="ghost" size="icon" title="Close">
               <XMarkIcon className="w-5 h-5" />
             </Button>

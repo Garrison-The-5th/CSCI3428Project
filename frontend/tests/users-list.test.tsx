@@ -1,6 +1,6 @@
 /**
  * File: users-list.test.tsx
- * Description: Component tests for searching and filtering users, and granting or removing admin access.
+ * Description: Component tests for searching and filtering users, granting or removing admin access, and deleting accounts.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-10-16
@@ -180,5 +180,52 @@ describe('UsersList — author access', () => {
     const dialog = screen.getByRole('dialog', { name: /dana/i });
     expect(within(dialog).getByText('Course author')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /^author access/i })).not.toBeChecked();
+  });
+});
+
+describe('UsersList — deleting an account', () => {
+  it('deletes only after the pop-up is confirmed, then drops them from the list', async () => {
+    renderPage();
+    http.delete.mockResolvedValue({ keycloakDeleted: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Ada' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
+    expect(http.delete).not.toHaveBeenCalled();
+
+    const confirm = screen.getByRole('dialog', { name: 'Delete this account?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete account' }));
+
+    await waitFor(() => expect(http.delete).toHaveBeenCalledWith('auth/users/2'));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "Ada's account and all of their data have been deleted",
+    );
+    expect(names()).not.toContain('Open Ada');
+  });
+
+  it('says when the Keycloak login could not be removed', async () => {
+    renderPage();
+    http.delete.mockResolvedValue({ keycloakDeleted: false });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
+    const confirm = screen.getByRole('dialog', { name: 'Delete this account?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete account' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/Keycloak login is still there/);
+  });
+
+  it('keeps them, and says why, when the server refuses', async () => {
+    renderPage();
+    http.delete.mockRejectedValue(new Error('Keycloak did not delete the account'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
+    const confirm = screen.getByRole('dialog', { name: 'Delete this account?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete account' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Keycloak did not delete');
+    expect(names()).toContain('Open Ada');
+  });
+
+  it('offers no delete button on your own account', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Me' }));
+    expect(screen.queryByRole('button', { name: 'Delete account' })).not.toBeInTheDocument();
   });
 });

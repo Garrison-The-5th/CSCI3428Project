@@ -71,7 +71,7 @@ See [Code Structure](docs/code_structure.md) for the full domain model and file 
 | Document | What it covers |
 |---|---|
 | [Code Structure](docs/code_structure.md) | Domain model and file tree |
-| [API Reference](docs/api-reference.md) | All 111 routes, access levels and error codes |
+| [API Reference](docs/api-reference.md) | All 112 routes, access levels and error codes |
 | [Testing](docs/testing.md) | Every suite, how to run it, and the merge gate |
 | [UX Design](docs/ux-design.md) | Navigation paths per audience, per-page rationale |
 | [Security Follow-Ups](docs/security-follow-ups.md) | Known gaps against the standards, and why |

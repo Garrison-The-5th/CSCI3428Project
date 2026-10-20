@@ -29,7 +29,11 @@ export type AssignmentType = 'PLATFORM' | 'LINK';
 export interface Assignment {
   id: string;
   type: AssignmentType;
-  token: string;
+  /**
+   * Present only on the reply that creates a link. Links are stored as hashes,
+   * so a listed assignment has no token; Copy link issues a new one.
+   */
+  token?: string;
   email: string;
   courseId: string | null;
   quizId: string | null;
@@ -345,6 +349,12 @@ export const assignmentApi = {
    */
   restore: (id: string): Promise<{ message: string; delivery: Delivery }> =>
     HttpHelper.post(`assignments/${id}/restore`, {}),
+
+  /** A fresh link for a guest. The previous link stops working. */
+  issueLink: async (id: string): Promise<string> => {
+    const response = await HttpHelper.post(`assignments/${id}/link`, {});
+    return response.token as string;
+  },
 
   resend: (id: string): Promise<{ message: string; delivery: Delivery }> =>
     HttpHelper.post(`assignments/${id}/resend`, {}),

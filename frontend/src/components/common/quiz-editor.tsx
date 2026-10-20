@@ -39,7 +39,6 @@ import { useEditLocks } from '@/contexts/edit-locks-context';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
 import {
   Quiz,
-  QUIZ_TYPE_HINTS,
   QUIZ_TYPE_LABELS,
   quizApi,
   quizCapabilities,
@@ -528,11 +527,6 @@ const QuizEditor = ({
         <div className="flex flex-col gap-1 text-sm text-dark-gray">
           <span className="font-medium">Quiz type</span>
           <span>{QUIZ_TYPE_LABELS[quiz.type]}</span>
-          <p className="max-w-prose text-xs">
-            Generated from the course map. You can reword its title here, and the prompt and hint of
-            its question; the options and everything else follow the map and are changed on the
-            Course mapping tab.
-          </p>
         </div>
       ) : (
         <>
@@ -582,9 +576,6 @@ const QuizEditor = ({
                 ))}
               </select>
             </LockOverlay>
-            <span className="max-w-prose text-xs font-normal text-dark-gray">
-              {QUIZ_TYPE_HINTS[quiz.type]}
-            </span>
             {/* A greyed option explains itself here rather than in the list: a
               disabled <option> shows no tooltip, so the reason would otherwise
               be nowhere an author could read it. */}
@@ -629,7 +620,6 @@ const QuizEditor = ({
                   )
                 }
                 label="Allow multiple attempts"
-                hint="Adds Restart Quiz to the result screen, and when they come back to it"
               />
             )}
 
@@ -648,7 +638,6 @@ const QuizEditor = ({
                   )
                 }
                 label="Lock after the due date"
-                hint="Off, and it is still marked overdue but can still be taken"
               />
             )}
 
@@ -664,7 +653,6 @@ const QuizEditor = ({
                 )
               }
               label="Show correct answers"
-              hint="After the learner submits"
             />
 
             {/* Whether they are told how they did at all. Off sends them straight on
@@ -681,7 +669,6 @@ const QuizEditor = ({
                 )
               }
               label="Show results"
-              hint="The score ring after submitting"
             />
           </div>
 
@@ -762,17 +749,6 @@ const QuizEditor = ({
         the shell that owns the quiz, which is also the only place that knows
         what deleting it takes with it.
       */}
-
-          {/* Where it lives, which the kind decides. Stated rather than hidden: an
-            author changing the type needs to see what that did to the placement. */}
-          <p className="text-xs text-dark-gray">
-            {quiz.type === 'ONE_TIME'
-              ? 'Reached only through the link you send. It never appears on the Quizzes tab, even ' +
-                'for somebody signed in with the address it went to.'
-              : quiz.sectionId
-                ? 'Sits inside a section, in the content order you dropped it at.'
-                : 'Stands on its own — reached from the Quizzes tab or through a shared link.'}
-          </p>
         </>
       )}
     </div>
@@ -847,16 +823,15 @@ const QuizEditor = ({
   );
 
   /** One of the two fixed rows at the top of the sidebar. */
-  const fixedRow = (key: Pane, label: string, hint: string) => (
+  const fixedRow = (key: Pane, label: string) => (
     <button
       ref={key === 'new' ? newRowRef : undefined}
       onClick={() => leaveQuestion(key)}
-      className={`flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left ${
+      className={`flex w-full rounded-md px-3 py-2 text-left ${
         pane === key ? 'bg-navy text-white' : 'text-dark-gray hover:bg-white'
       }`}
     >
       <span className="text-sm font-semibold">{label}</span>
-      <span className={`text-xs ${pane === key ? 'text-white/80' : 'text-dark-gray'}`}>{hint}</span>
     </button>
   );
 
@@ -873,9 +848,9 @@ const QuizEditor = ({
       <aside
         className="flex h-fit flex-col gap-1 rounded-lg border border-gray-300 bg-light-gray p-2"
       >
-        {fixedRow('settings', 'Settings', 'Title, type, timing')}
+        {fixedRow('settings', 'Settings')}
         {/* A directed quiz has exactly one question, so there is no adding one. */}
-        {!isDirected && fixedRow('new', 'New question', 'Add one to the end')}
+        {!isDirected && fixedRow('new', 'New question')}
 
         <hr className="my-1 h-px border-t-0 bg-gray-300" />
 

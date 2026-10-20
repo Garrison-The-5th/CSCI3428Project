@@ -1,6 +1,6 @@
 # API Reference
 
-Every HTTP endpoint the backend exposes: **111 routes** across eight controllers.
+Every HTTP endpoint the backend exposes: **112 routes** across eight controllers.
 
 TTG Technology Standards §1.8 requires "detailed documentation covering all
 endpoints, parameters, request/response formats, and error codes".
@@ -78,6 +78,7 @@ Defined in `backend/src/controllers/**/assignment-controller.ts`.
 | `PUT` | `/assignments/:id` | signed in, can edit this course | Moves one person's due date |
 | `POST` | `/assignments/:id/revoke` | signed in, can edit this course | Turns a link off without losing the record or the progress behind it |
 | `POST` | `/assignments/:id/restore` | signed in, can edit this course | Turns a link back on and tells the person it works again |
+| `POST` | `/assignments/:id/link` | signed in, can edit this course | Issues a new link for a guest and returns its token; the previous link stops working |
 | `POST` | `/assignments/:id/resend` | signed in, can edit this course | Sends the same message again, on demand |
 | `DELETE` | `/assignments/:id` | signed in, can edit this course | Takes an assignment away, and the progress inside it |
 

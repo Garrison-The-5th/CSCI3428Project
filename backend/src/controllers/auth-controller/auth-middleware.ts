@@ -11,7 +11,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import { clientAddress } from '@/config/client-address';
 import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
 import AdminAccessService from '@/services/admin-access-service/admin-access-service';
-import AuthService from '@/services/auth-service/auth-service';
+import AuthService, { IdentityConflictError } from '@/services/auth-service/auth-service';
 
 import { User } from '../../../generated/prisma';
 
@@ -24,6 +24,15 @@ const public_key = `
 ${process.env.PUBLICKEY}
 -----END PUBLIC KEY-----
 `.trim();
+
+/**
+ * The Keycloak clients whose tokens this API accepts — this app's own, unless
+ * KEYCLOAK_CLIENT_ID names others (comma-separated).
+ */
+const ALLOWED_CLIENTS = (process.env.KEYCLOAK_CLIENT_ID ?? 'learning-client')
+  .split(',')
+  .map((client) => client.trim())
+  .filter(Boolean);
 
 export interface AuthClaims {
   email: string;
@@ -66,6 +75,8 @@ export async function authenticateAndAttachUser(
 
     const clientId = decoded.azp as string | undefined;
     const email = decoded.email as string | undefined;
+    // Keycloak sets this only once the person has proved they own the address.
+    const emailVerified = decoded.email_verified === true;
     const subject = decoded.sub as string | undefined;
     const name = decoded.name as string | undefined;
     // A role assigned either on the client or on the realm counts, so `admin` works
@@ -86,6 +97,19 @@ export async function authenticateAndAttachUser(
       return res.status(401).send({ errorMessage: 'Invalid token payload' });
     }
 
+    // Only tokens issued to this app. Any other client in the realm signs with
+    // the same key, and its roles live under its own name — accepting it would
+    // let a role granted for some other app count here.
+    if (!ALLOWED_CLIENTS.includes(clientId)) {
+      logSecurityEvent('auth.failure', {
+        ip,
+        method: req.method,
+        path,
+        reason: `token issued to another client (${safeForLog(clientId, 60)})`,
+      });
+      return res.status(401).send({ errorMessage: 'Invalid token payload' });
+    }
+
     req.auth = {
       clientId,
       email,
@@ -94,7 +118,14 @@ export async function authenticateAndAttachUser(
       subject,
     };
 
-    req.user = await AuthService.getOrCreateUser(email, name);
+    try {
+      req.user = await AuthService.resolveSignedInUser({ subject, email, emailVerified, name });
+    } catch (error) {
+      if (error instanceof IdentityConflictError) {
+        return res.status(403).send({ errorMessage: error.message });
+      }
+      throw error;
+    }
 
     logSecurityEvent('auth.success', {
       userId: req.user.id,

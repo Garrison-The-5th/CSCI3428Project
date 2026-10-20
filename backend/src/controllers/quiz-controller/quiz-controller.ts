@@ -12,7 +12,8 @@ import {
   AuthenticatedRequest,
 } from '@/controllers/auth-controller/auth-middleware';
 import {
-  AUTHOR_ROLES,
+  type CourseReach,
+  courseReach,
   requireAuthor,
 } from '@/controllers/auth-controller/authorization-middleware';
 import {
@@ -33,14 +34,12 @@ function param(req: Request, name: string): string {
 }
 
 /**
- * Whether the caller holds a global authoring role.
- *
- * It no longer means "may reach every quiz". It widens the scoped listings by
- * exactly the quizzes that belong to no course — see
- * `QuizGateway.quizzesInCourses`.
+ * How far the caller reaches: every course's quizzes for an admin; for an
+ * author, the scoped listings widened by exactly the quizzes that belong to no
+ * course — see `QuizGateway.quizzesInCourses`.
  */
-function isGlobalAuthor(req: AuthenticatedRequest): boolean {
-  return AUTHOR_ROLES.some((role) => req.auth!.roles.includes(role));
+function isGlobalAuthor(req: AuthenticatedRequest): CourseReach {
+  return courseReach(req.auth!.roles);
 }
 
 @controller('/quizzes')
@@ -212,6 +211,7 @@ export default class QuizController {
   @use(authenticateAndAttachUser)
   async peekSession(req: AuthenticatedRequest, res: Response) {
     try {
+      await QuizService.assertCanRun(req.user!, param(req as Request, 'id'), isGlobalAuthor(req));
       const session = await QuizService.peekSession(req.user!.id, param(req as Request, 'id'));
       return res.send(session);
     } catch (error) {
@@ -227,6 +227,7 @@ export default class QuizController {
   @use(authenticateAndAttachUser)
   async startSession(req: AuthenticatedRequest, res: Response) {
     try {
+      await QuizService.assertCanRun(req.user!, param(req as Request, 'id'), isGlobalAuthor(req));
       const session = await QuizService.startSession(req.user!.id, param(req as Request, 'id'));
       return res.send(session);
     } catch (error) {
@@ -241,6 +242,7 @@ export default class QuizController {
   async submitAttempt(req: AuthenticatedRequest, res: Response) {
     try {
       const { answers } = req.body as { answers?: Record<string, string | string[]> };
+      await QuizService.assertCanRun(req.user!, param(req as Request, 'id'), isGlobalAuthor(req));
       const result = await QuizService.submitAttempt(
         req.user!.id,
         param(req as Request, 'id'),
