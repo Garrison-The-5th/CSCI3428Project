@@ -24,9 +24,11 @@ import {useLoaderData} from 'react-router'
 import {wordsLoader} from '@/router/words.loader'
 import {toStorageUrl} from '@/utils'
 
-export function Dictionary() {
+/**
+ * Purpose: Searchable grid of every word in the dictionary.
+ */
+export function DictionaryBrowser() {
   const {words} = useLoaderData<typeof wordsLoader>()
-  const [opened, {open, close}] = useDisclosure(false)
 
   const fuse = new Fuse(words, {
     keys: [
@@ -44,6 +46,24 @@ export function Dictionary() {
 
   const _words = query.length ? fuse.search(query).map(result => result.item) : words
   const wordCards = _words.map(word => <DictionaryCard key={word.id} word={word} />)
+
+  return (
+    <Stack>
+      <TextInput
+        placeholder="Search words..."
+        leftSection={<MagnifyingGlassIcon size={20} />}
+        value={query}
+        onChange={e => setQuery(e.currentTarget.value)}
+        aria-label="Search dictionary"
+      />
+      <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
+    </Stack>
+  )
+}
+
+export function Dictionary() {
+  const {words} = useLoaderData<typeof wordsLoader>()
+  const [opened, {open, close}] = useDisclosure(false)
 
   return (
     <>
@@ -71,16 +91,7 @@ export function Dictionary() {
         centered
         scrollAreaComponent={ScrollArea.Autosize}
       >
-        <Stack>
-          <TextInput
-            placeholder="Search words..."
-            leftSection={<MagnifyingGlassIcon size={20} />}
-            value={query}
-            onChange={e => setQuery(e.currentTarget.value)}
-            aria-label="Search dictionary"
-          />
-          <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
-        </Stack>
+        <DictionaryBrowser />
       </Modal>
     </>
   )
