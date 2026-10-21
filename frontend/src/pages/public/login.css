@@ -17,10 +17,6 @@
     margin-bottom: 1.5rem;
   }
 
-  .login-links {
-    align-items: stretch;
-  }
-
   .login-background svg {
     transform: scale(0.75);
     transform-origin: center;
