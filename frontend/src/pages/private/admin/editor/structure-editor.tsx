@@ -235,6 +235,7 @@ const StructureEditor = ({
     { enabled: Boolean(selectedSection), resetKey: selectedSection?.id ?? null },
   );
 
+  /** Collapses or expands a module. */
   const toggleModule = (moduleId: string) =>
     setCollapsedModuleIds((prev) => {
       const next = new Set(prev);
@@ -243,6 +244,7 @@ const StructureEditor = ({
       return next;
     });
 
+  /** Collapses or expands a section. */
   const toggleSection = (sectionId: string) =>
     setCollapsedSectionIds((prev) => {
       const next = new Set(prev);

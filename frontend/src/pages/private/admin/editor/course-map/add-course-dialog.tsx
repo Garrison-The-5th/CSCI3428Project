@@ -31,6 +31,7 @@ interface AddCourseDialogProps {
   onAdd: (sourceCourseId: string) => Promise<void>;
 }
 
+/** Searches for another course to bring into this map's staging. */
 const AddCourseDialog = ({ open, courseId, onClose, onAdd }: AddCourseDialogProps) => {
   const [courses, setCourses] = useState<ImportableCourse[]>([]);
   const [query, setQuery] = useState('');

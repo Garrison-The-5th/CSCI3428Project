@@ -68,6 +68,7 @@ export type PersistedDataTableState = DataTableQueryState & {
 
 const DATA_TABLE_STORAGE_KEY = 'table-page:data-table-state:v1';
 
+/** A fresh table view: no sorting, filters or selection, default column order, first page of 12. */
 function getDefaultDataTableState(): PersistedDataTableState {
   return {
     version: 1,
@@ -84,6 +85,10 @@ function getDefaultDataTableState(): PersistedDataTableState {
   };
 }
 
+/**
+ * The default view without its storage `version` field — what the page queries with when nothing is
+ * saved.
+ */
 export function getDefaultTableQueryState(): DataTableQueryState {
   // `version` is intentionally dropped from the persisted state.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -91,6 +96,11 @@ export function getDefaultTableQueryState(): DataTableQueryState {
   return state;
 }
 
+/**
+ * The table view saved in localStorage, field by field, with anything missing or the wrong type
+ * replaced by its default. Null when nothing is saved, the saved version is unknown, or storage is
+ * unavailable.
+ */
 export function readPersistedState(): PersistedDataTableState | null {
   try {
     const raw = window.localStorage.getItem(DATA_TABLE_STORAGE_KEY);
@@ -130,14 +140,19 @@ export function readPersistedState(): PersistedDataTableState | null {
   }
 }
 
+/** Saves the table view to localStorage so it survives a reload. */
 function writePersistedState(state: PersistedDataTableState) {
   window.localStorage.setItem(DATA_TABLE_STORAGE_KEY, JSON.stringify(state));
 }
 
+/**
+ * Applies a TanStack-style updater, which is either a new value or a function of the previous one.
+ */
 function resolveUpdater<T>(updater: T | ((previous: T) => T), previous: T): T {
   return typeof updater === 'function' ? (updater as (previous: T) => T)(previous) : updater;
 }
 
+/** Column ids in the order the columns were defined (by `id`, falling back to `accessorKey`). */
 function getDefaultColumnOrder<TData, TValue>(columns: ColumnDef<TData, TValue>[]) {
   return columns
     .map((column) => {
@@ -154,6 +169,7 @@ function getDefaultColumnOrder<TData, TValue>(columns: ColumnDef<TData, TValue>[
     .filter(Boolean);
 }
 
+/** Copies just the query fields out of a table state, leaving anything else behind. */
 function toQueryState(state: DataTableQueryState): DataTableQueryState {
   return {
     sorting: state.sorting,
@@ -180,6 +196,10 @@ export interface DataTableColumnHeaderProps<
   onDrop?: (event: React.DragEvent<HTMLElement>) => void;
 }
 
+/**
+ * A column header that toggles sorting when clicked and, when `draggable`, can be dragged to
+ * reorder columns.
+ */
 export function DataTableColumnHeader<TData, TValue>({
   column,
   title,
@@ -245,6 +265,11 @@ export interface DataTableProps<TData, TValue> {
   onStateChange?: (state: DataTableQueryState) => void;
 }
 
+/**
+ * Server-driven data table: sorting, filtering, paging, column hiding, drag-to-reorder columns and
+ * row selection. The view is kept in localStorage, and every change is reported through
+ * `onStateChange` so the parent can refetch.
+ */
 export function DataTable<TData, TValue>({
   columns,
   data,
@@ -364,6 +389,10 @@ export function DataTable<TData, TValue>({
       return;
     }
 
+    /**
+     * FLIP animation: shifts a column's cells back to where they were, then lets them slide into
+     * their new place.
+     */
     const animateElements = (columnId: string, deltaX: number) => {
       tableRef.current
         ?.querySelectorAll<HTMLElement>(`[data-column-id="${columnId}"]`)
@@ -476,16 +505,22 @@ export function DataTable<TData, TValue>({
     },
   });
 
+  /** Begins dragging a column header. */
   const handleDragStart = (columnId: string, event: React.DragEvent<HTMLElement>) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', columnId);
     setDraggingColumnId(columnId);
   };
 
+  /** Ends a column drag. */
   const handleDragEnd = () => {
     setDraggingColumnId(null);
   };
 
+  /**
+   * Moves the dragged column into this column's place as soon as it is dragged over, recording
+   * positions first so the move animates.
+   */
   const handleDragEnter = (columnId: string, event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     if (draggingColumnId && draggingColumnId !== columnId) {
@@ -494,11 +529,16 @@ export function DataTable<TData, TValue>({
     }
   };
 
+  /** Finishes a column drop. The reorder already happened on drag-enter. */
   const handleDrop = (_columnId: string, event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     handleDragEnd();
   };
 
+  /**
+   * Restores the default view: no sorting, filters, hidden columns or selection, default column
+   * order, first page.
+   */
   const resetTableView = () => {
     setSorting([]);
     setColumnFilters([]);
@@ -680,6 +720,9 @@ export function DataTable<TData, TValue>({
   );
 }
 
+/**
+ * The "select all on this page" checkbox, shown as indeterminate when only some rows are selected.
+ */
 export function DataTableSelectionHeader<TData>({ table }: { table: TanStackTable<TData> }) {
   return (
     <Checkbox
@@ -692,6 +735,7 @@ export function DataTableSelectionHeader<TData>({ table }: { table: TanStackTabl
   );
 }
 
+/** The checkbox that selects one row. */
 export function DataTableSelectionCell<TData>({
   row,
 }: {

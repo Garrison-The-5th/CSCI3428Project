@@ -67,6 +67,7 @@ export default class QuizController {
     return res.send({ quizzes });
   }
 
+  /** The quizzes in this person's recycle bin. */
   @get('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
@@ -162,6 +163,7 @@ export default class QuizController {
     }
   }
 
+  /** Edits a quiz's settings (title, type, time limit, …). */
   @put('/:id')
   @use(requireCourseEditor(fromQuizParam('id'), { attributes: { kind: 'QUIZ' } }))
   @use(authenticateAndAttachUser)
@@ -187,6 +189,7 @@ export default class QuizController {
     }
   }
 
+  /** Takes a quiz back out of the recycle bin. */
   @post('/:id/restore')
   @use(requireCourseEditor(fromQuizParam('id')))
   @use(authenticateAndAttachUser)
@@ -254,6 +257,7 @@ export default class QuizController {
     }
   }
 
+  /** Adds a question, on the end or straight after `afterOrder`. */
   @post('/:quizId/questions')
   @use(requireCourseEditor(fromQuizParam('quizId')))
   @use(authenticateAndAttachUser)
@@ -288,6 +292,7 @@ export default class QuizController {
   @use(
     requireCourseEditor(fromQuizParam('quizId'), { attributes: { kind: 'QUIZ', param: 'quizId' } }),
   )
+  /** Puts a quiz's questions in the order given; the list must name every question. */
   @use(authenticateAndAttachUser)
   async reorderQuestions(req: Request, res: Response) {
     try {
@@ -303,6 +308,7 @@ export default class QuizController {
     }
   }
 
+  /** Edits a question's prompt, hint or options. */
   @put('/questions/:id')
   @use(requireCourseEditor(fromQuestionParam('id'), { attributes: { kind: 'QUESTION' } }))
   @use(authenticateAndAttachUser)
@@ -315,6 +321,7 @@ export default class QuizController {
     }
   }
 
+  /** Permanently removes a question. */
   @del('/questions/:id')
   @use(requireCourseEditor(fromQuestionParam('id')))
   @use(authenticateAndAttachUser)

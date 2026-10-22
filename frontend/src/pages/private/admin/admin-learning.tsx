@@ -59,6 +59,10 @@ const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
 const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
 
+/**
+ * The author's Learning page: every lesson course they may edit, filterable, as cards that open the
+ * editor.
+ */
 const AdminLearning = () => {
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
@@ -72,6 +76,7 @@ const AdminLearning = () => {
 
   const filtersRef = useRef<HTMLDivElement>(null);
 
+  /** Shows a toast. */
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
 
@@ -156,6 +161,7 @@ const AdminLearning = () => {
   const drafts = matching.filter((course) => !course.published);
   const activeFilter = FILTERS.find((entry) => entry.key === filter)!;
 
+  /** One course's card: cover, title, counts and status. */
   const courseCard = (course: Course) => {
     const cover = imageSrc(course.imageData, course.imageType);
     const quizCount = course.sections.reduce((sum, section) => sum + section.quizzes.length, 0);

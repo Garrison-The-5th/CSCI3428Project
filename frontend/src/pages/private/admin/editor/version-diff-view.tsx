@@ -60,6 +60,10 @@ function StatusMark({ status }: { status: DiffStatus | undefined }) {
   return null;
 }
 
+/**
+ * One archived version laid out by module, marking what is the same as, added to or removed from
+ * the live version.
+ */
 const VersionDiffView = ({ diff }: { diff: VersionDiff }) => {
   const groups = moduleGroups(diff.course);
 

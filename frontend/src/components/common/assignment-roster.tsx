@@ -54,6 +54,7 @@ const AssignmentRoster = ({
   const [pendingRemove, setPendingRemove] = useState<Assignment | null>(null);
   const [pendingLink, setPendingLink] = useState<Assignment | null>(null);
 
+  /** Marks one assignment row as busy (or not), to disable its buttons while a request runs. */
   const setBusy = (id: string, busy: boolean) =>
     setBusyIds((prev) => {
       const next = new Set(prev);
@@ -109,6 +110,7 @@ const AssignmentRoster = ({
     );
   };
 
+  /** Mails an assignment again and reports whether the email went out. */
   const resend = (assignment: Assignment) =>
     run(
       assignment.id,
@@ -120,6 +122,7 @@ const AssignmentRoster = ({
       'Failed to resend the email',
     );
 
+  /** Sets or clears one assignment's deadline. */
   const changeDueDate = (assignment: Assignment, value: string) =>
     run(
       assignment.id,

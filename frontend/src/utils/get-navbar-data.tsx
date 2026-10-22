@@ -102,6 +102,7 @@ export const getNavbarData = (
   };
 };
 
+/** The sidebar's sign-out entry. */
 export const getLogoutItem = (): NavbarPage => {
   return logoutItem;
 };

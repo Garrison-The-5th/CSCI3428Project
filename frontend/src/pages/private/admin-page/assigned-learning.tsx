@@ -37,6 +37,10 @@ interface AssignedLearningProps {
 /** How a learner is doing, in the one word the roster leads with. */
 type Status = 'finished' | 'overdue' | 'started' | 'not-started' | 'off';
 
+/**
+ * Where one assignment stands: turned off, finished, overdue, started or not started — checked in
+ * that order.
+ */
 function statusOf(assignment: Assignment): Status {
   if (assignment.revokedAt) return 'off';
 
@@ -70,6 +74,7 @@ const STATUS_CLASS: Record<Status, string> = {
 /** Worst first, so the people who need chasing are at the top. */
 const STATUS_ORDER: Status[] = ['overdue', 'not-started', 'started', 'finished', 'off'];
 
+/** Who has been given which course, and how far each of them has got. */
 const AssignedLearning = ({ onNotify }: AssignedLearningProps) => {
   const [courses, setCourses] = useState<AssignedCourse[]>([]);
   const [loading, setLoading] = useState(true);

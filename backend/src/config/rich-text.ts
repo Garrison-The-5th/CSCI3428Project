@@ -50,6 +50,10 @@ const ALLOWED_TAGS = [
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const RGB_COLOR = /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/i;
 
+/**
+ * Cleans author HTML down to the tags, attributes and inline styles the editor toolbar can produce,
+ * so it is safe to render for learners.
+ */
 export function sanitizeRichText(html: string): string {
   return sanitizeHtml(html, {
     allowedTags: ALLOWED_TAGS,

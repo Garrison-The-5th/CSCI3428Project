@@ -291,12 +291,20 @@ export const SHAPE_BY_KIND = Object.fromEntries(SHAPES.map((s) => [s.kind, s])) 
 
 // ---- New items ----
 
+/**
+ * A fresh item id — a UUID where the browser has one, otherwise a time-plus-random fallback.
+ * Matches the server's id pattern either way.
+ */
 export function newItemId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * The geometry every new item starts with: `width` × `height`, centred on `centre`, unrotated and
+ * opaque.
+ */
 const base = (width: number, height: number, centre: { x: number; y: number }) => ({
   id: newItemId(),
   x: Math.round(centre.x - width / 2),
@@ -311,6 +319,7 @@ export const CANVAS_CENTRE = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
 
 export const DEFAULT_SHAPE_COLOR = '#1f4e79';
 
+/** A new outlined shape of the given kind, at its default size, centred on `centre`. */
 export function newShape(kind: ShapeKind, centre = CANVAS_CENTRE): CanvasShapeItem {
   const definition = SHAPE_BY_KIND[kind];
   return {
@@ -325,6 +334,7 @@ export function newShape(kind: ShapeKind, centre = CANVAS_CENTRE): CanvasShapeIt
   };
 }
 
+/** A new empty text box, centred on `centre`. */
 export function newTextBox(centre = CANVAS_CENTRE): CanvasTextItem {
   return {
     ...base(320, 80, centre),
@@ -406,6 +416,7 @@ export type Handle = (typeof HANDLES)[number];
 
 type Box = Pick<CanvasItemBase, 'x' | 'y' | 'width' | 'height' | 'rotation'>;
 
+/** Rotates the vector (x, y) by `degrees` about the origin. */
 function rotate(x: number, y: number, degrees: number): { x: number; y: number } {
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.cos(radians);
@@ -579,10 +590,12 @@ export function rotationToward(box: Box, px: number, py: number, snap = false): 
   return Math.round(degrees * 10) / 10;
 }
 
+/** `value` limited to the range [min, max]. */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Rounded to four decimal places — enough precision for crop fractions. */
 const r4 = (value: number) => Math.round(value * 10_000) / 10_000;
 
 /** The CSS filter for a picture's brightness, contrast and saturation. */
@@ -593,12 +606,14 @@ export function imageFilter(item: CanvasImageItem): string | undefined {
 
 // ---- Colour ----
 
+/** "#rrggbb" (with or without the #) as 0–255 channels. Anything unparseable reads as black. */
 export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex);
   const value = match ? parseInt(match[1], 16) : 0;
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 }
 
+/** 0–255 channels as "#rrggbb", clamping and rounding each one. */
 export function rgbToHex(r: number, g: number, b: number): string {
   const part = (n: number) =>
     clamp(Math.round(n) || 0, 0, 255)
@@ -607,4 +622,5 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${part(r)}${part(g)}${part(b)}`;
 }
 
+/** True for a six-digit "#rrggbb" colour — the only form the server stores. */
 export const isHexColor = (value: string) => /^#[0-9a-f]{6}$/i.test(value);

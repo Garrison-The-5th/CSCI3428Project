@@ -21,6 +21,10 @@ import { NextFunction, Request, Response } from 'express';
  */
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 
+/**
+ * Refuses a POST/PUT/PATCH that carries a body in anything other than JSON (or multipart for
+ * uploads), with a 415.
+ */
 export function enforceJsonContentType(req: Request, res: Response, next: NextFunction) {
   if (!BODY_METHODS.has(req.method)) return next();
 

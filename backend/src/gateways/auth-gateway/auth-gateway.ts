@@ -20,6 +20,7 @@ import { prisma } from '../../../prisma/prisma-client';
  * the service's problem, not this one's.
  */
 export default class AuthGateway {
+  /** Every user row. */
   static async getAll(): Promise<User[]> {
     return await prisma.user.findMany();
   }
@@ -63,6 +64,7 @@ export default class AuthGateway {
     return new Set(rows.map((row) => row.email.toLowerCase()));
   }
 
+  /** Users whose local role is plain `user`. */
   static async getUsers(): Promise<User[]> {
     return await prisma.user.findMany({
       where: { role: 'user' },
@@ -112,6 +114,7 @@ export default class AuthGateway {
     return user?.lastSignInAt != null;
   }
 
+  /** One user by their numeric id, or null. */
   static getUserById(id: number): Promise<User | null> {
     return prisma.user.findUnique({ where: { id } });
   }
@@ -138,16 +141,19 @@ export default class AuthGateway {
     return { assignmentsDeleted: assignments.count };
   }
 
+  /** Stamps the last sign-in time — the only reliable sign that someone has an account. */
   static markSignedIn(id: number) {
     return prisma.user.update({ where: { id }, data: { lastSignInAt: new Date() } });
   }
 
+  /** Exact-match lookup; the caller lower-cases the address first. */
   static async getUserByEmail(email: string): Promise<User | null> {
     return await prisma.user.findUnique({
       where: { email },
     });
   }
 
+  /** The user bound to a Keycloak account id (`sub`), or null if none is bound yet. */
   static getUserBySubject(keycloakSubject: string): Promise<User | null> {
     return prisma.user.findUnique({ where: { keycloakSubject } });
   }
@@ -157,10 +163,12 @@ export default class AuthGateway {
     return prisma.user.update({ where: { id }, data: { keycloakSubject } });
   }
 
+  /** Changes a user's stored address (used when Keycloak reports a verified new email). */
   static setEmail(id: number, email: string): Promise<User> {
     return prisma.user.update({ where: { id }, data: { email } });
   }
 
+  /** Inserts a user row, optionally already bound to a Keycloak account. */
   static async createUser(data: {
     email: string;
     name: string | null;
@@ -171,6 +179,7 @@ export default class AuthGateway {
     });
   }
 
+  /** Updates name and/or newsletter subscription; only the fields given change. */
   static async updateUser(
     id: number,
     data: { name?: string | null; subscribed?: boolean },
@@ -184,6 +193,10 @@ export default class AuthGateway {
     });
   }
 
+  /**
+   * Turns the newsletter on for an address, creating the row if needed. An
+   * existing name is only replaced when a non-blank one is given.
+   */
   static async subscribeUser(data: { email: string; name?: string | null }): Promise<User> {
     return await prisma.user.upsert({
       where: {
@@ -201,6 +214,7 @@ export default class AuthGateway {
     });
   }
 
+  /** Everyone subscribed to the newsletter, by email. */
   static async getSubscribedUsers(): Promise<User[]> {
     return await prisma.user.findMany({
       where: { subscribed: true },

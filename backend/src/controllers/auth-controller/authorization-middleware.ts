@@ -14,6 +14,7 @@ import type { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gatew
 
 export type { CourseReach };
 
+/** Passes when the caller holds this one Keycloak role. */
 export function requireRole(requiredRole: string) {
   return requireAnyRole([requiredRole]);
 }

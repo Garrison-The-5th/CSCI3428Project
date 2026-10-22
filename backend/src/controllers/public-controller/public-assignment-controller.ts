@@ -106,6 +106,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** What the link's holder has viewed and attempted so far. */
   @get('/:token/progress')
   @use(readLimit)
   async getProgress(req: Request, res: Response) {
@@ -117,6 +118,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** Marks a section as viewed by the link's holder. */
   @post('/:token/sections/:sectionId/view')
   @use(writeLimit)
   async recordView(req: Request, res: Response) {
@@ -168,6 +170,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** Grades and records a quiz handed in through the link. */
   @post('/:token/quizzes/:quizId/attempt')
   @use(writeLimit)
   async submitAttempt(req: Request, res: Response) {
@@ -199,6 +202,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** The link holder's notes on a course. */
   @get('/:token/courses/:courseId/notes')
   @use(readLimit)
   async getNotes(req: Request, res: Response) {
@@ -210,6 +214,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** Saves a note for the link's holder. */
   @post('/:token/courses/:courseId/notes')
   @use(writeLimit)
   async createNote(req: Request, res: Response) {
@@ -227,6 +232,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** Rewrites one of the link holder's notes. */
   @put('/:token/notes/:noteId')
   @use(writeLimit)
   async updateNote(req: Request, res: Response) {
@@ -239,6 +245,7 @@ export default class PublicAssignmentController {
     }
   }
 
+  /** Deletes one of the link holder's notes. */
   @del('/:token/notes/:noteId')
   @use(writeLimit)
   async deleteNote(req: Request, res: Response) {

@@ -220,6 +220,7 @@ export default class AssignmentController {
     }
   }
 
+  /** Mails the assignment again. Not a content edit, so it does not mark the draft as changed. */
   @post('/:id/resend')
   @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)
@@ -238,6 +239,7 @@ export default class AssignmentController {
     }
   }
 
+  /** Deletes an assignment and clears the person's progress in what it gave them. */
   @del('/:id')
   @use(requireCourseEditor(fromAssignmentParam('id'), { marksDraftEdited: false }))
   @use(authenticateAndAttachUser)

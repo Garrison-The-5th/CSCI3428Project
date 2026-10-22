@@ -84,10 +84,16 @@ const QuizPane = ({
     onSelectSection(course.sections[0].id);
   }, [course, selectedSectionId, onSelectSection]);
 
+  /**
+   * The new-quiz form state for one section (or the standalone slot), defaulting to an untitled
+   * exam.
+   */
   const draftFor = (key: string) => drafts[key] ?? { title: '', type: 'EXAM' as QuizType };
+  /** Updates part of one new-quiz form. */
   const setDraft = (key: string, patch: Partial<{ title: string; type: QuizType }>) =>
     setDrafts((prev) => ({ ...prev, [key]: { ...draftFor(key), ...patch } }));
 
+  /** Creates a quiz in a section from that section's new-quiz form. */
   const createInSection = async (sectionId: string) => {
     const draft = draftFor(sectionId);
     const title = draft.title.trim();
@@ -134,6 +140,7 @@ const QuizPane = ({
     if (ok) setDraft(moduleId, { title: '' });
   };
 
+  /** The quiz-kind dropdown for one new-quiz form. */
   const typePicker = (key: string) => (
     <select
       value={draftFor(key).type}

@@ -40,6 +40,7 @@ export function firstName(user: { name: string | null; email: string }): string 
   return given || user.email;
 }
 
+/** The cut-off time: a lease last renewed before this has lapsed. */
 function staleBefore() {
   return new Date(Date.now() - EDIT_LEASE_TTL_MS);
 }
@@ -79,6 +80,7 @@ export default class EditLeaseService {
     };
   }
 
+  /** Gives up one claim. Only the holder's own claim is released. */
   static async release(scope: EditScope, targetId: string, userId: number) {
     const { count } = await EditLeaseGateway.release(scope, targetId, userId);
     return { released: count > 0 };

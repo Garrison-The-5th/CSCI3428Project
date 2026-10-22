@@ -209,6 +209,10 @@ app.use(
   },
 );
 
+/**
+ * Connects to the database, starts the HTTP server and the recycle-bin sweep, and wires up graceful
+ * shutdown. Exits the process if the database cannot be reached.
+ */
 async function startServer() {
   try {
     await connectDB();

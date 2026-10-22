@@ -72,6 +72,10 @@ const MiniBar = ({ course }: { course: LearnerCourseProgress }) => (
   </li>
 );
 
+/**
+ * Who has been given learning and how they are getting on — for this author's courses or, with
+ * `scope` "all", everyone's.
+ */
 const StudentInsights = ({ onNotify }: StudentInsightsProps) => {
   const [learners, setLearners] = useState<LearnerInsight[]>([]);
   const [scope, setScope] = useState<'all' | 'mine'>('mine');

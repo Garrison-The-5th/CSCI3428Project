@@ -151,6 +151,10 @@ export function cleanStringList(
  */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * A required email address, trimmed, lower-cased, length-checked and loosely pattern-checked (see
+ * EMAIL_PATTERN). Throws a user-facing message naming `label`.
+ */
 export function normaliseEmail(value: unknown, label = 'email'): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`${label} is required`);
@@ -225,6 +229,10 @@ export function boundedInteger(
  */
 export const MAX_DAYS_REMAINING = 1825;
 
+/**
+ * "Days to complete" from a request: undefined leaves it unchanged, blank clears it (null),
+ * anything else must be a whole number from 1 to MAX_DAYS_REMAINING.
+ */
 export function parseDaysRemaining(value: unknown, label = 'days remaining') {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;

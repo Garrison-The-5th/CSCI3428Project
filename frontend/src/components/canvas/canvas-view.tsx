@@ -103,6 +103,7 @@ interface CanvasViewProps {
   onTextClick?: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
+/** A canvas as the learner sees it — read-only and scaled to fit its box. */
 const CanvasView = ({ data, fill = false, onTextClick }: CanvasViewProps) => {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
   const sources = useImageSources(data?.images);

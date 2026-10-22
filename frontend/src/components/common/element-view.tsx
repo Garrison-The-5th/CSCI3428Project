@@ -73,6 +73,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
   // moment; panning is the difference between the two.
   const dragFrom = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
 
+  /** Changes the picture's zoom by `delta`, clamped to MIN_ZOOM–MAX_ZOOM. */
   const zoomBy = (delta: number) =>
     setZoom((current) =>
       Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((current + delta) * 100) / 100)),
@@ -103,6 +104,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
+    /** Ctrl/pinch + wheel zooms around the pointer; a plain scroll is left to pan the box. */
     const onWheel = (event: WheelEvent) => {
       // A plain two-finger scroll is panning, and the box does that itself.
       if (!event.ctrlKey) return;
@@ -155,6 +157,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
     viewport.scrollTop = held.contentY * zoom - held.y;
   }, [zoom]);
 
+  /** Starts dragging a zoomed-in picture around. Does nothing at 100%. */
   const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
     if (!viewport || zoom === 1) return;
@@ -167,6 +170,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
     viewport.setPointerCapture(event.pointerId);
   };
 
+  /** Scrolls the picture to follow the pointer. */
   const pan = (event: React.PointerEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
     const from = dragFrom.current;
@@ -175,6 +179,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
     viewport.scrollTop = from.top - (event.clientY - from.y);
   };
 
+  /** Stops dragging the picture. */
   const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
     dragFrom.current = null;
     viewportRef.current?.releasePointerCapture(event.pointerId);
@@ -291,7 +296,15 @@ function openLinksInNewTab(event: React.MouseEvent<HTMLElement>) {
   window.open(link.href, '_blank', 'noopener,noreferrer');
 }
 
+/**
+ * Renders one piece of course content — video, picture, PDF, text or canvas — for a learner. With
+ * `preview`, missing content shows a placeholder note for the author instead of nothing.
+ */
 const ElementView = ({ element, preview = false, fill = false }: ElementViewProps) => {
+  /**
+   * The author-only placeholder for content that has not been filled in yet; renders nothing for
+   * learners.
+   */
   const missing = (message: string) =>
     preview ? (
       <p className="rounded border border-dashed border-gray-300 p-3 text-sm text-dark-gray">

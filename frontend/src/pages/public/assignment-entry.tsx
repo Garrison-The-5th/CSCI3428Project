@@ -31,6 +31,10 @@ const FAILURE_TITLES: Record<AssignmentFailure, string> = {
   error: 'Something went wrong',
 };
 
+/**
+ * What /a/:token does: checks the private link and starts a guest session for it, or explains why
+ * the link cannot be opened.
+ */
 const AssignmentEntry = () => {
   const { token } = useParams<{ token: string }>();
   const { startSession, setEmail } = useGuest();

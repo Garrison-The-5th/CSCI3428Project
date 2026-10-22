@@ -21,6 +21,10 @@ import { Course, imageSrc } from '@/services/curriculum-api';
 import HttpHelper from '@/utils/http-helper';
 import { logger } from '@/utils/logger';
 
+/**
+ * The Course Editor page for contributors: the courses they have been named on, each opening the
+ * editor.
+ */
 const CourseEditorList = () => {
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);

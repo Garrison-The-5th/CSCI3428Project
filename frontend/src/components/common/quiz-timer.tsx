@@ -36,6 +36,10 @@ function formatCountdown(seconds: number): string {
   return `${minutes}:${String(safe % 60).padStart(2, '0')}`;
 }
 
+/**
+ * The countdown ring shown during a timed quiz. It floats over the page and can be dragged out of
+ * the way.
+ */
 const QuizTimer = ({ secondsLeft, totalSeconds }: QuizTimerProps) => {
   const [position, setPosition] = useState(INITIAL);
   const dragFrom = useRef<{ x: number; y: number; right: number; top: number } | null>(null);
@@ -43,6 +47,7 @@ const QuizTimer = ({ secondsLeft, totalSeconds }: QuizTimerProps) => {
   // Keep it on screen when the window shrinks. Without this, a timer parked at
   // the right edge of a wide window is off the side of a narrow one.
   useEffect(() => {
+    /** Pulls the timer back on screen after the window shrinks. */
     const clamp = () => {
       setPosition((current) => ({
         right: Math.min(current.right, Math.max(0, window.innerWidth - SIZE)),
@@ -53,6 +58,7 @@ const QuizTimer = ({ secondsLeft, totalSeconds }: QuizTimerProps) => {
     return () => window.removeEventListener('resize', clamp);
   }, []);
 
+  /** Starts moving the timer, capturing the pointer. */
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     dragFrom.current = {
       x: event.clientX,
@@ -63,6 +69,7 @@ const QuizTimer = ({ secondsLeft, totalSeconds }: QuizTimerProps) => {
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
+  /** Moves the timer with the pointer, keeping it on screen. */
   const drag = (event: React.PointerEvent<HTMLDivElement>) => {
     const from = dragFrom.current;
     if (!from) return;
@@ -80,6 +87,7 @@ const QuizTimer = ({ secondsLeft, totalSeconds }: QuizTimerProps) => {
     });
   };
 
+  /** Stops moving the timer. */
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     dragFrom.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);

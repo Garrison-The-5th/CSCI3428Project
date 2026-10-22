@@ -42,6 +42,7 @@ const users = [
   },
 ];
 
+/** Inserts the sample users above into an empty database. */
 async function main() {
   console.log('Seeding users...');
   for (const user of users) {

@@ -15,6 +15,7 @@ import ToastNotification from '@/components/common/toast-notification';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 
+/** The learner's own details, and the privacy and data controls that go with them. */
 const Profile = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);

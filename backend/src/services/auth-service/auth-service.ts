@@ -12,6 +12,9 @@ import AdminAccessService from '@/services/admin-access-service/admin-access-ser
 
 import { User } from '../../../generated/prisma';
 
+/** A sign-in that would land on somebody else's record. Answered with a 403. */
+export class IdentityConflictError extends Error {}
+
 /**
  * User records, and the newsletter subscription that sits on the same row.
  *
@@ -21,10 +24,8 @@ import { User } from '../../../generated/prisma';
  * existing proves nothing about whether they have an account. `lastSignInAt` is
  * the only reliable answer to that, and `markSignedIn` is what maintains it.
  */
-/** A sign-in that would land on somebody else's record. Answered with a 403. */
-export class IdentityConflictError extends Error {}
-
 export default class AuthService {
+  /** Every user row, unfiltered. */
   static async getAll(): Promise<User[]> {
     try {
       return await AuthGateway.getAll();
@@ -79,6 +80,7 @@ export default class AuthService {
     });
   }
 
+  /** Users whose local role is plain `user` (no author or admin role). */
   static async getUsers(): Promise<User[]> {
     try {
       return await AuthGateway.getUsers();
@@ -106,6 +108,7 @@ export default class AuthService {
     }
   }
 
+  /** Looks a user up by email, case-insensitively. Throws on an address with no "@". */
   static async getUserByEmail(email: string): Promise<User | null> {
     try {
       if (!email || !email.includes('@')) {
@@ -118,6 +121,10 @@ export default class AuthService {
     }
   }
 
+  /**
+   * Creates a user row for an address, with no Keycloak account bound yet —
+   * that happens on their first sign-in. Refuses an address already in use.
+   */
   static async createUser(data: { email: string; name: string | undefined }): Promise<User> {
     try {
       if (!data.email || !data.email.includes('@')) {
@@ -140,6 +147,7 @@ export default class AuthService {
     }
   }
 
+  /** Renames a user; a blank name is refused. */
   static async updateUser(id: number, data: { name: string | undefined }): Promise<User> {
     try {
       if (!data.name?.trim()) {
@@ -155,6 +163,10 @@ export default class AuthService {
     }
   }
 
+  /**
+   * Newsletter sign-up. Creates the user row if the address is new, otherwise
+   * just turns the subscription on (and fills in the name if one was given).
+   */
   static async subscribeByEmail(data: { email: string; name?: string | null }): Promise<User> {
     try {
       if (!data.email || !data.email.includes('@')) {
@@ -171,6 +183,7 @@ export default class AuthService {
     }
   }
 
+  /** Everyone on the newsletter list, by email. */
   static async getSubscribedUsers(): Promise<User[]> {
     try {
       return await AuthGateway.getSubscribedUsers();
@@ -181,7 +194,8 @@ export default class AuthService {
   }
 
   /**
-   * Get or create user - useful for SSO/OAuth flows
+   * Type-ahead over existing users by email or name. `accountsOnly` limits it to
+   * people who have actually signed in.
    */
   static searchUsers(query: string, options?: { accountsOnly?: boolean }) {
     return AuthGateway.searchUsers(query, options);
@@ -277,6 +291,11 @@ export default class AuthService {
     return user;
   }
 
+  /**
+   * The user row for an address, made if it does not exist yet. Used wherever
+   * someone has to be named before they have signed in — contributors and
+   * assignments. A given name overwrites the stored one.
+   */
   static async getOrCreateUser(email: string, name?: string): Promise<User> {
     try {
       let user = await this.getUserByEmail(email);

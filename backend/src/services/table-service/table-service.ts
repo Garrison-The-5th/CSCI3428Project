@@ -33,6 +33,12 @@ type TableSummary = {
   teamCount: number;
 };
 
+/**
+ * Demo data for the table page: 24 generated team members. Names, teams, roles
+ * and statuses cycle through the lists below so every combination of filter and
+ * sort has something to show, and `lastActiveMinutes` grows with the index so
+ * the "last active" column spans minutes, hours and days.
+ */
 const MEMBERS: TeamMemberRecord[] = Array.from({ length: 24 }, (_, index) => {
   const seed = index + 1;
   const firstNames = [
@@ -96,6 +102,11 @@ const MEMBERS: TeamMemberRecord[] = Array.from({ length: 24 }, (_, index) => {
   };
 });
 
+/**
+ * Reads a JSON-encoded array from a query string parameter. Anything missing,
+ * malformed or not an array comes back as an empty list, so a bad query never
+ * fails the request — it just applies no sorting or filtering.
+ */
 function parseJsonArray<T>(value: string | undefined): T[] {
   if (!value) {
     return [];
@@ -109,17 +120,24 @@ function parseJsonArray<T>(value: string | undefined): T[] {
   }
 }
 
+/** Parses a base-10 integer from a query parameter, falling back to `defaultValue`. */
 function parseInteger(value: unknown, defaultValue: number) {
   const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+/** Trimmed, lower-cased string form of any value, for case-insensitive comparison. */
 function normalizeText(value: unknown) {
   return String(value ?? '')
     .trim()
     .toLowerCase();
 }
 
+/**
+ * Looks up a column by its id. An explicit switch rather than `member[field]`
+ * so a client-supplied column id can only ever reach the known fields; an
+ * unknown id returns undefined and is ignored by the filters and sorts.
+ */
 function getFieldValue(member: TeamMemberRecord, field: string) {
   switch (field) {
     case 'id':
@@ -143,6 +161,9 @@ function getFieldValue(member: TeamMemberRecord, field: string) {
   }
 }
 
+/**
+ * True when the search box term appears in any field of the row. An empty term matches everything.
+ */
 function matchesGlobalFilter(member: TeamMemberRecord, term: string) {
   if (!term) {
     return true;
@@ -152,6 +173,11 @@ function matchesGlobalFilter(member: TeamMemberRecord, term: string) {
   return Object.values(member).some((value) => String(value).toLowerCase().includes(needle));
 }
 
+/**
+ * True when the row passes every per-column filter (a case-insensitive
+ * substring match). Filters on unknown columns are skipped rather than
+ * excluding every row.
+ */
 function matchesColumnFilters(member: TeamMemberRecord, filters: TableFilter[]) {
   return filters.every((filter) => {
     const value = getFieldValue(member, filter.id);
@@ -163,6 +189,7 @@ function matchesColumnFilters(member: TeamMemberRecord, filters: TableFilter[]) 
   });
 }
 
+/** Sorts statuses by workflow order (Active, Pending, Paused) rather than alphabetically. */
 function compareStatus(left: RowStatus, right: RowStatus) {
   const order: Record<RowStatus, number> = {
     Active: 0,
@@ -173,6 +200,14 @@ function compareStatus(left: RowStatus, right: RowStatus) {
   return order[left] - order[right];
 }
 
+/**
+ * Multi-column comparator. Each sort in `sorting` is tried in turn and the
+ * first one that tells the rows apart decides; later sorts only break ties.
+ *
+ * Status sorts by workflow order, "last active" sorts by the underlying minutes
+ * (the label text would put "10 days ago" before "2 hr ago"), numbers compare
+ * numerically, and everything else uses a natural, case-insensitive compare.
+ */
 function compareMembers(left: TeamMemberRecord, right: TeamMemberRecord, sorting: TableSort[]) {
   for (const sort of sorting) {
     const leftValue = getFieldValue(left, sort.id);
@@ -200,6 +235,7 @@ function compareMembers(left: TeamMemberRecord, right: TeamMemberRecord, sorting
   return 0;
 }
 
+/** Headline counts for the whole data set, unaffected by the current filters. */
 function createSummary(): TableSummary {
   return {
     totalCount: MEMBERS.length,
@@ -209,6 +245,13 @@ function createSummary(): TableSummary {
 }
 
 export default class TableService {
+  /**
+   * One page of the members table, server side: filter, then sort, then slice.
+   *
+   * The page size is clamped to 1–100, and a page index past the end is pulled
+   * back to the last page, so narrowing a filter while on page 5 lands on the
+   * last page that still has rows instead of an empty one.
+   */
   static async list(query: {
     sorting?: string;
     columnFilters?: string;

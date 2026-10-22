@@ -56,6 +56,10 @@ export class KeycloakError extends Error {
   }
 }
 
+/**
+ * Keycloak admin-API settings from the environment, or null when no service client is configured —
+ * callers then fall back to the local role copy.
+ */
 function config(): KeycloakConfig | null {
   const serviceClientId = process.env.KEYCLOAK_SERVICE_CLIENT_ID;
   const serviceClientSecret = process.env.KEYCLOAK_SERVICE_CLIENT_SECRET;
@@ -260,6 +264,10 @@ export default class KeycloakGateway {
     return role;
   }
 
+  /**
+   * Gives a user one of the app's realm roles. Fails with a 404 if the realm role has not been
+   * created in Keycloak.
+   */
   static async grantRole(userId: string, roleName: AppRole): Promise<void> {
     const role = await KeycloakGateway.realmRole(roleName);
     await KeycloakGateway.api(`/users/${encodeURIComponent(userId)}/role-mappings/realm`, {

@@ -9,6 +9,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { logger } from '@/utils/logger';
 
+/** Where an auto-save stands: nothing pending, in flight, done, or failed. */
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
 /**
  * Saves a value a short while after typing stops, instead of on a button press.
  *
@@ -23,8 +26,6 @@ import { logger } from '@/utils/logger';
  *   when `resetKey` says the form now holds a different record. Dropping the
  *   timer there lost whatever was typed in the last moment before the switch.
  */
-export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-
 export function useAutoSave<T>(
   value: T,
   save: (value: T) => Promise<unknown>,

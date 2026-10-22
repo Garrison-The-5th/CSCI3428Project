@@ -6,12 +6,13 @@
  */
 import '@/pages/public/login.css';
 
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 
 import logo from '@/assets/logo.svg';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 
+/** The sign-in page, with an optional Google button behind VITE_ENABLE_GOOGLE_LOGIN. */
 const Login = () => {
   // Feature flag: Set to false to disable Google OAuth login button
   const ENABLE_GOOGLE_LOGIN = import.meta.env.VITE_ENABLE_GOOGLE_LOGIN === 'true';
@@ -24,12 +25,10 @@ const Login = () => {
     return isAdmin ? <Navigate to="/admin" replace /> : <Navigate to="/" replace />;
   }
 
+  /** Signs in through Keycloak, going straight to the Google identity provider. */
   const handleGoogleLogin = () => {
     keycloak.login({ idpHint: 'oauth2' });
   };
-
-  const loginLinkStyles =
-    'inline-flex border-2 rounded-lg py-3 px-6 text-purple font-medium hover:bg-purple hover:text-light-gray hover:border-purple';
 
   return (
     <div
@@ -93,15 +92,6 @@ const Login = () => {
                 </Button>
               </>
             )}
-          </div>
-
-          <div className="login-links flex justify-center mt-8 gap-4">
-            <Link to="/public" className={loginLinkStyles}>
-              View Public Page
-            </Link>
-            <Link to="/about" className={loginLinkStyles}>
-              About
-            </Link>
           </div>
         </div>
       </div>

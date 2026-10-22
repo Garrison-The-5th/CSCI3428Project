@@ -105,6 +105,10 @@ const pressed = 'bg-navy text-white hover:bg-navy-hover hover:text-white';
 
 /** The cursor for a handle, turned with the item so it always points along the drag. */
 const CURSORS = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
+/**
+ * The resize cursor for a handle, turned to match the item's rotation and snapped to one of the
+ * four CSS resize cursors.
+ */
 function handleCursor(handle: Handle, rotation: number): string {
   const angle = (Math.atan2(handle.hy, handle.hx) * 180) / Math.PI + 90 + rotation;
   return CURSORS[Math.round((((angle % 180) + 180) % 180) / 45) % 4];
@@ -119,6 +123,7 @@ function handleCursor(handle: Handle, rotation: number): string {
  * than a round trip.
  */
 const ACCEPTED = IMAGE_ONLY_ACCEPT.split(',');
+/** True when the file's type or extension is on the cover photo's accept list. */
 function isAcceptedPicture(file: File): boolean {
   const extension = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`;
   return ACCEPTED.includes(file.type.toLowerCase()) || ACCEPTED.includes(extension);
@@ -201,6 +206,7 @@ const CanvasTextContent = ({
     if (ref.current && ref.current.innerHTML !== item.html) ref.current.innerHTML = item.html;
   }, [item.html]);
 
+  /** Reports the box's current markup and rendered height, so it can grow to fit. */
   const emit = () => {
     if (ref.current) onHtml(ref.current.innerHTML, ref.current.offsetHeight);
   };
@@ -227,6 +233,11 @@ const CanvasTextContent = ({
   );
 };
 
+/**
+ * The author's canvas editor: a fixed-size board of pictures, shapes and text boxes that can be
+ * dragged, resized, rotated, cropped and styled, with undo/redo. Emits the whole layout on every
+ * change; the parent saves it.
+ */
 const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps) => {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
   const scale = box.width > 0 ? box.width / CANVAS_WIDTH : 0;
@@ -266,11 +277,13 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   const future = useRef<CanvasLayout[]>([]);
   const [, setHistoryTick] = useState(0);
 
+  /** Hands a new layout to the parent (which auto-saves it), without touching history. */
   const emit = (next: CanvasLayout) => {
     layoutRef.current = next;
     onChange(next);
   };
 
+  /** Pushes `before` onto the undo stack (capped at HISTORY_LIMIT) and clears redo. */
   const remember = (before: CanvasLayout) => {
     lastStep.current = null;
     past.current = [...past.current.slice(-(HISTORY_LIMIT - 1)), before];
@@ -295,6 +308,10 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     emit(next);
   };
 
+  /**
+   * Moves one step between the undo and redo stacks — `undo` and `redo` are this in opposite
+   * directions.
+   */
   const travel = (from: typeof past, to: typeof future) => {
     const target = from.current[from.current.length - 1];
     if (!target) return;
@@ -313,6 +330,10 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   const selected = layout.items.find((item) => item.id === selectedId) ?? null;
 
+  /**
+   * Applies `patch` to one item. With `record`, it is an undoable step (repeats of the same kind of
+   * change fold together); without, it is a live update mid-gesture.
+   */
   const replaceItem = (id: string, patch: Partial<CanvasItem>, record = true) => {
     const current = layoutRef.current;
     const next = {
@@ -325,10 +346,12 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     else emit(next);
   };
 
+  /** Applies `patch` to the selected item, if there is one. */
   const updateSelected = (patch: Partial<CanvasItem>) => {
     if (selected) replaceItem(selected.id, patch);
   };
 
+  /** Puts a new item on top of the canvas and selects it. */
   const addItem = (item: CanvasItem) => {
     stopEditing();
     const current = layoutRef.current;
@@ -337,6 +360,10 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     setCropping(false);
   };
 
+  /**
+   * Selects an item (or nothing), closing crop mode, the adjust panel and any text editing that
+   * belonged to the previous selection.
+   */
   const select = (id: string | null) => {
     if (id !== selectedId) {
       setCropping(false);
@@ -351,6 +378,9 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   /** The layout as it was when writing began, so the whole edit undoes as one step. */
   const editStart = useRef<CanvasLayout | null>(null);
 
+  /**
+   * Puts a text box into typing mode, remembering the layout so the whole edit undoes as one step.
+   */
   const startEditing = (id: string) => {
     editStart.current = layoutRef.current;
     setCropping(false);
@@ -358,6 +388,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     setEditingId(id);
   };
 
+  /** Leaves typing mode, recording the edit as one undo step if anything changed. */
   const stopEditing = () => {
     if (editingId && editStart.current && editStart.current !== layoutRef.current) {
       remember(editStart.current);
@@ -391,12 +422,17 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   // ---- Pointer gestures ----
 
+  /** Converts a screen position to canvas coordinates, undoing the on-screen scale. */
   const toCanvas = (clientX: number, clientY: number): Point => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect || !scale) return { x: 0, y: 0 };
     return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale };
   };
 
+  /**
+   * Starts a move, resize, rotate, crop or pan (moving a picture inside its crop) drag. Updates are
+   * live while the pointer moves; the whole drag becomes one undo step on release.
+   */
   const beginGesture = (event: React.PointerEvent, gesture: Gesture) => {
     event.preventDefault();
     event.stopPropagation();
@@ -404,6 +440,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     const before = layoutRef.current;
     const id = gesture.start.id;
 
+    /** Applies the gesture for the pointer's current position. */
     const onMove = (move: PointerEvent) => {
       const point = toCanvas(move.clientX, move.clientY);
       const dx = 'from' in gesture ? point.x - gesture.from.x : 0;
@@ -437,6 +474,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
       }
     };
 
+    /** Ends the gesture and records it for undo if anything changed. */
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
@@ -450,6 +488,10 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     window.addEventListener('pointercancel', onUp);
   };
 
+  /**
+   * Selects an item and starts dragging it — panning the picture instead while cropping, and doing
+   * nothing for the text box being typed in, where the pointer places the caret.
+   */
   const onItemPointerDown = (event: React.PointerEvent, item: CanvasItem) => {
     if (event.button !== 0) return;
     // Writing in a text box: the pointer is for placing the caret, not dragging.
@@ -468,6 +510,10 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   // ---- Pictures ----
 
+  /**
+   * Uploads the given files and places each as a picture, at `at` if dropped or the centre
+   * otherwise. Unsupported files are reported, not uploaded.
+   */
   const addPictures = async (files: File[], at?: Point) => {
     setError(null);
     const rejected = files.filter((file) => !isAcceptedPicture(file));
@@ -498,6 +544,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     }
   };
 
+  /** Adds pictures dropped onto the canvas where they were dropped. */
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault();
     setDropActive(false);
@@ -508,6 +555,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   // ---- Keyboard ----
 
+  /** Removes the selected item. */
   const deleteSelected = () => {
     if (!selected) return;
     const current = layoutRef.current;
@@ -517,11 +565,17 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     setCropping(false);
   };
 
+  /** Copies the selected item, offset slightly so the copy is visible. */
   const duplicateSelected = () => {
     if (!selected) return;
     addItem({ ...selected, id: newItemId(), x: selected.x + 16, y: selected.y + 16 });
   };
 
+  /**
+   * Keyboard shortcuts: Escape backs out one level, Delete/Backspace removes, Enter starts typing
+   * in a text box, arrows nudge, and Ctrl/⌘ Z/Y/D undo, redo and duplicate. Ignored while typing in
+   * a field.
+   */
   const onKeyDown = (event: React.KeyboardEvent) => {
     const target = event.target as HTMLElement;
     const typing =
@@ -569,6 +623,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   // ---- Drawing ----
 
+  /** Draws one item, with its selection frame and handles when selected. */
   const renderItem = (item: CanvasItem) => {
     const editing = item.id === editingId;
     const frame: CSSProperties = {
@@ -720,6 +775,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   // ---- Toolbar pieces ----
 
+  /** The border-width slider shared by every item kind's toolbar. */
   const borderWidthControl = (item: CanvasItem, max = 20) => (
     <label className="flex h-8 items-center gap-2 text-sm text-dark-gray">
       Border
@@ -760,6 +816,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     />
   );
 
+  /** Toolbar controls for a selected shape: colour, fill and border. */
   const shapeToolbar = (item: Extract<CanvasItem, { kind: 'shape' }>) => {
     const strokeOnly = SHAPES.find((s) => s.kind === item.shape)?.strokeOnly;
     return (
@@ -800,6 +857,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     );
   };
 
+  /** Toolbar controls for a selected picture: crop, flip and brightness/contrast/saturation. */
   const imageToolbar = (item: CanvasImageItem) => {
     const cropped = Object.values(item.crop).some((side) => side > 0);
     return (
@@ -896,6 +954,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     );
   };
 
+  /** Toolbar controls for a selected text box: edit, background and border. */
   const textToolbar = (item: CanvasTextItem) => (
     <>
       {editingId !== item.id && (

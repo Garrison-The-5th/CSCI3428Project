@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/auth-context';
 import HttpHelper from '@/utils/http-helper';
 
+/** The contact page, with a newsletter sign-up form. */
 const ContactUs = () => {
   const { user } = useAuth();
   const [isSubscribeOpen, setIsSubscribeOpen] = useState(false);
@@ -34,6 +35,7 @@ const ContactUs = () => {
   const fieldLabel = 'text-center text-lg font-medium';
   const fieldValue = 'mb-6 px-6 text-lg text-text-muted';
 
+  /** Subscribes the entered address to the newsletter and shows the result. */
   const handleSubscribeSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);

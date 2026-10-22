@@ -147,6 +147,7 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `DELETE` | `/curriculum/courses/:id` | signed in, can edit this course | Soft delete — the course moves to the recycle bin and can be restored |
 | `POST` | `/curriculum/courses/:id/restore` | signed in, can edit this course | Brings a course back out of the recycle bin |
 | `POST` | `/curriculum/courses/:id/image` | signed in, can edit this course, upload quota | Uploads the course cover photo shown on the Learning page |
+| `DELETE` | `/curriculum/courses/:id/image` | signed in, can edit this course | Removes the cover photo from a lesson or quiz set |
 | `GET` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | Uploads the course cover photo shown on the Learning page |
 | `POST` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
 | `PUT` | `/curriculum/modules/:id` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |

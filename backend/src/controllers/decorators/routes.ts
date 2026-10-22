@@ -9,6 +9,10 @@ import 'reflect-metadata';
 import { MetadataKeys } from '@/controllers/decorators/metadata-keys';
 import { Methods } from '@/controllers/decorators/methods';
 
+/**
+ * Builds a method decorator (`@get`, `@post`, …) that records the HTTP verb and path for
+ * `@controller` to register.
+ */
 function routeBinder(method: string) {
   return function (path: string) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

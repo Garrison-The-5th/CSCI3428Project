@@ -135,6 +135,10 @@ const ROLE_COPY: Record<
   },
 };
 
+/**
+ * The admin Users page: everyone in the system, searchable and filterable by role, with a panel per
+ * person to grant or remove roles, delete them, and a form to mail newsletter subscribers.
+ */
 const UsersList = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -165,6 +169,7 @@ const UsersList = () => {
     fetchUsers();
   }, [user]);
 
+  /** Loads every user with their role labels, and whether this admin may manage other admins. */
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -182,9 +187,14 @@ const UsersList = () => {
 
   const shown = useMemo(() => filterUsers(users, query, roleFilters), [users, query, roleFilters]);
   const openUser = users.find((candidate) => candidate.id === openUserId) ?? null;
+  /**
+   * Whether this row is the signed-in admin — used to stop them removing their own admin role or
+   * deleting their own account.
+   */
   const isMe = (candidate: User) =>
     !!user?.email && candidate.email.toLowerCase() === user.email.toLowerCase();
 
+  /** Turns one role filter on or off. */
   const toggleFilter = (id: RoleFilter) =>
     setRoleFilters((current) => {
       const next = new Set(current);
@@ -193,6 +203,7 @@ const UsersList = () => {
       return next;
     });
 
+  /** Closes a person's panel, discarding any unconfirmed role change or delete. */
   const closeUser = () => {
     setOpenUserId(null);
     setPending(null);
@@ -200,6 +211,7 @@ const UsersList = () => {
     setAdminError(null);
   };
 
+  /** Deletes the open person after confirmation, then drops them from the list. */
   const confirmDelete = async () => {
     if (!openUser || deleting) return;
     const target = openUser;
@@ -242,6 +254,10 @@ const UsersList = () => {
     return null;
   };
 
+  /**
+   * Applies the pending admin/author role change for the open person and updates their row from the
+   * server's answer.
+   */
   const confirmRoleChange = async () => {
     if (!openUser || pending === null || adminSaving) return;
     const target = openUser;
@@ -279,6 +295,7 @@ const UsersList = () => {
     }
   };
 
+  /** Sends the composed subject and message to every newsletter subscriber. */
   const handleSendMail = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMailSending(true);

@@ -64,6 +64,10 @@ const RouteFallback = () => (
   </div>
 );
 
+/**
+ * The app shell: works out which tabs this person gets (guests see learner tabs only), and lays out
+ * the sidebar, theme and routes.
+ */
 function App() {
   const { authenticated, loading, isAdmin, isAuthor } = useAuth();
   const { isGuest } = useGuest();
@@ -72,7 +76,9 @@ function App() {
   const showShell = authenticated || isGuest;
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') ?? 'light');
+  /** Opens or closes the sidebar. */
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
+  /** Switches between light and dark themes. */
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   const { pages } = useMemo(
     () =>

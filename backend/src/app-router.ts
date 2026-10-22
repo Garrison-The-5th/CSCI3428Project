@@ -11,6 +11,7 @@ import express from 'express';
 export class AppRouter {
   private static instance: express.Router;
 
+  /** The one shared router every `@controller` registers its routes on. */
   static getInstance(): express.Router {
     if (!AppRouter.instance) {
       AppRouter.instance = express.Router();

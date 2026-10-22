@@ -56,6 +56,7 @@ import {
 import { useLearnerApi } from '@/services/learner-api';
 import { logger } from '@/utils/logger';
 
+/** A duration for display: "45 min", "2 hours" or "1 h 30 min". */
 function formatMinutes(minutes: number): string {
   if (minutes <= 0) return '0 min';
   if (minutes < 60) return `${minutes} min`;
@@ -71,6 +72,10 @@ interface CourseLandingProps {
   preview?: boolean;
 }
 
+/**
+ * The overview a learner sees after picking a course card: description, outcomes, prerequisites,
+ * length, deadline and a Start/Continue button. With `preview` it shows an author's draft.
+ */
 const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) => {
   const api = useLearnerApi();
   const { courseId } = useParams<{ courseId: string }>();
@@ -209,6 +214,7 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
   /** Where Continue drops them: the last thing they actually opened. */
   const resumeAt = resumeItem(course, items, unlocked, progress);
 
+  /** A ticked bullet list, for outcomes and prerequisites. */
   const bulletList = (items: string[]) => (
     <ul className="flex flex-col gap-2">
       {items.map((item, index) => (

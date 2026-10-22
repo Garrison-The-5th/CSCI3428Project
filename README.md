@@ -55,12 +55,15 @@ See [Code Structure](docs/code_structure.md) for the full domain model and file 
 ## Prerequisites
 ### Download and install:
 1) Docker Desktop
-2) Node.js
-3) PostgreSQL
+2) Node.js 24 (`engines` is `^24.0.0` in every `package.json`)
+
+PostgreSQL does not need installing — both ways of running the app below start
+it in Docker.
 
 ## Table of Contents
 
 - [Quick Setup](#quick-setup)
+- [Troubleshooting](#troubleshooting)
 - [Running the tests](#running-the-tests)
 - [Contributing](#contributing)
 - [Available Scripts](#available-scripts)
@@ -70,8 +73,8 @@ See [Code Structure](docs/code_structure.md) for the full domain model and file 
 
 | Document | What it covers |
 |---|---|
-| [Code Structure](docs/code_structure.md) | Domain model and file tree |
-| [API Reference](docs/api-reference.md) | All 112 routes, access levels and error codes |
+| [Code Structure](docs/code_structure.md) | Domain model, file tree, and the rules to know **before you change anything** |
+| [API Reference](docs/api-reference.md) | Every route, its access level and error codes |
 | [Testing](docs/testing.md) | Every suite, how to run it, and the merge gate |
 | [UX Design](docs/ux-design.md) | Navigation paths per audience, per-page rationale |
 | [Security Follow-Ups](docs/security-follow-ups.md) | Known gaps against the standards, and why |
@@ -105,6 +108,25 @@ Copy each example file and fill in your values. None of these are committed —
 **`DB_NAME` in the root `.env` and the database named in `backend/.env`'s
 `DATABASE_URL` must match.** They are easy to let drift apart, and the symptom
 is a backend that starts cleanly against an empty database.
+
+The backend settings that change behaviour, rather than just pointing at a
+service, are worth knowing about. Each is explained in more detail in
+`backend/example.env.backend.dev`.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PUBLICKEY` | — | Keycloak realm public key; every API request's token is verified against it |
+| `KEYCLOAK_CLIENT_ID` | `learning-client` | Client(s) whose tokens the API accepts (comma-separated) |
+| `KEYCLOAK_SERVICE_CLIENT_ID` / `_SECRET` | blank | Lets the Users page grant and remove roles in Keycloak. Blank: roles are read-only |
+| `REQUIRE_VERIFIED_EMAIL` | `false` | Refuses a first sign-in with an unverified email onto a record created by assigning work. Turn on once the realm verifies emails |
+| `TRUST_PROXY` | unset | Proxy hops to trust for the caller's IP. **Must be set in production** or the rate limiter sees one address for everyone |
+| `APP_BASE_URL` / `APP_ALLOWED_HOSTS` | blank | Where links in emails point. Needed in production |
+| `EMAIL_USER` / `EMAIL_APP_PASSWORD` | blank | SMTP sender. Blank: emails are logged instead of sent |
+
+Less often needed, and not in the example file: `CORS_ALLOWED_ORIGINS`
+(default `http://localhost:5173,http://127.0.0.1:5173`), `JSON_BODY_LIMIT`
+(`2mb`), `LOG_LEVEL` (`debug`, or `info` in production), `SMTP_HOST` / `SMTP_PORT`
+(`smtp.gmail.com` / `465`) and `KEYCLOAK_URL` (`http://localhost:4000`).
 
 ### 2) [Keycloak setup](docs/keycloak.md)
 
@@ -158,18 +180,32 @@ Access the app at `http://localhost:5173`.
 > new. The two use different container names and bind the same ports, so run one
 > or the other — never both.
 
-## Available Scripts
+## Troubleshooting
+
+**`sh: tsc: command not found` (or `jest`, `prettier`, `eslint`) from an `npm run`
+script, although the dependency is installed.** The checkout's path contains a
+colon — a folder named after a time such as `10:06:26` does it. npm adds
+`node_modules/.bin` to `PATH`, which is colon-separated, so the path is split in
+two and none of the tools are found. Move the checkout to a path without a colon.
+
+**A clean backend start against an empty database.** `DB_NAME` and
+`DATABASE_URL` disagree — see step 1 above.
+
+**Signed in, but every API call is 401.** `PUBLICKEY` is missing or belongs to a
+different realm. In Docker, recreate the container after changing it
+(`docker compose up -d backend`); a restart does not re-read `.env`.
 
 ## Running the tests
 
 From the repo root — these delegate into both workspaces:
 
 ```bash
-npm test              # 392 tests: backend unit + integration, frontend
-npm run test:unit     # unit only, no database needed
-npm run test:e2e      # 16 Playwright flows
-npm run test:coverage # with coverage, enforcing the thresholds
-npm run check         # everything the PR pipeline runs, in the same order
+npm test                 # backend unit + integration, then frontend
+npm run test:unit        # unit only, no database needed
+npm run test:integration # backend integration only (needs a test database)
+npm run test:e2e         # Playwright flows (needs both servers running)
+npm run test:coverage    # with coverage, enforcing the thresholds
+npm run check            # everything the PR pipeline runs, in the same order
 ```
 
 Or target one workspace directly with `--prefix backend` / `--prefix frontend`.
@@ -198,6 +234,13 @@ too. CodeQL, a dependency audit and SBOM generation run alongside.
 - Every file opens with a header block naming file, purpose, author and date.
 - Anything a learner reads comes from the published snapshot, never the live rows.
 - Quiz answers are stripped server-side on every path that returns a quiz.
+- Several rules span files and fail silently when missed — a new field that never
+  reaches learners, a canvas property dropped on save, a toolbar feature the
+  sanitiser strips. Read
+  [Before you change anything](docs/code_structure.md#before-you-change-anything)
+  first.
+
+## Available Scripts
 
 ### Root scripts
 
@@ -209,6 +252,7 @@ Run these from the repository root; each delegates into the workspaces.
 | `npm run setup` | Start PostgreSQL in Docker and apply migrations |
 | `npm test` | Backend unit + integration, then frontend |
 | `npm run test:unit` | Unit suites only — no database needed |
+| `npm run test:integration` | Backend integration suites only |
 | `npm run test:e2e` | Playwright end-to-end flows |
 | `npm run test:coverage` | Tests with coverage, enforcing the thresholds |
 | `npm run typecheck` | Type-check both workspaces |
@@ -223,15 +267,29 @@ Run these from the repository root; each delegates into the workspaces.
 - `npm run start-back` - Start only backend locally
 
 ### Backend Scripts (run from /backend directory)
-- `npm run dev` - Start backend in development mode with auto-reload
+- `npm run dev` - Apply migrations, then start the backend with auto-reload
+- `npm run build` - Compile to `build/` and rewrite the `@/` import aliases
 - `npm run db:setup` - Apply existing migrations and generate the Prisma client
 - `npm test` - Run the unit and integration suites
+- `npm run test:unit` / `test:integration` - Run one of the two
+- `npm run test:watch` - Re-run the unit suites on every change
 - `npm run test:coverage` - Run with coverage and enforce the thresholds
+- `npm run test:smoke` - Run the end-to-end check scripts in `scripts/` against the database
+- `npm run check` - Type-check, test and smoke-test
 - `npm run typecheck` - Type-check src, scripts and tests
+- `npm run prisma:generate` - Regenerate the Prisma client without migrating
 - `npm run db:migrate` - Create a new database migration (see the caveat below)
 - `npm run db:seed` - Load sample users
 - `npm run db:studio` - Open Prisma Studio (database GUI)
 - `npm run db:reset` - Reset database (delete all data)
+
+### Frontend Scripts (run from /frontend directory)
+- `npm run dev` - Start the Vite dev server on port 5173
+- `npm run build` - Type-check and build for production
+- `npm run preview` - Serve the production build locally
+- `npm run typecheck` - Type-check only
+- `npm test` / `test:watch` / `test:coverage` - Jest component and unit tests
+- `npm run test:e2e` / `test:e2e:ui` - Playwright flows, headless or in the Playwright UI
 
 ### Creating new migrations
 

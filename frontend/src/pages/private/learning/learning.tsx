@@ -28,6 +28,10 @@ import { Course, imageSrc } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { logger } from '@/utils/logger';
 
+/**
+ * The learner's Learning tab: a grid of the courses assigned to them, with progress and "new"
+ * marks.
+ */
 const Learning = () => {
   const api = useLearnerApi();
   const navigate = useNavigate();

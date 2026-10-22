@@ -49,11 +49,16 @@ export interface NewMarkers {
   any: boolean;
 }
 
+/**
+ * Turns the server's "new since you started" ids into lookups for the rail. An item or section
+ * inside a wholly new module is not marked again — the module heading already says so.
+ */
 export function newMarkers(ids: NewIds | null | undefined): NewMarkers {
   const modules = new Set(ids?.newModuleIds ?? []);
   const sections = new Set(ids?.newSectionIds ?? []);
   const items = new Set([...(ids?.newElementIds ?? []), ...(ids?.newQuizIds ?? [])]);
 
+  /** Whether the given module is itself new. */
   const moduleIsNew = (moduleId: string | null) => moduleId !== null && modules.has(moduleId);
 
   return {

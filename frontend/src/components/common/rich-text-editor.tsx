@@ -115,6 +115,7 @@ const TablePicker = ({ onPick }: { onPick: (rows: number, columns: number) => vo
     return () => document.removeEventListener('pointerdown', close);
   }, [open]);
 
+  /** Closes the picker and inserts a table of the chosen size. */
   const pick = (rows: number, columns: number) => {
     setOpen(false);
     onPick(rows, columns);
@@ -212,6 +213,11 @@ interface RichTextToolbarProps {
   className?: string;
 }
 
+/**
+ * The formatting toolbar for a contentEditable editor: bold/italic/underline, headings, fonts,
+ * sizes, colours, alignment, lists, links, tables and undo/redo. Every change is reported through
+ * `onChange` as the editor's new HTML.
+ */
 export const RichTextToolbar = ({ editorRef: ref, onChange, className }: RichTextToolbarProps) => {
   /**
    * The last selection made inside the editor.
@@ -230,6 +236,10 @@ export const RichTextToolbar = ({ editorRef: ref, onChange, className }: RichTex
   const sizeFocused = useRef(false);
 
   useEffect(() => {
+    /**
+     * On every selection change inside this editor: saves the range, updates the size box and
+     * colour swatch to match the text there, and notes which table cell the caret is in.
+     */
     const remember = () => {
       const selection = window.getSelection();
       if (!selection || selection.rangeCount === 0) return;
@@ -252,6 +262,7 @@ export const RichTextToolbar = ({ editorRef: ref, onChange, className }: RichTex
     return () => document.removeEventListener('selectionchange', remember);
   }, []);
 
+  /** Reports the editor's current HTML after a toolbar change. */
   const emit = () => {
     if (ref.current) onChange(ref.current.innerHTML);
   };
@@ -419,6 +430,7 @@ export const RichTextToolbar = ({ editorRef: ref, onChange, className }: RichTex
     emit();
   };
 
+  /** Inserts an empty table of the given size where the author's selection was. */
   const insertTable = (rows: number, columns: number) => {
     restoreSelection();
     document.execCommand('insertHTML', false, emptyTableHtml(rows, columns));
@@ -447,6 +459,10 @@ export const RichTextToolbar = ({ editorRef: ref, onChange, className }: RichTex
     return cell ? [cell] : [];
   };
 
+  /**
+   * Asks for an address and links the selected text to it. Only http(s) and mailto links are
+   * accepted, matching the server's sanitiser.
+   */
   const addLink = () => {
     const url = window.prompt('Link address');
     if (!url) return;
@@ -668,6 +684,10 @@ export function pastePlainText(event: React.ClipboardEvent<HTMLElement>, after: 
   after();
 }
 
+/**
+ * A contentEditable text editor with the toolbar above it. `value` is HTML; `onChange` receives the
+ * new HTML on every edit.
+ */
 const RichTextEditor = ({ value, onChange, placeholder }: RichTextEditorProps) => {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -679,6 +699,7 @@ const RichTextEditor = ({ value, onChange, placeholder }: RichTextEditorProps) =
     }
   }, [value]);
 
+  /** Reports the editor's current HTML after typing or pasting. */
   const emit = useCallback(() => {
     if (ref.current) onChange(ref.current.innerHTML);
   }, [onChange]);

@@ -152,6 +152,7 @@ export const CanvasPicture = ({
     );
   }
 
+  /** The <img> for a picture item, with the given positioning style. */
   const picture = (style: CSSProperties) => (
     <img
       src={src}

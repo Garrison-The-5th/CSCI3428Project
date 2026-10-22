@@ -57,6 +57,10 @@ export interface LearnerApi {
   deleteNote: (noteId: string) => Promise<unknown>;
 }
 
+/**
+ * The learner API for the current session: the private-link endpoints when there is a guest
+ * `token`, otherwise the signed-in endpoints.
+ */
 export function makeLearnerApi(token: string | null): LearnerApi {
   if (token) {
     return {

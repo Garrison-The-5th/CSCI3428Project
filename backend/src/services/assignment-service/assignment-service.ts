@@ -28,6 +28,7 @@ import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service
 
 import { AssignmentType, QuizType } from '../../../generated/prisma';
 
+/** A date from the request body. Blank clears it (null); anything unparseable is refused. */
 function parseDate(value: string | null | undefined, field: string): Date | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = new Date(value);
@@ -491,6 +492,7 @@ export default class AssignmentService {
     return AssignmentGateway.setDueDate(id, endOfDueDay(parseDate(dueDate, 'dueDate')));
   }
 
+  /** The assignment kind from a request: PLATFORM or LINK, with blank meaning LINK. */
   static parseType(value: unknown): AssignmentType {
     if (value === undefined || value === null || value === '') return 'LINK';
     if (value !== 'LINK' && value !== 'PLATFORM') {
@@ -913,6 +915,7 @@ export default class AssignmentService {
     });
   }
 
+  /** Rewrites a note through a private link, as the person the link belongs to. */
   static async updateNote(token: string, noteId: string, body: string) {
     const { user } = await AssignmentService.resolveToken(token);
     AssignmentService.assertNotesOpen(user);
@@ -922,6 +925,7 @@ export default class AssignmentService {
     if (count === 0) throw new NotFoundError(`Note with ID ${noteId} not found`);
   }
 
+  /** Deletes a note through a private link, as the person the link belongs to. */
   static async deleteNote(token: string, noteId: string) {
     const { user } = await AssignmentService.resolveToken(token);
     AssignmentService.assertNotesOpen(user);
@@ -1027,6 +1031,10 @@ export default class AssignmentService {
     );
   }
 
+  /**
+   * Switches a link off without deleting it. The record and its history stay,
+   * and `restore` can turn it back on.
+   */
   static async revoke(id: string) {
     const assignment = await AssignmentGateway.findById(id);
     if (!assignment) throw new NotFoundError(`Assignment with ID ${id} not found`);

@@ -72,6 +72,10 @@ function index(rows: MarkedRow[], readerId: number | null): Record<string, EditM
 }
 
 export default class EditAttributionService {
+  /**
+   * Records who last edited a piece of content and when. Best effort: never throws, and does
+   * nothing without a user or id.
+   */
   static async stamp(kind: EditedKind, id: string, userId: number | null) {
     if (!userId || !id) return;
 

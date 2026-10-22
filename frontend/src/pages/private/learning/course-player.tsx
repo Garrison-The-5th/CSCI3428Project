@@ -89,6 +89,11 @@ function isTyping(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * The learner's course player: the module/section rail, the selected element or quiz, Previous/Next
+ * navigation, sequential unlocking and the notes tab. With `preview` it renders an author's draft,
+ * and nothing it does is saved.
+ */
 const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => {
   const api = useLearnerApi();
   const { courseId } = useParams<{ courseId: string }>();
@@ -262,6 +267,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     );
   }, [course]);
 
+  /** The id of a rail item, whichever kind it is. */
   const idOf = (item: NonNullable<Selection>) =>
     item.kind === 'element' ? item.element.id : item.quiz.id;
 
@@ -331,6 +337,10 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     const unlocked = new Set<string>();
     if (!course) return unlocked;
 
+    /**
+     * Removes the directed-learning layer quizzes that are currently shut from a set of unlocked
+     * ids.
+     */
     const shutLayers = (ids: Set<string>) => {
       for (const item of flatItems) {
         if (item.kind === 'quiz' && shutLayerQuizIds.has(item.quiz.id)) ids.delete(idOf(item));
@@ -359,6 +369,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     return shutLayers(unlocked);
   }, [course, flatItems, itemDone, shutLayerQuizIds]);
 
+  /** Whether the learner may open this item yet. */
   const isUnlocked = (item: NonNullable<Selection>) => unlockedItemIds.has(idOf(item));
 
   /**
@@ -501,6 +512,10 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   stepRef.current = { previousItem, nextItem, pick };
 
   useEffect(() => {
+    /**
+     * Left/right arrow keys step to the previous/next item, unless a modifier is held or the
+     * learner is typing.
+     */
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -531,6 +546,10 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     return section ? `${section.number} ${section.title}` : 'Removed section';
   };
 
+  /**
+   * Saves the note being written, tied to the current section. In preview it is kept on the page
+   * only.
+   */
   const saveNote = async () => {
     if (!noteDraft.trim()) return;
 
@@ -561,11 +580,13 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     }
   };
 
+  /** Opens a note for editing. */
   const startEditing = (note: Note) => {
     setEditingNoteId(note.id);
     setEditingBody(note.body);
   };
 
+  /** Saves the note being edited. In preview it changes on the page only. */
   const saveEdit = async () => {
     const id = editingNoteId;
     const body = editingBody.trim();
@@ -590,6 +611,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     }
   };
 
+  /** Deletes a note. In preview it disappears from the page only. */
   const removeNote = async (id: string) => {
     if (editingNoteId === id) setEditingNoteId(null);
     if (preview) {
@@ -661,6 +683,9 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
     );
   }
 
+  /**
+   * The rail icon for an element's type: video, picture, canvas, or a document for everything else.
+   */
   const itemIcon = (element: SectionElement) =>
     element.type === 'YOUTUBE' ? (
       <PlayCircleIcon className="w-4 h-4 shrink-0" />
@@ -686,6 +711,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   const navLabel = (item: NonNullable<Selection>) =>
     item.kind === 'quiz' ? item.quiz.title : itemLabel(item.element);
 
+  /** Whether this element or quiz is the one open in the player. */
   const isSelected = (id: string) =>
     (selection?.kind === 'element' && selection.element.id === id) ||
     (selection?.kind === 'quiz' && selection.quiz.id === id);
@@ -695,6 +721,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
   // roll-up rule, so a wholly new module is marked once rather than everywhere.
   const isNew = newMarkers(newIds);
 
+  /** Collapses or expands a module in the rail. */
   const toggleModule = (moduleId: string) =>
     setCollapsedModuleIds((prev) => {
       const next = new Set(prev);
@@ -703,6 +730,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       return next;
     });
 
+  /** Collapses or expands a section in the rail. */
   const toggleSection = (sectionId: string) =>
     setCollapsedSectionIds((prev) => {
       const next = new Set(prev);

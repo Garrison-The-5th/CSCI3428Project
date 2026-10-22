@@ -160,6 +160,10 @@ export default class CurriculumGateway {
     return courses.map((course) => course.id);
   }
 
+  /**
+   * One course with its full tree, or null if it is deleted. `live` narrows it
+   * to the learner view: unpublished courses and quizzes are treated as missing.
+   */
   static getCourseById(id: string, live = false) {
     return prisma.course.findFirst({
       where: { id, deletedAt: null, ...(live ? { published: true } : {}) },
@@ -179,6 +183,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** Partial update of a course's settings; returns the course with its full author-view tree. */
   static updateCourse(
     id: string,
     data: Partial<{
@@ -214,12 +219,14 @@ export default class CurriculumGateway {
 
   // ---- Per-course contributors ----
 
+  /** The people named as editors on a course, beyond its owner. */
   static getContributors(courseId: string) {
     return prisma.course
       .findUnique({ where: { id: courseId } })
       .contributors({ select: { id: true, email: true, name: true } });
   }
 
+  /** Replaces the whole contributor list — anyone not in `userIds` loses access. */
   static setContributors(courseId: string, userIds: number[]) {
     return prisma.course.update({
       where: { id: courseId },
@@ -252,6 +259,7 @@ export default class CurriculumGateway {
     return module?.courseId ?? null;
   }
 
+  /** Owning course of a section, or null if the section does not exist. */
   static async courseIdFromSection(sectionId: string) {
     const section = await prisma.section.findUnique({
       where: { id: sectionId },
@@ -260,6 +268,7 @@ export default class CurriculumGateway {
     return section?.courseId ?? null;
   }
 
+  /** Owning course of an element, via its section. */
   static async courseIdFromElement(elementId: string) {
     const element = await prisma.element.findUnique({
       where: { id: elementId },
@@ -268,6 +277,7 @@ export default class CurriculumGateway {
     return element?.section.courseId ?? null;
   }
 
+  /** Owning course of a quiz; null for the older quizzes that have no section. */
   static async courseIdFromQuiz(quizId: string) {
     const quiz = await prisma.quiz.findUnique({
       where: { id: quizId },
@@ -276,6 +286,7 @@ export default class CurriculumGateway {
     return quiz?.section?.courseId ?? null;
   }
 
+  /** Owning course of a question, via quiz then section; null if the quiz has no section. */
   static async courseIdFromQuestion(questionId: string) {
     const question = await prisma.question.findUnique({
       where: { id: questionId },
@@ -286,18 +297,22 @@ export default class CurriculumGateway {
 
   // ---- Instructors ----
 
+  /** Every instructor profile, alphabetically — instructors are shared across courses. */
   static getInstructors() {
     return prisma.instructor.findMany({ orderBy: { name: 'asc' } });
   }
 
+  /** One instructor profile, or null. */
   static getInstructorById(id: string) {
     return prisma.instructor.findUnique({ where: { id } });
   }
 
+  /** Creates an instructor profile; the photo is added separately via updateInstructor. */
   static createInstructor(data: { name: string; title?: string | null; bio?: string | null }) {
     return prisma.instructor.create({ data });
   }
 
+  /** Partial update of an instructor profile, including its photo. */
   static updateInstructor(
     id: string,
     data: Partial<{
@@ -311,12 +326,14 @@ export default class CurriculumGateway {
     return prisma.instructor.update({ where: { id }, data });
   }
 
+  /** Permanent delete; courses that listed this instructor simply stop listing them. */
   static deleteInstructor(id: string) {
     return prisma.instructor.delete({ where: { id } });
   }
 
   // ---- Learner notes ----
 
+  /** One learner's notes on one course, newest first. Notes are private to their writer. */
   static getNotes(userId: number, courseId: string) {
     return prisma.note.findMany({
       where: { userId, courseId },
@@ -324,6 +341,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** Adds a note, optionally pinned to the section it was written on. */
   static createNote(data: {
     userId: number;
     courseId: string;
@@ -333,11 +351,13 @@ export default class CurriculumGateway {
     return prisma.note.create({ data });
   }
 
+  /** Rewrites a note's text. A count of 0 means it was not this user's note (or is gone). */
   static updateNote(id: string, userId: number, body: string) {
     // userId in the filter makes it impossible to edit someone else's note.
     return prisma.note.updateMany({ where: { id, userId }, data: { body } });
   }
 
+  /** Deletes a note, scoped to its writer the same way as updateNote. */
   static deleteNote(id: string, userId: number) {
     return prisma.note.deleteMany({ where: { id, userId } });
   }
@@ -347,6 +367,7 @@ export default class CurriculumGateway {
     return prisma.course.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
+  /** Takes a course back out of the recycle bin. */
   static restoreCourse(id: string) {
     return prisma.course.update({ where: { id }, data: { deletedAt: null } });
   }
@@ -389,6 +410,7 @@ export default class CurriculumGateway {
     return courses.map((course) => course.id);
   }
 
+  /** "Restore all" in the recycle bin, limited to the given (accessible) courses. */
   static restoreAllCourses(courseIds: string[]) {
     return prisma.course.updateMany({
       where: { deletedAt: { not: null }, id: { in: courseIds } },
@@ -396,20 +418,26 @@ export default class CurriculumGateway {
     });
   }
 
+  /** "Empty bin": permanently deletes the soft-deleted courses among those given. */
   static purgeCourses(courseIds: string[]) {
     return prisma.course.deleteMany({ where: { deletedAt: { not: null }, id: { in: courseIds } } });
   }
 
   // ---- Expiring the recycle bin ----
+  // Run by the scheduled cleanup: anything that has sat in the bin since before
+  // `cutoff` is permanently deleted, regardless of who owns it.
 
+  /** Permanently deletes courses binned before the cutoff. */
   static purgeCoursesDeletedBefore(cutoff: Date) {
     return prisma.course.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
 
+  /** Permanently deletes modules binned before the cutoff. */
   static purgeModulesDeletedBefore(cutoff: Date) {
     return prisma.module.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
 
+  /** Permanently deletes sections binned before the cutoff. */
   static purgeSectionsDeletedBefore(cutoff: Date) {
     return prisma.section.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
@@ -440,12 +468,14 @@ export default class CurriculumGateway {
     });
   }
 
+  /** This learner's completion record for one course, or null if they have not finished it. */
   static getCompletion(userId: number, courseId: string) {
     return prisma.courseCompletion.findUnique({
       where: { userId_courseId: { userId, courseId } },
     });
   }
 
+  /** Every course this learner has finished. */
   static getCompletions(userId: number) {
     return prisma.courseCompletion.findMany({ where: { userId } });
   }
@@ -476,6 +506,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** Stamps a completion as mailed about new content, so the same update is not mailed twice. */
   static markCompletionNotified(id: string) {
     return prisma.courseCompletion.update({
       where: { id },
@@ -528,6 +559,7 @@ export default class CurriculumGateway {
 
   // ---- Modules ----
 
+  /** A course's live modules in number order. */
   static getModules(courseId: string, db: Db = prisma) {
     return db.module.findMany({
       where: { courseId, deletedAt: null },
@@ -535,6 +567,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** One live module, or null if it is missing or in the bin. */
   static getModuleById(id: string) {
     return prisma.module.findFirst({ where: { id, deletedAt: null } });
   }
@@ -566,6 +599,7 @@ export default class CurriculumGateway {
     return Math.max(highest._max.number ?? 0, 0);
   }
 
+  /** Inserts a module. The caller picks `number` (see getHighestModuleNumber). */
   static createModule(
     data: { courseId: string; number: number; title: string; color?: string | null },
     db: Db = prisma,
@@ -573,6 +607,7 @@ export default class CurriculumGateway {
     return db.module.create({ data });
   }
 
+  /** Partial update of a module; also used by the renumber pass to move it. */
   static updateModule(
     id: string,
     data: Partial<{ number: number; title: string; color: string | null }>,
@@ -620,6 +655,7 @@ export default class CurriculumGateway {
     return prisma.module.findFirst({ where: { id, deletedAt: { not: null } } });
   }
 
+  /** Permanent. Its sections, elements and progress go with it via ON DELETE CASCADE. */
   static hardDeleteModule(id: string) {
     return prisma.module.delete({ where: { id } });
   }
@@ -642,6 +678,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** "Restore all" for modules in the given courses. */
   static restoreAllModules(courseIds: string[]) {
     return prisma.module.updateMany({
       where: { deletedAt: { not: null }, courseId: { in: courseIds } },
@@ -649,6 +686,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** "Empty bin" for modules in the given courses. */
   static purgeModules(courseIds: string[]) {
     return prisma.module.deleteMany({
       where: { deletedAt: { not: null }, courseId: { in: courseIds } },
@@ -681,10 +719,15 @@ export default class CurriculumGateway {
     return highest._max.position ?? 0;
   }
 
+  /** One live section, or null if it is missing or in the bin. */
   static getSectionById(id: string) {
     return prisma.section.findFirst({ where: { id, deletedAt: null } });
   }
 
+  /**
+   * Inserts a section. `number` is its display label (e.g. "1.2") and `sortKey`
+   * its course-wide reading order; both are recomputed by the renumber pass.
+   */
   static createSection(
     data: {
       courseId: string;
@@ -701,6 +744,7 @@ export default class CurriculumGateway {
     return db.section.create({ data });
   }
 
+  /** Partial update of a section, including moving it to another module or position. */
   static updateSection(
     id: string,
     data: Partial<{
@@ -754,6 +798,7 @@ export default class CurriculumGateway {
     return prisma.section.delete({ where: { id } });
   }
 
+  /** "Restore all" for sections in the given courses. */
   static restoreAllSections(courseIds: string[]) {
     return prisma.section.updateMany({
       where: { deletedAt: { not: null }, courseId: { in: courseIds } },
@@ -761,6 +806,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** "Empty bin" for sections in the given courses. */
   static purgeSections(courseIds: string[]) {
     return prisma.section.deleteMany({
       where: { deletedAt: { not: null }, courseId: { in: courseIds } },
@@ -781,6 +827,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** The section's last element by order (quizzes not counted — see getLastContentOrder). */
   static getLastElementOrder(sectionId: string, db: Db = prisma) {
     return db.element.findFirst({ where: { sectionId }, orderBy: { order: 'desc' } });
   }
@@ -797,10 +844,12 @@ export default class CurriculumGateway {
     return Math.max(element?.order ?? 0, quiz?.order ?? 0);
   }
 
+  /** Moves an element within its section's shared element/quiz sequence. */
   static setElementOrder(id: string, order: number, db: Db = prisma) {
     return db.element.update({ where: { id }, data: { order } });
   }
 
+  /** Moves a quiz within its section's shared element/quiz sequence. */
   static setQuizOrder(id: string, order: number, db: Db = prisma) {
     return db.quiz.update({ where: { id }, data: { order } });
   }
@@ -817,6 +866,7 @@ export default class CurriculumGateway {
     };
   }
 
+  /** Adds a piece of content (video, image, text, canvas, …) to a section at `order`. */
   static createElement(
     sectionId: string,
     data: {
@@ -836,10 +886,12 @@ export default class CurriculumGateway {
     return db.element.create({ data: { sectionId, order, ...data } });
   }
 
+  /** Partial update of an element's content. */
   static updateElement(id: string, data: Prisma.ElementUpdateInput) {
     return prisma.element.update({ where: { id }, data });
   }
 
+  /** Permanent — elements have no recycle bin; their progress rows cascade with them. */
   static deleteElement(id: string) {
     return prisma.element.delete({ where: { id } });
   }
@@ -874,6 +926,7 @@ export default class CurriculumGateway {
     return earliest?.viewedAt ?? null;
   }
 
+  /** Every section this learner has opened, with when — the basis of course progress. */
   static getViewedSectionIds(userId: number) {
     return prisma.sectionProgress.findMany({
       where: { userId },
@@ -913,6 +966,7 @@ export default class CurriculumGateway {
     });
   }
 
+  /** An element's ids only — enough to locate it and check access to its course. */
   static getElementById(id: string) {
     return prisma.element.findUnique({
       where: { id },
@@ -920,6 +974,9 @@ export default class CurriculumGateway {
     });
   }
 
+  /**
+   * Runs `fn` in one database transaction; pass the `db` it receives to the gateway calls inside.
+   */
   static runTransaction<T>(fn: (db: Db) => Promise<T>) {
     return prisma.$transaction(fn);
   }

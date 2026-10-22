@@ -41,6 +41,10 @@ interface AssignPanelProps {
 
 const inputClass = 'bg-white text-dark-gray';
 
+/**
+ * Hands a course or quiz to someone by email — on the platform or as a private link — and lists who
+ * already has it.
+ */
 const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPanelProps) => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,11 +77,13 @@ const AssignPanel = ({ courseId, quizId, label, onNotify, onChanged }: AssignPan
     fetchAssignments();
   }, [fetchAssignments]);
 
+  /** Reloads the list and tells the parent something changed. */
   const refresh = async () => {
     await fetchAssignments();
     onChanged?.();
   };
 
+  /** Assigns to the typed address, then reports whether the email actually went out. */
   const handleAssign = async () => {
     if (!email.trim()) return onNotify('Enter an email address', 'error');
 

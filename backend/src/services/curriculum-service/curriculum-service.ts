@@ -127,6 +127,10 @@ function redactCourse<
   };
 }
 
+/**
+ * A whole number of minutes, 0 or more. Blank means 0 (no estimate given);
+ * fractions are rounded rather than refused.
+ */
 function validateMinutes(estimatedMinutes: unknown): number {
   if (estimatedMinutes === undefined || estimatedMinutes === null || estimatedMinutes === '') {
     return 0;
@@ -302,6 +306,10 @@ export default class CurriculumService {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
+  /**
+   * One course straight from the live tables — the author's draft, not the
+   * published snapshot. Learner-facing reads go through getCourseForLearner.
+   */
   static getCourseById(id: string, live = false) {
     return CurriculumGateway.getCourseById(id, live);
   }
@@ -391,6 +399,11 @@ export default class CurriculumService {
     return cleanStringList(values, field, label);
   }
 
+  /**
+   * Edits a course's settings and landing-page details. Only the fields present
+   * in `data` change; each is validated and bounded before anything is written.
+   * Cannot publish — see the check below — but can unpublish.
+   */
   static async updateCourse(
     id: string,
     data: {
@@ -485,10 +498,12 @@ export default class CurriculumService {
 
   // ---- Per-course contributors ----
 
+  /** The courses this person may edit — the same scope as the author view. */
   static getEditableCourses(userId: number, isGlobalAuthor: CourseReach) {
     return CurriculumGateway.getCoursesForAuthor(userId, isGlobalAuthor);
   }
 
+  /** People named as editors on a course, beyond its owner. */
   static getContributors(courseId: string) {
     return CurriculumGateway.getContributors(courseId);
   }
@@ -524,10 +539,12 @@ export default class CurriculumService {
 
   // ---- Instructors ----
 
+  /** Every instructor profile, alphabetically. */
   static getInstructors() {
     return CurriculumGateway.getInstructors();
   }
 
+  /** Creates an instructor profile with a required name and optional title and bio. */
   static createInstructor(data: { name?: string; title?: string | null; bio?: string | null }) {
     return CurriculumGateway.createInstructor({
       name: requiredText(data.name, 'title', 'instructor name'),
@@ -536,6 +553,7 @@ export default class CurriculumService {
     });
   }
 
+  /** Edits an instructor profile. Blank title or bio clears it; a blank name is refused. */
   static async updateInstructor(
     id: string,
     data: { name?: string; title?: string | null; bio?: string | null },
@@ -553,6 +571,7 @@ export default class CurriculumService {
     });
   }
 
+  /** Stores an instructor's photo as base64, with the same upload rules as a cover photo. */
   static async setInstructorPhoto(id: string, file: Express.Multer.File) {
     const instructor = await CurriculumGateway.getInstructorById(id);
     if (!instructor) throw new NotFoundError(`Instructor with ID ${id} not found`);
@@ -566,6 +585,7 @@ export default class CurriculumService {
     });
   }
 
+  /** Permanently deletes an instructor profile; 404 if it does not exist. */
   static async deleteInstructor(id: string) {
     const instructor = await CurriculumGateway.getInstructorById(id);
     if (!instructor) throw new NotFoundError(`Instructor with ID ${id} not found`);
@@ -574,10 +594,12 @@ export default class CurriculumService {
 
   // ---- Learner notes ----
 
+  /** This learner's own notes on a course, newest first. */
   static getNotes(userId: number, courseId: string) {
     return CurriculumGateway.getNotes(userId, courseId);
   }
 
+  /** Saves a learner note, optionally tied to the section it was written on. */
   static createNote(
     userId: number,
     courseId: string,
@@ -592,12 +614,17 @@ export default class CurriculumService {
     });
   }
 
+  /**
+   * Rewrites a note. Someone else's note is reported as not found, the same as
+   * a missing one, so note ids cannot be probed.
+   */
   static async updateNote(id: string, userId: number, body?: string) {
     const clean = requiredText(body, 'noteBody', 'note');
     const { count } = await CurriculumGateway.updateNote(id, userId, clean);
     if (count === 0) throw new NotFoundError(`Note with ID ${id} not found`);
   }
 
+  /** Deletes a note, with the same not-found rule as updateNote. */
   static async deleteNote(id: string, userId: number) {
     const { count } = await CurriculumGateway.deleteNote(id, userId);
     if (count === 0) throw new NotFoundError(`Note with ID ${id} not found`);
@@ -621,6 +648,18 @@ export default class CurriculumService {
       imageData: normalized.buffer.toString('base64'),
       imageType: normalized.mimeType,
     });
+  }
+
+  /**
+   * Takes the cover photo off, leaving the course with the placeholder card.
+   * Like any other edit, learners keep seeing the old photo until the next
+   * publish.
+   */
+  static async removeCourseImage(id: string) {
+    const course = await CurriculumGateway.getCourseById(id);
+    if (!course) throw new NotFoundError(`Course with ID ${id} not found`);
+
+    return CurriculumGateway.updateCourse(id, { imageData: null, imageType: null });
   }
 
   /** Soft delete — recoverable from the admin dashboard. */
@@ -707,12 +746,14 @@ export default class CurriculumService {
     return CurriculumGateway.hardDeleteCourse(id);
   }
 
+  /** Permanently removes one section from the bin; refuses live sections, like purgeCourse. */
   static async purgeSection(id: string) {
     const section = await CurriculumGateway.findDeletedSection(id);
     if (!section) throw new NotFoundError(`Section with ID ${id} is not in the recycle bin`);
     return CurriculumGateway.hardDeleteSection(id);
   }
 
+  /** Permanently removes one module from the bin; refuses live modules, like purgeCourse. */
   static async purgeModule(id: string) {
     const module = await CurriculumGateway.findDeletedModule(id);
     if (!module) throw new NotFoundError(`Module with ID ${id} is not in the recycle bin`);
@@ -740,6 +781,7 @@ export default class CurriculumService {
     return { courses: courses.count, modules: modules.count, sections: sections.count };
   }
 
+  /** "Empty bin": permanently deletes everything binned in this person's courses. */
   static async purgeAll(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
 
@@ -837,6 +879,7 @@ export default class CurriculumService {
     }
   }
 
+  /** A course's live modules in number order. */
   static getModules(courseId: string) {
     return CurriculumGateway.getModules(courseId);
   }
@@ -877,6 +920,11 @@ export default class CurriculumService {
     return CurriculumGateway.getModuleById(module.id);
   }
 
+  /**
+   * Renames, recolours and/or moves a module. A new `number` is a place in the
+   * course, like createModule's: the module is lifted out and reinserted there,
+   * and the whole grid renumbers around it in the same transaction.
+   */
   static async updateModule(
     id: string,
     data: { title?: string; number?: number | string; color?: string | null },
@@ -1240,6 +1288,11 @@ export default class CurriculumService {
     });
   }
 
+  /**
+   * Adds a piece of content to the end of a section. Rich text is sanitised and
+   * linked media URLs are scheme-checked before storing; uploads go through
+   * addUploadedElement instead.
+   */
   static async createElement(
     sectionId: string,
     data: {
@@ -1331,6 +1384,10 @@ export default class CurriculumService {
     return CurriculumGateway.getSectionById(sectionId);
   }
 
+  /**
+   * Edits an element, applying the same sanitising and URL checks as
+   * createElement. This is also the canvas auto-save path.
+   */
   static async updateElement(
     id: string,
     data: Partial<{
@@ -1438,10 +1495,12 @@ export default class CurriculumService {
     });
   }
 
+  /** Permanent — elements are not recycled. */
   static deleteElement(id: string) {
     return CurriculumGateway.deleteElement(id);
   }
 
+  /** Marks a section as opened by this learner, which is what completes it. */
   static async recordSectionView(userId: number, sectionId: string) {
     const section = await CurriculumGateway.getSectionById(sectionId);
     if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
@@ -1462,6 +1521,7 @@ export default class CurriculumService {
     return CurriculumGateway.recordElementView(userId, elementId);
   }
 
+  /** Every section this learner has opened, with when. */
   static getViewedSectionIds(userId: number) {
     return CurriculumGateway.getViewedSectionIds(userId);
   }

@@ -225,6 +225,7 @@ const MapCanvas = ({
    */
   const [zoomDraft, setZoomDraft] = useState<string | null>(null);
 
+  /** Where a node is drawn: its live drag position if it is being dragged, else its stored one. */
   const positionOf = (node: MapNode): Point => dragged[node.id] ?? { x: node.x, y: node.y };
 
   /**
@@ -240,6 +241,7 @@ const MapCanvas = ({
   );
 
   useLayoutEffect(() => {
+    /** Records the frame's on-screen size. */
     const measure = () => {
       const box = frame.current?.getBoundingClientRect();
       if (box) setViewport({ x: box.width, y: box.height });
@@ -297,6 +299,7 @@ const MapCanvas = ({
     setOffset(clampOffset(moved, scaleBounds(bounds, next), viewport));
   };
 
+  /** Zooms by a factor, within the allowed range. */
   const zoomBy = (factor: number) => {
     const next = clampZoom(scale * factor);
     if (next !== scale) zoomTo(next);
@@ -391,6 +394,10 @@ const MapCanvas = ({
     return nodeAtPoint(candidates, at, CONNECT_REACH / scale);
   };
 
+  /**
+   * Advances the current gesture: pans the map, drags a node, or extends the connection being
+   * drawn.
+   */
   const onPointerMove = (event: React.PointerEvent) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
@@ -443,6 +450,10 @@ const MapCanvas = ({
     setHovered(dropTarget(gesture.parentId, to)?.id ?? null);
   };
 
+  /**
+   * Finishes the current gesture — saving a dragged node's position, or connecting two nodes if a
+   * connection was dropped on one.
+   */
   const endGesture = () => {
     // Taken and cleared in one step: the event is about to reach this again on
     // its way up, and the second pass must find nothing to do.
@@ -471,6 +482,7 @@ const MapCanvas = ({
     setHovered(null);
   };
 
+  /** A stable key for a connection, from its two ends. */
   const edgeKey = (edge: MapEdge) => `${edge.parentId}->${edge.childId}`;
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   /**

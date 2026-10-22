@@ -51,6 +51,10 @@ export const isAuthorUser = () => isAdminUser() || hasEitherRole('contributor');
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Starts Keycloak, keeps the token fresh, and provides the signed-in user, their roles and
+ * login/logout to the app.
+ */
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -112,10 +116,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   }, []);
 
+  /** Sends the browser to the Keycloak sign-in page. */
   const login = () => {
     keycloak.login();
   };
 
+  /** Signs out of Keycloak. */
   const logout = () => {
     keycloak.logout();
   };
@@ -148,6 +154,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
+/** The auth context. Throws if used outside AuthProvider. */
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {

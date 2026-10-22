@@ -65,6 +65,10 @@ function daysLeft(supersededAt: string): number {
   return Math.max(0, Math.ceil((clearsAt - Date.now()) / 86_400_000));
 }
 
+/**
+ * The course's version history: kept versions, what each one added, and a read-only comparison of
+ * any of them against the live one.
+ */
 const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
   /** The version being read, if any. Null is the list. */
   const [openId, setOpenId] = useState<string | null>(null);
@@ -88,6 +92,7 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
     else setDiff(null);
   }, [openId, loadDiff]);
 
+  /** Keeps or un-keeps a version, then refreshes the list. */
   const setArchived = async (version: CourseVersion, archived: boolean) => {
     try {
       const result = await curriculumApi.setVersionArchived(version.id, archived);
@@ -146,6 +151,7 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
   const kept = versions.filter((entry) => entry.archivedAt !== null);
   const history = versions.filter((entry) => entry.archivedAt === null);
 
+  /** One version's entry in the history, with what it added. */
   const card = (entry: CourseVersion) => {
     const added =
       entry.newModuleIds.length +

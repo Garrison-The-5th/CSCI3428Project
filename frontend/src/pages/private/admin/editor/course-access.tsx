@@ -82,6 +82,10 @@ const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
  */
 const looksLikeEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
+/**
+ * Who can edit and who has been given a course: its extra authors (if this person may manage them)
+ * and its assignments.
+ */
 const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: Props) => {
   const [authors, setAuthors] = useState<Person[]>([]);
   const [authorQuery, setAuthorQuery] = useState('');
@@ -158,6 +162,7 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
     return () => clearTimeout(timer);
   }, [platformQuery]);
 
+  /** Replaces the course's author list with these addresses. */
   const saveAuthors = async (emails: string[]) => {
     try {
       await curriculumApi.setContributors(course.id, emails);
@@ -169,6 +174,7 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
     }
   };
 
+  /** Adds a person as an author of this course, unless they already are. */
   const addAuthor = (email: string) => {
     if (authors.some((a) => a.email === email.toLowerCase())) {
       return onNotify('Already an author', 'error');
@@ -245,6 +251,9 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
     return assignment.email.toLowerCase().includes(query);
   });
 
+  /**
+   * The type-ahead result list for a people search; picking one calls `onPick` with their email.
+   */
   const results = (people: Person[], onPick: (email: string) => void) =>
     people.length > 0 && (
       <ul className="flex flex-col gap-1 rounded-md border border-gray-300 bg-white p-1">

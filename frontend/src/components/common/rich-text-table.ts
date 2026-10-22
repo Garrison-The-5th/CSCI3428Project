@@ -70,6 +70,10 @@ function cellLike(model: HTMLTableCellElement): HTMLTableCellElement {
   return cell;
 }
 
+/**
+ * Inserts a row above or below the cell's row, copying each cell's style. A row added under a
+ * heading row gets ordinary cells.
+ */
 export function addRow(cell: HTMLTableCellElement, where: 'above' | 'below'): void {
   const row = cell.parentElement as HTMLTableRowElement | null;
   if (!row) return;
@@ -82,6 +86,7 @@ export function addRow(cell: HTMLTableCellElement, where: 'above' | 'below'): vo
   row.parentNode?.insertBefore(next, where === 'above' ? row : row.nextSibling);
 }
 
+/** A plain `<td>` carrying a heading cell's style, to use as the model for a new data row. */
 function asDataCell(heading: HTMLTableCellElement): HTMLTableCellElement {
   const cell = document.createElement('td');
   const style = heading.getAttribute('style');
@@ -89,6 +94,7 @@ function asDataCell(heading: HTMLTableCellElement): HTMLTableCellElement {
   return cell;
 }
 
+/** Inserts a column left or right of the cell's column, in every row of the table. */
 export function addColumn(cell: HTMLTableCellElement, where: 'left' | 'right'): void {
   const table = cell.closest('table');
   if (!table) return;
@@ -142,6 +148,10 @@ export function setCellText(cells: HTMLTableCellElement[], color: string | null)
   for (const cell of cells) setOrClear(cell, 'color', color);
 }
 
+/**
+ * Sets one inline style property, or removes it when `value` is empty — dropping the style
+ * attribute entirely once nothing is left.
+ */
 function setOrClear(element: HTMLElement, property: string, value: string | null): void {
   if (value) element.style.setProperty(property, value);
   else element.style.removeProperty(property);
@@ -233,6 +243,7 @@ export function enableTableResizing(
   } | null = null;
   let hovering: HTMLElement | null = null;
 
+  /** The table cell edge under the pointer that can be dragged to resize, if any. */
   const edgeUnder = (event: PointerEvent) => {
     const root = editor();
     if (!root || !(event.target instanceof Node) || !root.contains(event.target)) return null;
@@ -242,12 +253,14 @@ export function enableTableResizing(
     return edge ? { root, cell, edge } : null;
   };
 
+  /** Shows the resize cursor over the editor being hovered, clearing it from the previous one. */
   const setCursor = (root: HTMLElement | null, cursor: string) => {
     if (hovering && hovering !== root) hovering.style.cursor = '';
     hovering = root;
     if (root) root.style.cursor = cursor;
   };
 
+  /** Starts a column/row resize when the pointer goes down on a cell edge. */
   const onDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
     const hit = edgeUnder(event);
@@ -262,6 +275,7 @@ export function enableTableResizing(
     document.body.style.cursor = hit.edge === 'column' ? 'col-resize' : 'row-resize';
   };
 
+  /** While dragging, resizes the column or row; otherwise just updates the hover cursor. */
   const onMove = (event: PointerEvent) => {
     if (drag) {
       event.preventDefault();
@@ -281,6 +295,7 @@ export function enableTableResizing(
   // the caret, or select the canvas item, wherever the drag happened to end.
   let swallowClick = false;
 
+  /** Ends a resize drag and reports the change so it gets saved. */
   const onUp = (event: PointerEvent) => {
     if (!drag) return;
     event.preventDefault();
@@ -299,6 +314,7 @@ export function enableTableResizing(
     event.stopPropagation();
   };
 
+  /** Swallows the click that follows a resize drag, so it does not move the caret. */
   const onClick = (event: MouseEvent) => {
     if (!swallowClick) return;
     swallowClick = false;

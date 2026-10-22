@@ -147,6 +147,10 @@ function isAllowedHost(origin: string): boolean {
   }
 }
 
+/**
+ * The public URL of the app, for links in emails. APP_BASE_URL wins when set; otherwise it is
+ * worked out from the request's origin.
+ */
 export function appBaseUrl(requestOrigin?: string | null): string {
   const configured = configuredBaseUrl();
   if (configured) return configured;

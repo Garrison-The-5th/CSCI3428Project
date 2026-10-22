@@ -51,6 +51,7 @@ export type MapNodeRow = Prisma.CourseMapNodeGetPayload<{ include: typeof nodeIn
 export default class CourseMapGateway {
   // ---- Reading ----
 
+  /** Every node on a course's map, in reading order, with its placed sections. */
   static getNodes(courseId: string, db: Db = prisma) {
     return db.courseMapNode.findMany({
       where: { courseId },
@@ -59,18 +60,22 @@ export default class CourseMapGateway {
     });
   }
 
+  /** Every parent-to-child connection on a course's map. */
   static getEdges(courseId: string, db: Db = prisma) {
     return db.courseMapEdge.findMany({ where: { courseId } });
   }
 
+  /** One node with its placed sections, or null. */
   static getNodeById(id: string, db: Db = prisma) {
     return db.courseMapNode.findUnique({ where: { id }, include: nodeInclude });
   }
 
+  /** The map's root — the content every learner gets before any choice is asked. */
   static getRoot(courseId: string, db: Db = prisma) {
     return db.courseMapNode.findFirst({ where: { courseId, isRoot: true } });
   }
 
+  /** Which course a node belongs to, for access checks; null if the node is gone. */
   static courseIdFromNode(id: string) {
     return prisma.courseMapNode
       .findUnique({ where: { id }, select: { courseId: true } })
@@ -79,6 +84,10 @@ export default class CourseMapGateway {
 
   // ---- Nodes ----
 
+  /**
+   * Adds a node. Depth starts at 0 for the root and 1 for anything else; the
+   * real depth is filled in by setDepths once the node is connected.
+   */
   static createNode(
     data: {
       courseId: string;
@@ -97,6 +106,7 @@ export default class CourseMapGateway {
     });
   }
 
+  /** Renames or moves a node on the canvas. */
   static updateNode(
     id: string,
     data: { title?: string; x?: number; y?: number; depth?: number },
@@ -112,12 +122,14 @@ export default class CourseMapGateway {
     );
   }
 
+  /** Removes a node; its connections and placed items go with it. */
   static deleteNode(id: string, db: Db = prisma) {
     return db.courseMapNode.delete({ where: { id } });
   }
 
   // ---- Edges ----
 
+  /** Connects a parent node to a child. `subgraphId` marks it as part of a linked map. */
   static createEdge(
     data: { courseId: string; parentId: string; childId: string; subgraphId?: string },
     db: Db = prisma,
@@ -125,14 +137,20 @@ export default class CourseMapGateway {
     return db.courseMapEdge.create({ data });
   }
 
+  /** Removes one connection by its id. */
   static deleteEdgeById(id: string, db: Db = prisma) {
     return db.courseMapEdge.delete({ where: { id } });
   }
 
+  /** Removes the connection between two nodes, if there is one (no error if not). */
   static deleteEdge(parentId: string, childId: string, db: Db = prisma) {
     return db.courseMapEdge.deleteMany({ where: { parentId, childId } });
   }
 
+  /**
+   * Points a connection at the layer-quiz option that selects it. Written by
+   * the quiz generator; null between drawing an edge and regenerating.
+   */
   static setEdgeOption(id: string, optionId: string | null, db: Db = prisma) {
     return db.courseMapEdge.update({ where: { id }, data: { optionId } });
   }
@@ -211,10 +229,12 @@ export default class CourseMapGateway {
     return prisma.$transaction(fn, { timeout: 30_000 });
   }
 
+  /** Every other course's map linked into this one. */
   static getSubgraphs(courseId: string, db: Db = prisma) {
     return db.courseMapSubgraph.findMany({ where: { courseId } });
   }
 
+  /** One linked map, or null. */
   static getSubgraphById(id: string, db: Db = prisma) {
     return db.courseMapSubgraph.findUnique({ where: { id } });
   }
@@ -224,6 +244,10 @@ export default class CourseMapGateway {
     return db.courseMapSubgraph.findMany({ where: { sourceCourseId } });
   }
 
+  /**
+   * Records a link to another course's map. The caller then copies the source's
+   * nodes, connections and items in under this subgraph's id.
+   */
   static createSubgraph(
     data: { courseId: string; sourceCourseId: string; anchorNodeId: string | null },
     db: Db = prisma,
@@ -231,6 +255,11 @@ export default class CourseMapGateway {
     return db.courseMapSubgraph.create({ data });
   }
 
+  /**
+   * Forgets the node a linked map was dropped on. Cleared once the connection
+   * from that node into the copy's root has been drawn, so later rewrites of the
+   * copy do not draw it again — from then on it is the author's own edge.
+   */
   static clearSubgraphAnchor(id: string, db: Db = prisma) {
     return db.courseMapSubgraph.update({ where: { id }, data: { anchorNodeId: null } });
   }
@@ -240,12 +269,16 @@ export default class CourseMapGateway {
     return db.courseMapSubgraph.deleteMany({ where: { id } });
   }
 
+  /** Removes every link from one source course into this map, e.g. when that import is dropped. */
   static deleteSubgraphsFromSource(courseId: string, sourceCourseId: string, db: Db = prisma) {
     return db.courseMapSubgraph.deleteMany({ where: { courseId, sourceCourseId } });
   }
 
   // ---- Imports ----
+  // An import makes another course's sections available to place on this map,
+  // without copying them; they stay owned and edited by their own course.
 
+  /** The courses this map draws on, in the order they were added. */
   static getImports(courseId: string, db: Db = prisma) {
     return db.courseMapImport.findMany({
       where: { courseId },
@@ -254,6 +287,7 @@ export default class CourseMapGateway {
     });
   }
 
+  /** Adds a source course to the end of this map's import list. */
   static async addImport(courseId: string, sourceCourseId: string, db: Db = prisma) {
     const last = await db.courseMapImport.findFirst({
       where: { courseId },
@@ -265,16 +299,21 @@ export default class CourseMapGateway {
     });
   }
 
+  /** Takes a source course off this map's import list. */
   static removeImport(courseId: string, sourceCourseId: string, db: Db = prisma) {
     return db.courseMapImport.deleteMany({ where: { courseId, sourceCourseId } });
   }
 
   // ---- Layer quizzes ----
+  // One generated quiz per depth of the map: everything the same distance from
+  // the root is offered together in a single question.
 
+  /** The map's layer quizzes, shallowest first. */
   static getLayers(courseId: string, db: Db = prisma) {
     return db.directedLayerQuiz.findMany({ where: { courseId }, orderBy: { depth: 'asc' } });
   }
 
+  /** Records the generated quiz and module for one depth of the map. */
   static createLayer(
     data: { courseId: string; depth: number; quizId: string; moduleId: string },
     db: Db = prisma,
@@ -282,6 +321,10 @@ export default class CourseMapGateway {
     return db.directedLayerQuiz.create({ data });
   }
 
+  /**
+   * Drops a layer record only. The caller deletes the layer's quiz and module
+   * separately.
+   */
   static deleteLayer(id: string, db: Db = prisma) {
     return db.directedLayerQuiz.delete({ where: { id } });
   }
@@ -293,6 +336,7 @@ export default class CourseMapGateway {
 
   // ---- Learner choices ----
 
+  /** What this learner picked at each layer of a course's map, shallowest first. */
   static getChoices(userId: number, courseId: string, db: Db = prisma) {
     return db.directedChoice.findMany({
       where: { userId, courseId },

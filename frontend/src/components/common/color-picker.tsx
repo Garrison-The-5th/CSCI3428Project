@@ -114,6 +114,10 @@ interface ColorPickerProps {
   noneDisplay?: string;
 }
 
+/**
+ * A colour button that opens a swatch table with red, green and blue sliders and a hex field.
+ * `noneLabel` adds a "no colour" choice, which reports null.
+ */
 const ColorPicker = ({ label, value, onChange, noneLabel, noneDisplay }: ColorPickerProps) => {
   const [open, setOpen] = useState(false);
   const [hexDraft, setHexDraft] = useState(value ?? '');
@@ -139,6 +143,7 @@ const ColorPicker = ({ label, value, onChange, noneLabel, noneDisplay }: ColorPi
     };
   }, [open]);
 
+  /** Changes one of the red/green/blue channels and reports the resulting hex colour. */
   const setChannel = (key: 'r' | 'g' | 'b', amount: number) => {
     const next = { ...rgb, [key]: amount };
     onChange(rgbToHex(next.r, next.g, next.b));
