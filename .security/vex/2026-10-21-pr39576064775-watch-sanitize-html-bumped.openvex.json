@@ -11,10 +11,10 @@
     "invocation_id": "39576064775"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-10-22T21:41:08Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -22,7 +22,11 @@
         "name": "CVE-2026-113654",
         "description": "sanitize-html: HTML sanitization bypass via improper noscript tag handling"
       },
-      "products": [{ "@id": "pkg:npm/sanitize-html@2.17.7" }],
+      "products": [
+        {
+          "@id": "pkg:npm/sanitize-html@2.17.7"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.18.1",
       "action_reference": "bot-sec/security commit bumping sanitize-html ^2.17.7 -> ^2.18.0 (installed 2.18.1)",
@@ -41,7 +45,11 @@
         "name": "CVE-2026-113661",
         "description": "sanitize-html: Cross-site scripting via unsafe meta refresh content attributes"
       },
-      "products": [{ "@id": "pkg:npm/sanitize-html@2.17.7" }],
+      "products": [
+        {
+          "@id": "pkg:npm/sanitize-html@2.17.7"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.18.1",
       "action_reference": "bot-sec/security commit bumping sanitize-html ^2.17.7 -> ^2.18.0 (installed 2.18.1)",
