@@ -1,0 +1,59 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-10-21-pr39576064775-watch-sanitize-html-bumped.openvex.json",
+  "version": 1,
+  "timestamp": "2026-10-21T09:29:24.997Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "39576064775"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-113654",
+        "description": "sanitize-html: HTML sanitization bypass via improper noscript tag handling"
+      },
+      "products": [{ "@id": "pkg:npm/sanitize-html@2.17.7" }],
+      "status": "fixed",
+      "fixed_in_version": "2.18.1",
+      "action_reference": "bot-sec/security commit bumping sanitize-html ^2.17.7 -> ^2.18.0 (installed 2.18.1)",
+      "impact_statement": "Bumped sanitize-html in backend/package.json from ^2.17.7 to ^2.18.0 to pick up the upstream fix (installed 2.18.1 via npm install). Only usage is backend/src/config/rich-text.ts:54 (sanitizeRichText), which runs on author-written lesson HTML. Verified: backend unit suite 678/678 passing (22 suites), rich-text sanitiser suite 52/52 passing, lint clean, backend typecheck clean, full build successful.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-113654",
+        "https://access.redhat.com/security/cve/CVE-2026-113654",
+        "https://github.com/apostrophecms/apostrophe/commit/9500b8b0e1d630d5e07fbb5fd2c25ed0943845ce"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-113661",
+        "description": "sanitize-html: Cross-site scripting via unsafe meta refresh content attributes"
+      },
+      "products": [{ "@id": "pkg:npm/sanitize-html@2.17.7" }],
+      "status": "fixed",
+      "fixed_in_version": "2.18.1",
+      "action_reference": "bot-sec/security commit bumping sanitize-html ^2.17.7 -> ^2.18.0 (installed 2.18.1)",
+      "impact_statement": "Closed by the same sanitize-html bump as CVE-2026-113654 — both CVEs are fixed in the 2.18.0 release and this PR installs 2.18.1 via package-lock refresh. Only call site is backend/src/config/rich-text.ts:54; <meta> is not in ALLOWED_TAGS, but the upstream fix hardens handling regardless. Verified: backend unit suite 678/678 passing, rich-text suite 52/52 passing, lint clean, backend typecheck clean, full build successful.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-113661",
+        "https://access.redhat.com/security/cve/CVE-2026-113661",
+        "https://github.com/apostrophecms/apostrophe/commit/9500b8b0e1d630d5e07fbb5fd2c25ed0943845ce"
+      ]
+    }
+  ]
+}
