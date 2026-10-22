@@ -1,0 +1,67 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-10-22-pr39832656632-reeval-xss-sinks-touched.sast.json",
+  "version": 1,
+  "timestamp": "2026-10-22T18:50:50.295Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "39832656632"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:ad1daf9f0a2c",
+        "location": {
+          "file": "frontend/src/components/common/element-view.tsx",
+          "start_line": 325,
+          "end_line": 325,
+          "commit_sha": "89808709ac3ef4a6e2e7a5cffcc999ebbf3842d3"
+        }
+      },
+      "status": "not_affected",
+      "justification": "inline_mitigations_already_exist",
+      "impact_statement": "REEVALUATE (touched): post-merge scan after PR #44/#48 edited element-view.tsx surfaced the finding. Re-verified against current code: the dangerouslySetInnerHTML sink at element-view.tsx:325 still reads `element.textContent` (unchanged shape; the line only moved because surrounding code grew). The write-time mitigation that justified the prior disposition is still in place — lesson text passes through `sanitizeRichText` (backend/src/config/rich-text.ts:57, built on `sanitize-html`) before storage, called from curriculum-service.ts:1320 and :1413. The nosemgrep marker on line 324 is intact. Re-confirmed not_affected with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-01-20",
+      "references": [
+        "https://semgrep.dev/r/typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml"
+      ]
+    },
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 536,
+          "end_line": 536,
+          "commit_sha": "89808709ac3ef4a6e2e7a5cffcc999ebbf3842d3"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "REEVALUATE (touched): post-merge scan after PR #44/#48 edited curriculum-controller.ts surfaced the finding. Re-verified against current code at line 536: `res.send(result)` where `result` is the return value of EditLeaseService.release (edit-lease-service.ts:84-87, returns `{released: boolean}` from `count > 0`) or EditLeaseService.releaseAll (edit-lease-service.ts:90-93, returns `{released: number}` from a Prisma `updateMany` count). Neither payload interpolates any user-supplied string — the shape is a single literal key and a server-computed primitive. Express `res.send` on an object auto-serialises to JSON with Content-Type application/json, which browsers cannot render as HTML. The nosemgrep marker on line 535 is intact. Original disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-01-20",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
