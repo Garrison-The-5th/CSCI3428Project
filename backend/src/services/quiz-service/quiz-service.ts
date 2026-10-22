@@ -120,6 +120,7 @@ function chosenIds(answer: string | string[] | undefined): string[] {
  */
 const DIRECTED_FIXED = 'a directed learning quiz is built from the course map';
 
+/** Throws if the quiz is a directed one; `what` says which change was refused. */
 async function assertNotDirected(quizId: string, what: string) {
   const quiz = await QuizGateway.getQuizById(quizId);
   if (quiz?.type === QuizType.DIRECTED) {
@@ -273,12 +274,14 @@ async function courseKindOfSection(sectionId: string | null): Promise<CourseKind
  */
 export const BROWSABLE_QUIZ_TYPES: QuizType[] = [QuizType.EXAM];
 
+/** Whether a quiz is a kind that is listed on the learner's Quizzes tab. */
 function isBrowsable(quiz: { type?: QuizType | null }): boolean {
   // Rows and snapshots written before the three kinds existed have no type and
   // were all exams, so a missing type reads as one.
   return BROWSABLE_QUIZ_TYPES.includes(quiz.type ?? QuizType.EXAM);
 }
 
+/** A date from the request body. Blank clears it (null); anything unparseable is refused. */
 function parseDate(value: string | null | undefined, field: string): Date | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = new Date(value);
@@ -496,14 +499,11 @@ export default class QuizService {
     return QuizGateway.getDeletedQuizzes(courseIds, Boolean(isGlobalAuthor));
   }
 
+  /** One quiz with its questions, straight from the live tables (author view unless `live`). */
   static getQuizById(id: string, live = false) {
     return QuizGateway.getQuizById(id, live);
   }
 
-  /**
-   * One quiz, if this person can reach it — answers stripped. Unreachable is
-   * reported as not found, so this cannot be used to enumerate quizzes.
-   */
   /**
    * Refuses a quiz run to somebody it was never given.
    *
@@ -554,6 +554,10 @@ export default class QuizService {
     throw new NotFoundError(`Quiz with ID ${quizId} not found`);
   }
 
+  /**
+   * One quiz, if this person can reach it — answers stripped. Unreachable is
+   * reported as not found, so this cannot be used to enumerate quizzes.
+   */
   static async getQuizForLearner(email: string, id: string) {
     const reachable = await QuizService.getQuizzesForLearner(email);
     return reachable.find((quiz) => quiz.id === id) ?? null;
@@ -769,6 +773,7 @@ export default class QuizService {
     });
   }
 
+  /** Soft delete — recoverable from the recycle bin. Directed quizzes are refused. */
   static async deleteQuiz(id: string) {
     const quiz = await QuizGateway.getQuizById(id);
     if (!quiz) {
@@ -808,18 +813,28 @@ export default class QuizService {
     return QuizGateway.hardDeleteQuiz(id);
   }
 
+  /**
+   * "Restore all" for quizzes in this person's courses. Global authors also get
+   * the older quizzes with no section, which belong to no course.
+   */
   static async restoreAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
     const { count } = await QuizGateway.restoreAllQuizzes(courseIds, Boolean(isGlobalAuthor));
     return count;
   }
 
+  /** "Empty bin" for quizzes, scoped the same way as restoreAllQuizzes. */
   static async purgeAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
     const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
     const { count } = await QuizGateway.purgeQuizzes(courseIds, Boolean(isGlobalAuthor));
     return count;
   }
 
+  /**
+   * Adds a question with its options. With `afterOrder` it is inserted straight
+   * after that question and everything below shifts down one; without it, it
+   * goes on the end.
+   */
   static async addQuestion(quizId: string, data: QuestionInput, afterOrder?: number) {
     const prompt = requiredText(data.prompt, 'prompt', 'question prompt');
 
@@ -882,6 +897,10 @@ export default class QuizService {
     return QuizGateway.getQuizById(quizId);
   }
 
+  /**
+   * Edits a question; only the fields present change. Sending `options`
+   * replaces the whole option list.
+   */
   static async updateQuestion(id: string, data: QuestionInput) {
     const question = await QuizGateway.getQuestionById(id);
     if (!question) {
@@ -911,6 +930,7 @@ export default class QuizService {
     });
   }
 
+  /** Permanently removes a question and its options. */
   static async deleteQuestion(id: string) {
     const question = await QuizGateway.getQuestionById(id);
     if (!question) {
@@ -1369,6 +1389,7 @@ export default class QuizService {
     };
   }
 
+  /** Every quiz this person has handed in, newest first. */
   static getAttemptsForUser(userId: number) {
     return QuizGateway.getAttemptsForUser(userId);
   }

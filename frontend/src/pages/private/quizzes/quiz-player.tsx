@@ -46,6 +46,7 @@ interface RailEntry {
   sectionTitle: string;
 }
 
+/** Takes one quiz of a quiz set, with the set's other quizzes and the learner's notes alongside. */
 const QuizPlayer = () => {
   const api = useLearnerApi();
   const { courseId, quizId } = useParams<{ courseId: string; quizId: string }>();
@@ -127,6 +128,7 @@ const QuizPlayer = () => {
 
   const isNew = newMarkers(newIds);
 
+  /** Switches to another quiz in the same set. */
   const openQuiz = (id: string) => navigate(`/quizzes/${courseId}/take/${id}`);
 
   /**
@@ -173,6 +175,7 @@ const QuizPlayer = () => {
     return [...byModule.values()];
   }, [entries]);
 
+  /** Saves a note on this quiz set. */
   const saveNote = async () => {
     if (!courseId || !noteDraft.trim()) return;
     try {
@@ -184,6 +187,7 @@ const QuizPlayer = () => {
     }
   };
 
+  /** Deletes one of the learner's notes. */
   const removeNote = async (id: string) => {
     try {
       await api.deleteNote(id);

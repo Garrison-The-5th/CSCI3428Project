@@ -34,11 +34,19 @@ interface PrivacyNoticeProps {
   onNotify?: (message: string, type?: 'success' | 'error') => void;
 }
 
+/**
+ * Explains what personal data is held and offers export and erasure. Guests on an assignment link
+ * are told to ask whoever sent it instead, since a link alone cannot prove who they are.
+ */
 const PrivacyNotice = ({ onNotify }: PrivacyNoticeProps) => {
   const { isGuest } = useGuest();
   const [confirmingErase, setConfirmingErase] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * Reports a result through `onNotify` when the parent gives one; otherwise errors are only
+   * logged.
+   */
   const notify = (message: string, type: 'success' | 'error' = 'success') => {
     if (onNotify) onNotify(message, type);
     else if (type === 'error') logger.error(message);
@@ -76,6 +84,7 @@ const PrivacyNotice = ({ onNotify }: PrivacyNoticeProps) => {
     }
   };
 
+  /** Erases the signed-in person's personal data after they confirm. */
   const eraseData = async () => {
     try {
       setBusy(true);

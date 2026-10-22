@@ -29,6 +29,7 @@ export type CourseItem =
   | { kind: 'element'; sectionId: string; element: SectionElement }
   | { kind: 'quiz'; sectionId: string; quiz: Quiz };
 
+/** The id of a course item, whichever kind it is. */
 export function itemId(item: CourseItem): string {
   return item.kind === 'element' ? item.element.id : item.quiz.id;
 }
@@ -119,6 +120,7 @@ export function unlockedItemIds(
   progress: LearnerProgress,
 ): Set<string> {
   const shut = shutLayerQuizIds(course, progress);
+  /** Removes the directed-learning layer quizzes that are still shut from a set of unlocked ids. */
   const shutLayers = (ids: Set<string>) => {
     for (const item of items) {
       if (item.kind === 'quiz' && shut.has(item.quiz.id)) ids.delete(itemId(item));

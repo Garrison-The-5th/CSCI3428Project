@@ -37,6 +37,10 @@ const buckets = new Map<string, Bucket>();
 const SWEEP_EVERY_MS = 60_000;
 let lastSweep = Date.now();
 
+/**
+ * Drops expired buckets, at most once per SWEEP_EVERY_MS, so the in-memory map does not grow with
+ * every address ever seen.
+ */
 function sweep(now: number) {
   if (now - lastSweep < SWEEP_EVERY_MS) return;
   lastSweep = now;
@@ -146,6 +150,10 @@ interface UploadBudget {
 
 const uploadBudgets = new Map<number, UploadBudget>();
 
+/**
+ * This user's upload allowance for the current window, starting a fresh one if the last has
+ * expired.
+ */
 function budgetFor(userId: number, now: number): UploadBudget {
   const existing = uploadBudgets.get(userId);
   if (existing && existing.resetAt > now) return existing;

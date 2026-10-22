@@ -24,6 +24,7 @@ if (isDevelopment) {
   logger.debug('Development mode - API_BASE_URL:', API_BASE_URL);
 }
 
+/** Joins class names, letting later Tailwind classes override conflicting earlier ones. */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

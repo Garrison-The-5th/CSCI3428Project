@@ -57,6 +57,10 @@ const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
 const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
 
+/**
+ * The author's Quizzes page: every quiz set they may edit, filterable, with a form to create a new
+ * one and an editor that opens in place.
+ */
 const AdminQuizzes = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +75,7 @@ const AdminQuizzes = () => {
 
   const filtersRef = useRef<HTMLDivElement>(null);
 
+  /** Shows a toast. */
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
 
@@ -101,6 +106,7 @@ const AdminQuizzes = () => {
     return () => document.removeEventListener('mousedown', onClick);
   }, [filtersOpen]);
 
+  /** How many quizzes a set holds. */
   const quizCount = (course: Course) =>
     course.sections.reduce((sum, section) => sum + section.quizzes.length, 0);
 
@@ -122,6 +128,7 @@ const AdminQuizzes = () => {
           0,
         );
 
+  /** Creates a quiz set with the typed name and opens it in the editor. */
   const createQuizSet = async () => {
     const title = newTitle.trim();
     if (!title) return notify('Give the quiz a name', 'error');

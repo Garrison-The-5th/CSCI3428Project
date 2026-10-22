@@ -203,6 +203,11 @@ export interface CourseEditorOptions {
   attributes?: { kind: EditedKind; param?: string };
 }
 
+/**
+ * Route guard: resolves which course a request touches and allows it only for someone who may edit
+ * that course. On success it also marks the draft as changed and, when `attributes` is given,
+ * credits the editor.
+ */
 export function requireCourseEditor(
   resolve: CourseResolver,
   { marksDraftEdited = true, attributes }: CourseEditorOptions = {},

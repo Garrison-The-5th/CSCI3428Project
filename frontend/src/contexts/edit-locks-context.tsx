@@ -88,6 +88,10 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+/**
+ * Tracks who else is editing this course and which modules and questions that locks, renewing this
+ * person's own claims while they edit.
+ */
 export const EditLocksProvider = ({ courseId, children }: ProviderProps) => {
   const [leases, setLeases] = useState<EditLease[]>([]);
   const [marks, setMarks] = useState<EditMarks>(NO_MARKS);
@@ -139,6 +143,7 @@ export const EditLocksProvider = ({ courseId, children }: ProviderProps) => {
   // Leaving the course gives up everything at once, so the next person does not
   // wait out the lease on a pane nobody has open.
   useEffect(() => {
+    /** Gives up every claim this person holds in the course, e.g. on leaving the editor. */
     const releaseAll = () => {
       held.current = {};
       void curriculumApi.releaseEditLease(courseId).catch(() => undefined);

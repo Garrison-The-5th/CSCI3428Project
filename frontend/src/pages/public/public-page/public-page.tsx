@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
+/** The public landing page shown before signing in. */
 const PublicPage = () => {
   const navigate = useNavigate();
 

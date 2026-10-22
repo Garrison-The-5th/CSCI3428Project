@@ -397,6 +397,10 @@ export default class CourseMapService {
 
   // ---- Nodes ----
 
+  /**
+   * Adds an unconnected node to a staged map. With no position given it is
+   * placed clear of the existing nodes; with no title it gets the default name.
+   */
   static async createNode(courseId: string, data: { title?: string; x?: number; y?: number }) {
     await CourseMapService.assertStaged(courseId);
 
@@ -422,6 +426,7 @@ export default class CourseMapService {
     return node;
   }
 
+  /** Renames or moves a node. A linked map's nodes can be moved but not renamed. */
   static async updateNode(id: string, data: { title?: string; x?: number; y?: number }) {
     const node = await CourseMapGateway.getNodeById(id);
     if (!node) throw new NotFoundError(`Node with ID ${id} not found`);
@@ -643,6 +648,10 @@ export default class CourseMapService {
     return CourseMapService.getMap(parent.courseId);
   }
 
+  /**
+   * Removes the connection between two nodes. Connections a linked map drew are
+   * fixed and refused; the source course owns them.
+   */
   static async disconnect(parentId: string, childId: string) {
     const parent = await CourseMapGateway.getNodeById(parentId);
     if (!parent) throw new NotFoundError(`Node with ID ${parentId} not found`);

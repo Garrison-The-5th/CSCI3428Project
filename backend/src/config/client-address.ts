@@ -62,6 +62,10 @@ export function isBehindTrustedProxy(): boolean {
   return behindTrustedProxy;
 }
 
+/**
+ * Applies TRUST_PROXY to Express, so `req.ip` is the real visitor behind a load balancer. Warns
+ * when unset, because the rate limiter would then see one address for everybody.
+ */
 export function configureTrustProxy(app: Application) {
   const setting = parseTrustProxy(process.env.TRUST_PROXY);
   app.set('trust proxy', setting);

@@ -42,6 +42,10 @@ function byPathSpecificity(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Class decorator: registers every decorated method of the class on the shared router under
+ * `routePrefix`, with its middlewares, most specific paths first.
+ */
 export function controller(routePrefix: string) {
   return function <T extends abstract new (...args: unknown[]) => unknown>(target: T) {
     const routes = Object.getOwnPropertyNames(target.prototype)

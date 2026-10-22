@@ -12,6 +12,7 @@ import logo from '@/assets/logo.svg';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 
+/** The sign-in page, with an optional Google button behind VITE_ENABLE_GOOGLE_LOGIN. */
 const Login = () => {
   // Feature flag: Set to false to disable Google OAuth login button
   const ENABLE_GOOGLE_LOGIN = import.meta.env.VITE_ENABLE_GOOGLE_LOGIN === 'true';
@@ -24,6 +25,7 @@ const Login = () => {
     return isAdmin ? <Navigate to="/admin" replace /> : <Navigate to="/" replace />;
   }
 
+  /** Signs in through Keycloak, going straight to the Google identity provider. */
   const handleGoogleLogin = () => {
     keycloak.login({ idpHint: 'oauth2' });
   };

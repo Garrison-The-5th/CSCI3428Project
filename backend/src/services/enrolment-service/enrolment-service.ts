@@ -71,6 +71,10 @@ export function dueFor(
  * the address it was sent to.
  */
 export default class EnrolmentService {
+  /**
+   * Everything assigned on-platform to this address, with the deadline that applies to each course
+   * and quiz (the newest assignment's, where one was assigned twice).
+   */
   static async forEmail(email: string): Promise<Enrolment> {
     const assignments = await AssignmentGateway.listPlatformForEmail(email.trim().toLowerCase());
 

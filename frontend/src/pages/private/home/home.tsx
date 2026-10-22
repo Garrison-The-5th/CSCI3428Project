@@ -46,6 +46,7 @@ function formatMinutes(minutes: number): string {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
+/** Whole calendar days from today to the given date (negative once it has passed). */
 function daysUntil(iso: string): number {
   const due = new Date(iso);
   const today = new Date();
@@ -76,6 +77,7 @@ function dueLabel(iso: string, overdue?: boolean): { text: string; overdue: bool
   return { text: `Due in ${days} days`, overdue: past };
 }
 
+/** The learner's dashboard: progress, deadlines and what to pick up next. */
 const HomePage = () => {
   const api = useLearnerApi();
   const { user } = useAuth();

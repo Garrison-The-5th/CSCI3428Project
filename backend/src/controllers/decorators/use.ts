@@ -10,6 +10,10 @@ import { RequestHandler } from 'express';
 
 import { MetadataKeys } from '@/controllers/decorators/metadata-keys';
 
+/**
+ * Method decorator that adds a middleware to a route. Decorators apply bottom-up, so the `@use`
+ * written lowest runs first — which is why `authenticateAndAttachUser` always sits at the bottom.
+ */
 export function use(middleware: RequestHandler) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return function (target: object, key: string, desc: PropertyDescriptor) {

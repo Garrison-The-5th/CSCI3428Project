@@ -345,12 +345,16 @@ function mergeById<T extends { id: string }>(live: T[], archived: T[]): T[] {
   return [...live, ...archived.filter((item) => !seen.has(item.id))];
 }
 
-/** `same` when both sides have it, `added` when only the live one does. */
+/**
+ * `same` when both sides have it, `added` when only the live one does, `removed` when only the
+ * archived one does.
+ */
 function verdict(id: string, live: Set<string>, archived: Set<string>): DiffStatus {
   if (live.has(id) && archived.has(id)) return 'same';
   return live.has(id) ? 'added' : 'removed';
 }
 
+/** A verdict for every id on either side, keyed by id. */
 function verdicts(live: Set<string>, archived: Set<string>): Record<string, DiffStatus> {
   const out: Record<string, DiffStatus> = {};
   for (const id of new Set([...live, ...archived])) out[id] = verdict(id, live, archived);
@@ -832,6 +836,7 @@ export default class PublicationService {
     return snapshots.filter((snapshot): snapshot is CourseSnapshot => snapshot !== null);
   }
 
+  /** Every published version of a course, for the editor's version history. */
   static listVersions(courseId: string) {
     return PublicationGateway.listForCourse(courseId);
   }

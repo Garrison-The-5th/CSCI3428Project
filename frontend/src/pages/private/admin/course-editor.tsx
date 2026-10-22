@@ -118,6 +118,7 @@ const PreviewBanner = () => (
 /** Where the sidebar's collapsed state is remembered between visits. */
 const SIDEBAR_KEY = 'course-editor-sidebar-collapsed';
 
+/** Whether the editor's sidebar was left collapsed last time. False when storage is unavailable. */
 function readSidebarCollapsed(): boolean {
   try {
     return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -173,6 +174,7 @@ const CourseEditor = ({
   /** Collapsed, the sidebar shows its icons only. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
 
+  /** Collapses or expands the sidebar and remembers the choice. */
   const toggleSidebar = () =>
     setSidebarCollapsed((prev) => {
       try {
@@ -183,6 +185,7 @@ const CourseEditor = ({
       return !prev;
     });
 
+  /** Shows a toast. */
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
 
@@ -328,6 +331,10 @@ const CourseEditor = ({
     if (!selectedSectionId && course?.sections.length) setSelectedSectionId(course.sections[0].id);
   }, [course, selectedSectionId]);
 
+  /**
+   * Runs one edit, then reloads the course and shows `success` — or shows the error. Returns
+   * whether it worked.
+   */
   const run = async (action: () => Promise<unknown>, success: string, failure: string) => {
     try {
       await action();
@@ -341,6 +348,7 @@ const CourseEditor = ({
     }
   };
 
+  /** Carries out the delete the author just confirmed — a course, module, section or quiz. */
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     const target = pendingDelete;

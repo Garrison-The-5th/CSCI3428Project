@@ -49,6 +49,10 @@ export interface AuthenticatedRequest extends Request {
   courseId?: string;
 }
 
+/**
+ * Verifies the Keycloak bearer token, checks it was issued to this app, and attaches the caller's
+ * claims (`req.auth`) and local user row (`req.user`). Every outcome is security-logged.
+ */
 export async function authenticateAndAttachUser(
   req: AuthenticatedRequest,
   res: Response,

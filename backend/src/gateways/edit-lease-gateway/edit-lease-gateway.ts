@@ -27,6 +27,7 @@ export default class EditLeaseGateway {
     });
   }
 
+  /** The current claim on one module or question, with who holds it, or null. */
   static find(scope: EditScope, targetId: string) {
     return prisma.editLease.findUnique({
       where: { scope_targetId: { scope, targetId } },

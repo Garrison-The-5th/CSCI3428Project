@@ -40,6 +40,10 @@ interface EditorAccess {
 
 const EditorAccessContext = createContext<EditorAccess | undefined>(undefined);
 
+/**
+ * Loads which courses the signed-in person may edit, so the app can show editing tabs to course
+ * contributors who are not global authors.
+ */
 export const EditorAccessProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { authenticated } = useAuth();
   const { isGuest } = useGuest();

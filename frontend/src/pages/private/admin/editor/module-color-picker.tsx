@@ -25,6 +25,10 @@ interface ModuleColorPickerProps {
   label: string;
 }
 
+/**
+ * The swatch beside a module or section: opens the fixed module palette, plus a choice to clear the
+ * colour.
+ */
 const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -49,6 +53,10 @@ const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) =
     };
   }, [open]);
 
+  /**
+   * Picks a colour (or null to clear) and closes the palette. Re-picking the current colour does
+   * nothing.
+   */
   const choose = (next: string | null) => {
     setOpen(false);
     // Picking what is already set is a no-op, not a pointless round trip.

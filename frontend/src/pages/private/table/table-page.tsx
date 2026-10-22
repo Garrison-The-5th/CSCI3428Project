@@ -36,6 +36,7 @@ type TableQueryState = Pick<
   'sorting' | 'columnFilters' | 'globalFilter' | 'pagination'
 >;
 
+/** The query to start with: the saved table view if there is one, otherwise the defaults. */
 const getInitialQueryState = (): TableQueryState => {
   const persisted = readPersistedState();
   if (!persisted) {
@@ -56,9 +57,11 @@ const getInitialQueryState = (): TableQueryState => {
   };
 };
 
+/** Deep equality of two queries, so an unchanged view does not trigger a refetch. */
 const sameQueryState = (left: TableQueryState, right: TableQueryState) =>
   JSON.stringify(left) === JSON.stringify(right);
 
+/** Just the fields the server query needs from the table's full state. */
 const toQueryState = (state: DataTableQueryState): TableQueryState => ({
   sorting: state.sorting,
   columnFilters: state.columnFilters,
@@ -66,6 +69,7 @@ const toQueryState = (state: DataTableQueryState): TableQueryState => ({
   pagination: state.pagination,
 });
 
+/** The table query as URL parameters; sorting and filters are sent as JSON strings. */
 const buildQueryString = (query: TableQueryState) => {
   const params = new URLSearchParams();
   params.set('pageIndex', String(query.pagination.pageIndex));
@@ -76,6 +80,10 @@ const buildQueryString = (query: TableQueryState) => {
   return params.toString();
 };
 
+/**
+ * The team members table page: holds the current query, fetches the matching page from the server
+ * whenever it changes, and shows the summary counts.
+ */
 const TablePage = () => {
   const [queryState, setQueryState] = useState<TableQueryState>(getInitialQueryState);
   const [rows, setRows] = useState<TeamMember[]>([]);

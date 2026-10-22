@@ -12,6 +12,7 @@ import { authenticateAndAttachUser } from '@/controllers/auth-controller/auth-mi
 import { controller, get, use } from '@/controllers/decorators';
 import TableService from '@/services/table-service/table-service';
 
+/** A loggable message from whatever was thrown. */
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -26,6 +27,11 @@ function getErrorMessage(error: unknown): string {
 
 @controller('/table-members')
 export default class TableController {
+  /**
+   * GET /table-members — one page of the members table. Sorting and filters
+   * arrive as JSON strings in the query; anything that is not a plain string
+   * (e.g. a repeated parameter) is dropped rather than passed through.
+   */
   @get('/')
   @use(authenticateAndAttachUser)
   async getMembers(req: Request, res: Response) {

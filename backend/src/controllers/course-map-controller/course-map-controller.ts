@@ -36,10 +36,12 @@ import CourseMapService from '@/services/course-map-service/course-map-service';
  * one is an edit to the course by any reading.
  */
 
+/** A route parameter as a string. */
 function param(req: Request, name: string): string {
   return String(req.params[name]);
 }
 
+/** How far this person's author role reaches — see `CourseReach`. */
 function isGlobalAuthor(req: AuthenticatedRequest): CourseReach {
   return courseReach(req.auth!.roles);
 }
@@ -128,6 +130,7 @@ export default class CourseMapController {
 
   // ---- Nodes ----
 
+  /** Adds a node to a staged map. */
   @post('/:courseId/nodes')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)
@@ -194,6 +197,7 @@ export default class CourseMapController {
     }
   }
 
+  /** Removes a node; whatever was placed on it goes back to staging. */
   @del('/nodes/:id')
   @use(requireCourseEditor(fromNodeParam('id')))
   @use(authenticateAndAttachUser)
@@ -222,6 +226,7 @@ export default class CourseMapController {
 
   // ---- Connections ----
 
+  /** Makes `childId` a child of this node and returns the updated map. */
   @post('/nodes/:id/children')
   @use(requireCourseEditor(fromNodeParam('id')))
   @use(authenticateAndAttachUser)
@@ -237,6 +242,7 @@ export default class CourseMapController {
     }
   }
 
+  /** Removes the connection from this node to `childId` and returns the updated map. */
   @del('/nodes/:id/children/:childId')
   @use(requireCourseEditor(fromNodeParam('id')))
   @use(authenticateAndAttachUser)
@@ -271,6 +277,10 @@ export default class CourseMapController {
     }
   }
 
+  /**
+   * Makes another course's sections available to place on this map. Only courses this person may
+   * edit can be imported.
+   */
   @post('/:courseId/imports')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)
@@ -288,6 +298,7 @@ export default class CourseMapController {
     }
   }
 
+  /** Takes an imported course off this map, along with anything of it already placed. */
   @del('/:courseId/imports/:sourceCourseId')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)

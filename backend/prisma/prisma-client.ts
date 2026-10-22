@@ -33,6 +33,7 @@ export async function connectDB() {
   await prisma.$connect();
 }
 
+/** Closes the database connection pool; called on shutdown. */
 export async function disconnectDB() {
   await prisma.$disconnect();
   console.log('Prisma disconnected from database');

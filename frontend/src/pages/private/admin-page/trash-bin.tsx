@@ -48,6 +48,11 @@ function timeLeft(deletedAt: string, retentionDays: number): string {
   return `clears in ${days} days`;
 }
 
+/**
+ * The recycle bin: deleted courses, modules, sections and quizzes this person may edit, each
+ * restorable or deletable for good, plus restore-all and empty-bin. Items expire after
+ * `retentionDays`.
+ */
 const TrashBin = ({ onNotify }: TrashBinProps) => {
   const [courses, setCourses] = useState<DeletedCourse[]>([]);
   const [modules, setModules] = useState<DeletedModule[]>([]);
@@ -83,6 +88,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
     fetchDeleted();
   }, [fetchDeleted]);
 
+  /** Runs one bin action, then reloads the bin and reports the outcome. */
   const run = async (action: () => Promise<unknown>, success: string, failure: string) => {
     try {
       setBusy(true);
@@ -97,6 +103,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
     }
   };
 
+  /** Restores everything in the bin — curriculum first, then quizzes. */
   const restoreAll = () =>
     run(
       async () => {
@@ -107,6 +114,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
       'Failed to restore everything',
     );
 
+  /** Permanently deletes everything in the bin. */
   const emptyBin = () =>
     run(
       async () => {
@@ -117,6 +125,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
       'Failed to empty the recycle bin',
     );
 
+  /** Permanently deletes one binned item, calling the endpoint for its kind. */
   const purgeOne = (target: Exclude<Pending, null | { kind: 'all' }>) => {
     const call =
       target.kind === 'course'

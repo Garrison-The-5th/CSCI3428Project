@@ -104,6 +104,7 @@ export default class PublicationGateway {
     });
   }
 
+  /** One published version, tree included, or null. */
   static getById(id: string) {
     return prisma.coursePublication.findUnique({ where: { id } });
   }

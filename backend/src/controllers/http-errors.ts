@@ -39,6 +39,10 @@ export class ForbiddenError extends Error {}
  */
 export class ConflictError extends Error {}
 
+/**
+ * True for any Prisma client error, whose messages can leak schema details and must not be sent to
+ * the browser.
+ */
 function isDatabaseError(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError ||

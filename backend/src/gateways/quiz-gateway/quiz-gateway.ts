@@ -77,6 +77,7 @@ export default class QuizGateway {
     });
   }
 
+  /** One non-deleted quiz with its questions and options; `live` also requires it be published. */
   static getQuizById(id: string, live = false) {
     return prisma.quiz.findFirst({
       where: { id, deletedAt: null, ...(live ? { published: true } : {}) },
@@ -166,6 +167,7 @@ export default class QuizGateway {
     return prisma.quiz.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
+  /** Takes a quiz back out of the recycle bin. */
   static restoreQuiz(id: string) {
     return prisma.quiz.update({ where: { id }, data: { deletedAt: null } });
   }
@@ -197,6 +199,7 @@ export default class QuizGateway {
     return prisma.quiz.delete({ where: { id } });
   }
 
+  /** "Restore all" for binned quizzes this author may reach. */
   static restoreAllQuizzes(courseIds: string[], includeOrphans: boolean) {
     return prisma.quiz.updateMany({
       where: {
@@ -207,6 +210,7 @@ export default class QuizGateway {
     });
   }
 
+  /** "Empty bin" for binned quizzes this author may reach. */
   static purgeQuizzes(courseIds: string[], includeOrphans: boolean) {
     return prisma.quiz.deleteMany({
       where: {
@@ -216,18 +220,22 @@ export default class QuizGateway {
     });
   }
 
+  /** Recycle-bin expiry: permanently deletes quizzes binned before the cutoff. */
   static purgeQuizzesDeletedBefore(cutoff: Date) {
     return prisma.quiz.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
 
+  /** One question with its options, or null. */
   static getQuestionById(id: string) {
     return prisma.question.findUnique({ where: { id }, include: { options: true } });
   }
 
+  /** The quiz's last question by order, so a new one can go on the end. */
   static getLastQuestionOrder(quizId: string, db: Db = prisma) {
     return db.question.findFirst({ where: { quizId }, orderBy: { order: 'desc' } });
   }
 
+  /** Moves every question at or after `fromOrder` down one, opening a slot to insert into. */
   static shiftQuestionsFrom(quizId: string, fromOrder: number, db: Db) {
     return db.question.updateMany({
       where: { quizId, order: { gte: fromOrder } },
@@ -321,6 +329,7 @@ export default class QuizGateway {
     );
   }
 
+  /** Permanent; the question's options go with it. */
   static deleteQuestion(id: string) {
     return prisma.question.delete({ where: { id } });
   }
@@ -335,10 +344,12 @@ export default class QuizGateway {
     });
   }
 
+  /** Opens a run. `expiresAt` is null for an untimed quiz. */
   static createSession(data: { userId: number; quizId: string; expiresAt: Date | null }) {
     return prisma.quizSession.create({ data });
   }
 
+  /** Marks a run as handed in, so it is no longer the open one. */
   static closeSession(id: string) {
     return prisma.quizSession.update({
       where: { id },
@@ -346,6 +357,7 @@ export default class QuizGateway {
     });
   }
 
+  /** Stores the graded result of a submitted quiz. */
   static recordAttempt(userId: number, quizId: string, score: number, total: number) {
     return prisma.quizAttempt.create({ data: { userId, quizId, score, total } });
   }
@@ -395,6 +407,7 @@ export default class QuizGateway {
     });
   }
 
+  /** Every attempt this person has made, newest first. */
   static getAttemptsForUser(userId: number) {
     return prisma.quizAttempt.findMany({
       where: { userId },

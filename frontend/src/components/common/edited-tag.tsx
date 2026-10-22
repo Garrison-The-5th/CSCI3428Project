@@ -27,6 +27,7 @@ interface Props {
   mark: EditMark | undefined;
 }
 
+/** "Last edited by …" on something learners cannot see yet. Renders nothing without a mark. */
 const EditedTag = ({ mark }: Props) => {
   if (!mark) return null;
 

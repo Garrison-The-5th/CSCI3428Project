@@ -42,6 +42,10 @@ interface NewContentContextType {
 
 const NewContentContext = createContext<NewContentContextType | undefined>(undefined);
 
+/**
+ * Loads which courses have gained content since this learner finished them, for the "new" marks on
+ * the course grids.
+ */
 export const NewContentProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { authenticated } = useAuth();
   const { token } = useGuest();

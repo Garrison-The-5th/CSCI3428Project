@@ -33,6 +33,7 @@ import { useLearnerApi } from '@/services/learner-api';
 import { Quiz, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
 
+/** The start page and player for a quiz that belongs to no course. */
 const StandaloneQuiz = () => {
   const api = useLearnerApi();
   const { quizId } = useParams<{ quizId: string }>();

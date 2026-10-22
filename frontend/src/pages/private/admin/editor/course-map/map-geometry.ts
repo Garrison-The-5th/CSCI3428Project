@@ -111,6 +111,7 @@ export function nodeAtPoint<T extends { id: string; x: number; y: number }>(
   point: Point,
   reach = 0,
 ): T | null {
+  /** Whether the point lies inside the node's box, grown by `pad` on every side. */
   const within = (node: T, pad: number) => {
     const box = nodeRect(node);
     return (
@@ -177,6 +178,10 @@ export function contentBounds(nodes: MapNode[]): Bounds {
  * against one edge, which is what a naive `Math.min`/`Math.max` pair would do.
  */
 export function clampOffset(offset: Point, bounds: Bounds, viewport: Point): Point {
+  /**
+   * Keeps a pan offset on one axis within the map's extent; centres the map on that axis when it is
+   * smaller than the frame.
+   */
   const clampAxis = (value: number, min: number, max: number, size: number): number => {
     const lowest = size - max;
     const highest = -min;
@@ -407,6 +412,7 @@ export function alignLayers(
   return out;
 }
 
+/** The mean of a non-empty list of numbers. */
 function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }

@@ -136,6 +136,7 @@ export interface CanvasData {
   images: Record<string, CanvasImageAsset>;
 }
 
+/** A blank white canvas with no items and no pictures — what a new canvas element starts as. */
 export function emptyCanvas(): CanvasData {
   return { version: 1, background: '#ffffff', items: [], images: {} };
 }
@@ -147,12 +148,14 @@ type Loose = Record<string, unknown>;
 const isObject = (value: unknown): value is Loose =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** A finite number clamped to [min, max] and rounded to 2 decimals; `fallback` if it isn't one. */
 function num(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, Math.round(parsed * 100) / 100));
 }
 
+/** Strictly `true`; anything else (including "true") is false. */
 function bool(value: unknown): boolean {
   return value === true;
 }
@@ -162,17 +165,24 @@ function optionalColor(value: unknown): string | null {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
 }
 
+/** A required colour: a valid hex value, or `fallback`. */
 function color(value: unknown, fallback: string): string {
   return optionalColor(value) ?? fallback;
 }
 
+/** Degrees normalised into [0, 360), so a spun-around item stores a small number. */
 function rotation(value: unknown): number {
   const degrees = num(value, 0, -100_000, 100_000);
   return Math.round((((degrees % 360) + 360) % 360) * 100) / 100;
 }
 
+/** Item ids are client-generated, so they are held to a short, safe alphabet. */
 const ID_PATTERN = /^[\w-]{1,64}$/;
 
+/**
+ * The stored JSON shaped as a canvas, without re-cleaning its items — they
+ * were cleaned on the way in. Anything that is not an object reads as empty.
+ */
 function readCanvas(value: unknown): CanvasData {
   if (!isObject(value)) return emptyCanvas();
   const images = isObject(value.images) ? (value.images as Record<string, CanvasImageAsset>) : {};
@@ -189,6 +199,10 @@ export function storedCanvas(value: unknown): CanvasData {
   return readCanvas(value);
 }
 
+/**
+ * The geometry and border every item kind shares, each value clamped. Positions
+ * may run a little off the canvas so an item can be dragged partly out of view.
+ */
 function cleanBase(raw: Loose, id: string): CanvasItemBase {
   return {
     id,
@@ -227,6 +241,11 @@ function cleanCrop(raw: unknown): CanvasImageItem['crop'] {
   return { top, right, bottom, left };
 }
 
+/**
+ * One client-sent item rebuilt field by field from what is allowed, or null to
+ * drop it. Unknown kinds, bad ids and pictures not in the stored pool are
+ * dropped rather than failing the whole save.
+ */
 function cleanItem(raw: unknown, images: Record<string, CanvasImageAsset>): CanvasItem | null {
   if (!isObject(raw)) return null;
   if (typeof raw.id !== 'string' || !ID_PATTERN.test(raw.id)) return null;

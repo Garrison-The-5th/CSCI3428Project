@@ -42,6 +42,10 @@ interface CourseMapPaneProps {
   onRefresh: () => Promise<void> | void;
 }
 
+/**
+ * The Course mapping tab: the staging pool of sections, the selected node's contents, and the map
+ * itself.
+ */
 const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
   const [map, setMap] = useState<CourseMap | null>(null);
   const [loading, setLoading] = useState(true);

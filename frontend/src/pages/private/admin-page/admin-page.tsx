@@ -48,6 +48,7 @@ const PANES: Array<{ key: Pane; label: string; hint: string; Icon: typeof TrashI
   },
 ];
 
+/** The admin dashboard: one pane at a time, chosen by the `pane` URL parameter. */
 const AdminPage = () => {
   const [params, setParams] = useSearchParams();
   const [toast, setToast] = useState<Toast>({ show: false, message: '', type: 'success' });
@@ -59,6 +60,7 @@ const AdminPage = () => {
   // `replace` so flicking between tabs does not fill up the back button.
   const openPane = (next: Pane) => setParams({ tab: next }, { replace: true });
 
+  /** Shows a toast. */
   const notify = (message: string, type: 'success' | 'error' = 'success') =>
     setToast({ show: true, message, type });
 

@@ -51,6 +51,10 @@ interface GuestContextType {
 
 const GuestContext = createContext<GuestContextType | undefined>(undefined);
 
+/**
+ * Holds a guest session — someone working through a private assignment link rather than signed in.
+ * The token lives in sessionStorage, so it ends with the tab.
+ */
 export const GuestProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(STORAGE_KEY));
   const [email, setEmail] = useState<string | null>(null);

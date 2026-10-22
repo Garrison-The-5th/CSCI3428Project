@@ -46,6 +46,7 @@ interface QuizEntry {
   sectionTitle: string;
 }
 
+/** A duration for display: "45 min", "2 hours" or "1 h 30 min". */
 function formatMinutes(minutes: number): string {
   if (minutes <= 0) return '0 min';
   if (minutes < 60) return `${minutes} min`;
@@ -54,6 +55,10 @@ function formatMinutes(minutes: number): string {
   return rest === 0 ? `${hours} hour${hours === 1 ? '' : 's'}` : `${hours} h ${rest} min`;
 }
 
+/**
+ * The learner's landing page for a quiz set: what is in it, how long it takes, its deadline, and
+ * notes.
+ */
 const QuizLanding = () => {
   const api = useLearnerApi();
   const { courseId } = useParams<{ courseId: string }>();
@@ -122,6 +127,7 @@ const QuizLanding = () => {
     );
   }, [course]);
 
+  /** Saves a note on this quiz set. */
   const saveNote = async () => {
     if (!courseId || !noteDraft.trim()) return;
     try {
@@ -133,6 +139,7 @@ const QuizLanding = () => {
     }
   };
 
+  /** Deletes one of the learner's notes. */
   const removeNote = async (id: string) => {
     try {
       await api.deleteNote(id);
@@ -202,6 +209,7 @@ const QuizLanding = () => {
           ? `Start quiz · ${next.quiz.timeLimitMinutes} min`
           : 'Start quiz';
 
+  /** Starts a quiz, unless the set is locked past its deadline. */
   const openQuiz = (quizId: string) => {
     if (locked) return;
     navigate(`/quizzes/${course.id}/take/${quizId}`);

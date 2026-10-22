@@ -25,6 +25,7 @@ import { useLearnerApi } from '@/services/learner-api';
 import { Quiz, QUIZ_TYPE_LABELS } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
 
+/** The learner's Quizzes tab: a grid of the courses that have quizzes for them. */
 const Quizzes = () => {
   const api = useLearnerApi();
   const navigate = useNavigate();

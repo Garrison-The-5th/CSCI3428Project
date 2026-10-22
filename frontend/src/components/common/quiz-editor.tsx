@@ -171,6 +171,10 @@ const QuizEditor = ({
     [quiz.id, quiz.timeLimitMinutes],
   );
 
+  /**
+   * Saves the time limit field: blank means untimed, otherwise a whole number of minutes, 1 or
+   * more. An invalid value is reported and the field reset.
+   */
   const saveTimeLimit = async () => {
     const trimmed = timeLimit.trim();
     const next = trimmed === '' ? null : Number(trimmed);
@@ -288,6 +292,10 @@ const QuizEditor = ({
     );
   };
 
+  /**
+   * Runs one save, then refreshes the quiz and shows `success` — or shows the error. Returns
+   * whether it worked.
+   */
   const run = async (action: () => Promise<unknown>, success: string, failure: string) => {
     try {
       await action();
@@ -301,6 +309,7 @@ const QuizEditor = ({
     }
   };
 
+  /** Saves the new-question draft as a question on the end of the quiz. */
   const addQuestion = async () => {
     const payload = toQuestionInput(draft, (m) => onNotify(m, 'error'));
     if (!payload) return;
@@ -380,6 +389,7 @@ const QuizEditor = ({
     );
   };
 
+  /** Opens an existing question for editing. */
   const startEditing = (question: QuizQuestion) => {
     setEditingId(question.id);
     setEditDraft(toDraft(question));
@@ -426,6 +436,10 @@ const QuizEditor = ({
   draftRef.current = draft;
   const savingNewRef = useRef(false);
 
+  /**
+   * Saves a half-written new question when the author moves away from it, so it is not lost. Empty
+   * or invalid drafts are left alone.
+   */
   const saveNewOnLeave = async (startAnother: boolean) => {
     const value = draftRef.current;
     if (savingNewRef.current || questionDraftIsEmpty(value)) return;
@@ -478,6 +492,7 @@ const QuizEditor = ({
     };
   }, [pane, isDirected]);
 
+  /** Saves the question being edited. */
   const saveQuestion = async () => {
     if (!editingId) return;
     const payload = questionInput(editDraft, (m) => onNotify(m, 'error'));

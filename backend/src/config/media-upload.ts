@@ -63,6 +63,11 @@ export function isHeic(file: { mimetype: string; originalname: string }): boolea
   );
 }
 
+/**
+ * Multer's first gate, run on the declared type and file name before the bytes
+ * are read. SVG and script-bearing files are refused outright; the real check
+ * of the content happens later, against the file's magic bytes.
+ */
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const mimetype = file.mimetype.toLowerCase();
 

@@ -87,6 +87,7 @@ export default class AssignmentGateway {
     });
   }
 
+  /** Everyone a course has been assigned to, most recent first, with who assigned it. */
   static listForCourse(courseId: string) {
     return prisma.assignment.findMany({
       // The hash is only ever compared against; nothing outside needs it.
@@ -97,6 +98,7 @@ export default class AssignmentGateway {
     });
   }
 
+  /** Everyone a quiz has been assigned to on its own, most recent first. */
   static listForQuiz(quizId: string) {
     return prisma.assignment.findMany({
       // The hash is only ever compared against; nothing outside needs it.
@@ -134,10 +136,12 @@ export default class AssignmentGateway {
     return rows.map((row) => ({ courseId: row.courseId!, count: row._count._all }));
   }
 
+  /** One assignment with its assigner, or null. */
   static findById(id: string) {
     return prisma.assignment.findUnique({ where: { id }, include: withAssigner });
   }
 
+  /** Stamps the link as revoked; it stops opening but the row is kept. */
   static revoke(id: string) {
     return prisma.assignment.update({ where: { id }, data: { revokedAt: new Date() } });
   }
@@ -164,6 +168,7 @@ export default class AssignmentGateway {
     return prisma.assignment.update({ where: { id }, data: { dueDate } });
   }
 
+  /** Permanently removes the assignment row. */
   static delete(id: string) {
     return prisma.assignment.delete({ where: { id } });
   }
@@ -196,6 +201,7 @@ export default class AssignmentGateway {
     ]);
   }
 
+  /** Records that the link was just opened, for the "last accessed" column. */
   static touch(id: string) {
     return prisma.assignment.update({ where: { id }, data: { lastAccessedAt: new Date() } });
   }

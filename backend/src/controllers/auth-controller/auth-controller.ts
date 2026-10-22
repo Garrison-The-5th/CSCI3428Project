@@ -179,6 +179,7 @@ export default class AuthController {
     });
   }
 
+  /** Admin only: mails a subject and message to everyone on the newsletter list. */
   @post('/send-email-to-subscribers')
   @use(requireRole('admin'))
   @use(authenticateAndAttachUser)
