@@ -608,6 +608,10 @@ export const curriculumApi = {
     return HttpHelper.postFormData(`curriculum/courses/${courseId}/image`, form);
   },
 
+  /** Takes the cover photo off a lesson or quiz set. */
+  removeCourseImage: (courseId: string) =>
+    HttpHelper.delete(`curriculum/courses/${courseId}/image`),
+
   uploadSectionImage: (sectionId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);

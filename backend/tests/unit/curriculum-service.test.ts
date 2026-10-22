@@ -150,6 +150,23 @@ describe('createCourse', () => {
   });
 });
 
+describe('removeCourseImage', () => {
+  it('clears the photo and its type together', async () => {
+    gateway.getCourseById.mockResolvedValue({ id: 'c1' } as never);
+    gateway.updateCourse.mockResolvedValue({} as never);
+
+    await CurriculumService.removeCourseImage('c1');
+
+    expect(gateway.updateCourse).toHaveBeenCalledWith('c1', { imageData: null, imageType: null });
+  });
+
+  it('refuses an unknown course', async () => {
+    gateway.getCourseById.mockResolvedValue(null as never);
+    await expect(CurriculumService.removeCourseImage('missing')).rejects.toThrow(/not found/);
+    expect(gateway.updateCourse).not.toHaveBeenCalled();
+  });
+});
+
 describe('updateCourse', () => {
   beforeEach(() => {
     gateway.getCourseById.mockResolvedValue({ id: 'c1', title: 'Existing' } as never);

@@ -10,7 +10,7 @@
  *
  * Every field saves itself shortly after typing stops; there are no save buttons.
  */
-import { ArrowUpTrayIcon } from '@heroicons/react/24/outline';
+import { ArrowUpTrayIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -32,11 +32,13 @@ interface Props {
 
 const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
+/** A comma-separated field as a list, blanks dropped. */
 const splitCommas = (v: string) =>
   v
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
+/** A one-per-line field as a list, blanks dropped. */
 const splitLines = (v: string) =>
   v
     .split('\n')
@@ -54,6 +56,10 @@ const splitLines = (v: string) =>
  */
 const dueIfAssignedToday = (days: string) => dueDateFromDays(days)?.toLocaleDateString() ?? null;
 
+/**
+ * Edits what the course landing page shows: cover photo, descriptions, tags, languages, learning
+ * outcomes and prerequisites.
+ */
 const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
   const coverRef = useRef<HTMLInputElement>(null);
 
@@ -67,6 +73,22 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
    * the upload reads as a click that did nothing and gets clicked again.
    */
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [removingCover, setRemovingCover] = useState(false);
+  const cover = imageSrc(course.imageData, course.imageType);
+
+  /** Takes the cover photo off. `run` refreshes the course, so the box empties on success. */
+  const removeCover = async () => {
+    setRemovingCover(true);
+    try {
+      await run(
+        () => curriculumApi.removeCourseImage(course.id),
+        'Cover photo removed',
+        'Failed to remove cover photo',
+      );
+    } finally {
+      setRemovingCover(false);
+    }
+  };
 
   const [draft, setDraft] = useState({
     title: '',
@@ -112,6 +134,7 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
     await onRefresh();
   });
 
+  /** A labelled form field with an optional hint underneath. */
   const field = (label: string, node: React.ReactNode, hint?: string) => (
     <label className="flex flex-col gap-1">
       <span className="text-sm font-medium text-dark-gray">{label}</span>
@@ -134,12 +157,8 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
             className="relative flex h-24 w-32 shrink-0 items-center justify-center overflow-hidden
               rounded-lg border border-gray-300 bg-white"
           >
-            {imageSrc(course.imageData, course.imageType) ? (
-              <img
-                src={imageSrc(course.imageData, course.imageType)!}
-                alt=""
-                className="h-full w-full object-cover"
-              />
+            {cover ? (
+              <img src={cover} alt="" className="h-full w-full object-cover" />
             ) : (
               <span className="text-xs text-dark-gray">No photo</span>
             )}
@@ -183,21 +202,40 @@ const LandingPageEditor = ({ course, onRefresh, run }: Props) => {
                 }
               }}
             />
-            <Button
-              onClick={() => coverRef.current?.click()}
-              disabled={uploadingCover}
-              className={primaryBtn}
-            >
-              {uploadingCover ? (
-                <>
-                  <Spinner className="w-5 h-5" /> Uploading…
-                </>
-              ) : (
-                <>
-                  <ArrowUpTrayIcon className="w-5 h-5" /> Upload cover photo
-                </>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => coverRef.current?.click()}
+                disabled={uploadingCover || removingCover}
+                className={primaryBtn}
+              >
+                {uploadingCover ? (
+                  <>
+                    <Spinner className="w-5 h-5" /> Uploading…
+                  </>
+                ) : (
+                  <>
+                    <ArrowUpTrayIcon className="w-5 h-5" /> Upload cover photo
+                  </>
+                )}
+              </Button>
+              {cover && (
+                <Button
+                  variant="outline"
+                  onClick={removeCover}
+                  disabled={uploadingCover || removingCover}
+                >
+                  {removingCover ? (
+                    <>
+                      <Spinner className="w-5 h-5" /> Removing…
+                    </>
+                  ) : (
+                    <>
+                      <TrashIcon className="w-5 h-5" /> Remove photo
+                    </>
+                  )}
+                </Button>
               )}
-            </Button>
+            </div>
             <p className="mt-1 text-xs text-dark-gray">
               JPEG, PNG, GIF, WebP, SVG, BMP or HEIC, up to 10MB.
             </p>

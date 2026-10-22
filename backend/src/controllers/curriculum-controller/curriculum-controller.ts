@@ -56,6 +56,7 @@ function parseEditScope(value: unknown): EditScope {
   throw new Error('scope must be MODULE or QUESTION');
 }
 
+/** How far this person's author role reaches — see `CourseReach`. */
 function isGlobalAuthor(req: AuthenticatedRequest): CourseReach {
   return courseReach(req.auth!.roles);
 }
@@ -90,6 +91,7 @@ export default class CurriculumController {
     return res.send({ courses, isGlobalAuthor: Boolean(global) });
   }
 
+  /** The people named as editors on a course. Only someone who may edit it can see the list. */
   @get('/courses/:id/contributors')
   @use(authenticateAndAttachUser)
   async getContributors(req: AuthenticatedRequest, res: Response) {
@@ -261,6 +263,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Edits a course's settings and landing page. Cannot publish — that is the publish endpoint. */
   @put('/courses/:id')
   @use(requireCourseEditor(fromCourseParam('id')))
   @use(authenticateAndAttachUser)
@@ -549,6 +552,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Takes a course back out of the recycle bin. */
   @post('/courses/:id/restore')
   @use(requireCourseEditor(fromCourseParam('id')))
   @use(authenticateAndAttachUser)
@@ -579,8 +583,22 @@ export default class CurriculumController {
     }
   }
 
+  /** Removes the course cover photo. Lessons and quiz sets both use this. */
+  @del('/courses/:id/image')
+  @use(requireCourseEditor(fromCourseParam('id')))
+  @use(authenticateAndAttachUser)
+  async removeCourseImage(req: Request, res: Response) {
+    try {
+      const course = await CurriculumService.removeCourseImage(param(req, 'id'));
+      return res.send({ message: 'Course photo removed', course });
+    } catch (error) {
+      return fail(res, error, 'Error removing course photo');
+    }
+  }
+
   // ---- Modules ----
 
+  /** A course's live modules in order, for the editor. */
   @get('/courses/:courseId/modules')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)
@@ -607,6 +625,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Renames, recolours or moves a module; the grid renumbers around a move. */
   @put('/modules/:id')
   @use(requireCourseEditor(fromModuleParam('id'), { attributes: { kind: 'MODULE' } }))
   @use(authenticateAndAttachUser)
@@ -632,6 +651,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Takes a module back out of the recycle bin, onto the end of its course. */
   @post('/modules/:id/restore')
   @use(requireCourseEditor(fromModuleParam('id'), { attributes: { kind: 'MODULE' } }))
   @use(authenticateAndAttachUser)
@@ -659,6 +679,7 @@ export default class CurriculumController {
 
   // ---- Sections ----
 
+  /** Adds a section to a module and credits the author with it. */
   @post('/courses/:courseId/sections')
   @use(requireCourseEditor(fromCourseParam('courseId')))
   @use(authenticateAndAttachUser)
@@ -701,6 +722,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Changes a section's title, time estimate or colour. Moving it is done by reorder. */
   @put('/sections/:id')
   @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
@@ -726,6 +748,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Takes a section back out of the recycle bin, onto the end of its module. */
   @post('/sections/:id/restore')
   @use(requireCourseEditor(fromSectionParam('id'), { attributes: { kind: 'SECTION' } }))
   @use(authenticateAndAttachUser)
@@ -810,6 +833,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Adds a piece of content (video, text, canvas, …) to the end of a section. */
   @post('/sections/:sectionId/elements')
   @use(requireCourseEditor(fromSectionParam('sectionId')))
   @use(authenticateAndAttachUser)
@@ -835,6 +859,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Edits an element's content; also the canvas auto-save. */
   @put('/elements/:id')
   @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
   @use(authenticateAndAttachUser)
@@ -886,6 +911,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Permanently removes an element — elements are not recycled. */
   @del('/elements/:id')
   @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))
   @use(authenticateAndAttachUser)
@@ -932,6 +958,7 @@ export default class CurriculumController {
     return res.send({ instructors });
   }
 
+  /** Creates an instructor profile. Instructors are shared, so any author may. */
   @post('/instructors')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
@@ -944,6 +971,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Edits an instructor profile. */
   @put('/instructors/:id')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
@@ -956,6 +984,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Sets an instructor's photo from an uploaded image (counts toward the upload quota). */
   @post('/instructors/:id/photo')
   @use(enforceUploadQuota)
   @use(mediaUpload.single('file'))
@@ -971,6 +1000,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Permanently deletes an instructor profile. */
   @del('/instructors/:id')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
@@ -985,6 +1015,7 @@ export default class CurriculumController {
 
   // ---- Learner notes ----
 
+  /** The signed-in learner's own notes on a course. */
   @get('/courses/:courseId/notes')
   @use(authenticateAndAttachUser)
   async getNotes(req: AuthenticatedRequest, res: Response) {
@@ -992,6 +1023,7 @@ export default class CurriculumController {
     return res.send({ notes });
   }
 
+  /** Saves a note for the signed-in learner. */
   @post('/courses/:courseId/notes')
   @use(authenticateAndAttachUser)
   async createNote(req: AuthenticatedRequest, res: Response) {
@@ -1007,6 +1039,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Rewrites one of the signed-in learner's own notes. */
   @put('/notes/:id')
   @use(authenticateAndAttachUser)
   async updateNote(req: AuthenticatedRequest, res: Response) {
@@ -1019,6 +1052,7 @@ export default class CurriculumController {
     }
   }
 
+  /** Deletes one of the signed-in learner's own notes. */
   @del('/notes/:id')
   @use(authenticateAndAttachUser)
   async deleteNote(req: AuthenticatedRequest, res: Response) {
