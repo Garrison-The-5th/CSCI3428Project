@@ -11,6 +11,7 @@ import { Navigate } from 'react-router-dom';
 import logo from '@/assets/logo.svg';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
+import { getAuthConfig } from '@/utils/keycloak';
 
 /** The sign-in page, with an optional Google button behind VITE_ENABLE_GOOGLE_LOGIN. */
 const Login = () => {
@@ -25,9 +26,12 @@ const Login = () => {
     return isAdmin ? <Navigate to="/admin" replace /> : <Navigate to="/" replace />;
   }
 
-  /** Signs in through Keycloak, going straight to the Google identity provider. */
+  /**
+   * Signs in through Keycloak, going straight to the Google identity provider —
+   * whose alias in the realm comes from KEYCLOAK_IDP_HINT, via /auth-config.
+   */
   const handleGoogleLogin = () => {
-    keycloak.login({ idpHint: 'oauth2' });
+    keycloak.login({ idpHint: getAuthConfig().idpHint });
   };
 
   return (

@@ -15,7 +15,7 @@ import LogoImage from '@/assets/logo.svg';
 import { useGuest } from '@/contexts/guest-context';
 import { useNewContent } from '@/contexts/new-content-context';
 import { getLogoutItem } from '@/utils/get-navbar-data';
-import { keycloak } from '@/utils/keycloak';
+import { getKeycloak } from '@/utils/keycloak';
 
 type NavbarProps = {
   isDarkMode: boolean;
@@ -238,7 +238,7 @@ const Navbar: React.FC<NavbarProps> = ({
                   window.location.assign('/');
                   return;
                 }
-                keycloak.logout({ redirectUri: window.location.origin });
+                getKeycloak().logout({ redirectUri: window.location.origin });
               }}
             />
           </ul>

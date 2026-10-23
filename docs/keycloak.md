@@ -37,7 +37,8 @@ docker compose up -d keycloak
    - **Authorization**: OFF
    - **Authentication flow**: 
      - ✅ Standard flow
-     - ✅ Direct access grants
+     - ✅ Direct access grants (local only, for testing with curl — never on a
+       shared realm)
    - Click **"Next"**
 
 8. **Configure login settings**:
@@ -70,9 +71,22 @@ docker compose up -d keycloak
 
 ### Point the Backend at the Realm
 
-11. **Copy the realm public key into the backend environment.** The backend
-    verifies every token against `PUBLICKEY`, so a key that does not match this
-    realm rejects all sign-ins with a 401:
+The realm and client are named in one place: the backend's environment. The
+browser asks the backend for them at start-up (`GET /auth-config`), so nothing
+about the realm is baked into the frontend image.
+
+| Variable | What it is | Local default |
+|---|---|---|
+| `KEYCLOAK_URL` | Browser-facing Keycloak address | `http://localhost:4000` |
+| `KEYCLOAK_REALM` | The realm | `learningapp` |
+| `KEYCLOAK_CLIENT_ID` | The app's public client — the one whose roles count | `learning-client` |
+| `KEYCLOAK_IDP_HINT` | Alias of the Google identity provider, for the Google button | `oauth2` locally |
+| `KEYCLOAK_ADMIN_URL` | Where the backend itself reaches Keycloak | `http://keycloak:8080` in compose |
+| `PUBLICKEY` | Optional pinned realm key | unset — keys are fetched from the realm |
+
+11. **Optional: pin the realm public key.** Left unset, the backend fetches the
+    realm's signing keys itself (and again when the realm rotates them). To pin
+    one instead:
 
     ```bash
     curl -s http://localhost:4000/realms/learningapp \
@@ -80,10 +94,7 @@ docker compose up -d keycloak
       >> .env      # then delete any older PUBLICKEY line
     ```
 
-    The same value is in the admin console under **Realm settings → Keys → RS256
-    → Public key**.
-
-12. **Recreate the backend** so it picks up the new value:
+12. **Recreate the backend** so it picks up new values:
 
     ```bash
     docker compose up -d backend
@@ -92,7 +103,8 @@ docker compose up -d keycloak
     `docker compose restart backend` is not enough — compose substitutes `.env`
     when it creates the container, not when it restarts one.
 
-13. **Check it end to end:**
+13. **Check it end to end** — sign in at `http://localhost:5173`, or with the
+    password grant if you enabled **Direct access grants** on the local client:
 
     ```bash
     TOKEN=$(curl -s -d client_id=learning-client -d username=testuser \
@@ -103,38 +115,49 @@ docker compose up -d keycloak
       http://localhost:5002/table-members/    # expect 200
     ```
 
-> **Note**: The app is pre-configured to work with realm name `learningapp` and client ID `learning-client`. If you use these exact names, you won't need to modify any configuration files.
+**Google sign-in:** if you change the realm name, the Google OAuth redirect URI
+in Google Cloud Console changes too:
+`http://localhost:4000/realms/YOUR_REALM_NAME/broker/<idp alias>/endpoint`.
 
-### Using Different Realm/Client Names
+## Deployed: the shared central realms
 
-If you want to use different realm or client names, you'll need to update the following configuration file:
+Staging and production sign in through the company-wide realms on
+`auth.ttgteams.com` — `central-staging` and `central` — which other
+applications share. Everything the app does is therefore scoped to its own
+client:
 
-**File to update**: `config/keycloak.json`
+- Its roles are **client roles on `learning-client`**. Realm roles are ignored
+  entirely, so a realm-wide `admin` held for another app means nothing here.
+- Tokens issued to any other client in the realm are refused, even though they
+  are signed with the same key.
+- The app never creates, edits or deletes a Keycloak account. Deleting someone
+  on the Users page deletes their data here and removes the app's roles; their
+  company sign-in is untouched.
 
-```json
-{
-  "realm": "your-realm-name",           // Change this to your realm name
-  "auth-server-url": "http://localhost:4000/",
-  "ssl-required": "external",
-  "resource": "your-client-id",         // Change this to your client ID
-  "public-client": true,
-  "confidential-port": 0
-}
+The settings live in Infisical (project `learning-app-l-lb-j`, environments
+`staging` and `prod`), which the operator syncs into the backend's secret:
+
+```
+KEYCLOAK_URL=https://auth.ttgteams.com
+KEYCLOAK_REALM=central-staging            # central in prod
+KEYCLOAK_CLIENT_ID=learning-client
+KEYCLOAK_IDP_HINT=google
+KEYCLOAK_ADMIN_URL=https://auth.ttgteams.com
+KEYCLOAK_SERVICE_CLIENT_ID=learning-admin-api
+KEYCLOAK_SERVICE_CLIENT_SECRET=<from the client's Credentials tab>
 ```
 
-**Important**: If you change the realm name AND plan to use Google OAuth (see Google OAuth Setup section below), you must also update:
-- The Google OAuth redirect URI in Google Cloud Console
-- The redirect URI format will change to: `http://localhost:4000/realms/YOUR_REALM_NAME/broker/oauth2/endpoint`
+The backend reads its environment at start-up, so restart it after a change.
 
 ## Admin role management
 
 The **Users** page has two switches per person, **Author access** and **Admin
-access**. They change the roles in Keycloak itself, so the change is in the
-person's next token (within a few minutes) and anyone looking at the realm sees
-the same lists. Without the setup below the page still shows who holds which
-role, but the switches are turned off.
+access**. They change the person's roles on the app's client in Keycloak, so
+the change is in their next token (within a few minutes) and anyone looking at
+the client sees the same lists. Without the setup below the page still shows
+who holds which role, but the switches are turned off.
 
-| Role | Keycloak realm role | What it allows |
+| Role | Client role on `learning-client` | What it allows |
 |---|---|---|
 | Author | `contributor` | Create their own courses and quizzes, assign learning, the dashboard — everything except the Users page |
 | Admin | `admin` | Everything an author can do, plus the Users page: accounts and roles |
@@ -142,25 +165,33 @@ role, but the switches are turned off.
 Being named as an author on one course is separate from both: it lets someone
 edit that course but not create their own, and is set on the course itself.
 
-People given a role the older way — as a client role on `learning-client` (see
-[CMS.md](CMS.md)) — are still recognised, and removing a role from the Users
-page removes both.
-
-1. **Create the realm roles** (skip any that exist): **Realm roles → Create
-   role**, name `admin`, **Save**; then again for `contributor`.
-2. **Create the service client**: **Clients → Create client**
+1. **Create the client roles** on the app's client (skip any that exist):
+   **Clients → `learning-client` → Roles → Create role**, name `admin`,
+   **Save**; then again for `contributor`.
+2. **Keep the app's tokens to the app's roles**: **Clients → `learning-client`
+   → Client scopes → `learning-client-dedicated` → Scope** → turn **Full scope
+   allowed** OFF. (The backend ignores other roles anyway; this keeps them out
+   of the token altogether.)
+3. **Create the service client**: **Clients → Create client**
    - **Client ID**: `learning-admin-api`
    - **Next** → **Client authentication**: ON · **Service accounts roles**: ✅ ·
      untick **Standard flow** and **Direct access grants** → **Save**
-3. **Give it permission to manage users**: open the client → **Service accounts
+4. **Give it just enough permission**: open the client → **Service accounts
    roles** tab → **Assign role** → filter by **clients** → pick
-   `realm-management` roles **view-users**, **manage-users**,
-   **view-clients** and **view-realm** → **Assign**. (`view-realm` is what lets
-   it look up the `admin` and `contributor` roles; without it every switch
-   fails with a 403.)
-4. **Copy its secret**: **Credentials** tab → **Client secret**.
-5. **Give the backend the credentials** in the root `.env` (Docker) or
-   `backend/.env` (running locally):
+   `realm-management` roles **view-users** and **view-clients** → **Assign**.
+   Then let it map only the app's roles, using fine-grained admin permissions:
+   - **Clients → `learning-client` → Permissions** → turn permissions on →
+     open **map-roles** → add a client policy naming `learning-admin-api`.
+   - **Users → Permissions** (realm) → turn on → open **map-roles** → add the
+     same policy.
+
+   With both, the service account can grant and remove `learning-client`'s
+   roles and nothing else — it cannot edit, delete or create accounts, and
+   cannot hand out any other role in the realm. Do not give it
+   `manage-users`: in a shared realm that is every user in the company.
+5. **Copy its secret**: **Credentials** tab → **Client secret**.
+6. **Give the backend the credentials** in the root `.env` (Docker),
+   `backend/.env` (running locally) or Infisical (k8s):
 
    ```bash
    KEYCLOAK_SERVICE_CLIENT_ID=learning-admin-api
@@ -169,7 +200,7 @@ page removes both.
    KEYCLOAK_ADMIN_URL=http://localhost:4000
    ```
 
-6. Recreate the backend (`docker compose up -d backend`).
+7. Recreate the backend (`docker compose up -d backend`).
 
 Someone must have signed in to the app at least once before they can be made
 an admin — until then they have no Keycloak account to give the role to. An

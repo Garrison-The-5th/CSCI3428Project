@@ -76,10 +76,10 @@ export default class AuthController {
     try {
       const result = await AdminAccessService.deleteUser(req.user!, id);
       return res.send({
-        message: result.keycloakDeleted
-          ? 'Account and data deleted'
-          : 'Data deleted. Their Keycloak login could not be removed from here, so remove it ' +
-            'in Keycloak or they can sign in again (to an empty account).',
+        message: result.rolesRemoved
+          ? 'Data deleted and their access to this app removed'
+          : 'Data deleted. Their roles in this app could not be checked from here, so remove ' +
+            "any admin or author role on the app's Keycloak client.",
         ...result,
       });
     } catch (error) {

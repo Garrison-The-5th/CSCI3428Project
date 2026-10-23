@@ -1,10 +1,11 @@
 /**
  * File: keycloak-gateway.ts
- * Description: Calls to Keycloak's admin API — who holds the admin and author roles, and granting or removing them.
+ * Description: Calls to Keycloak's admin API — who holds the app's admin and author client roles, and granting or removing them.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Modified by: Jacob Matthews
- * Date: 2026-10-16
+ * Modified by: rware <rware@ttgteams.com>
+ * Date: 2026-10-23
  */
+import { keycloakSettings } from '@/config/keycloak';
 
 /**
  * The only place the backend talks to Keycloak's admin REST API.
@@ -12,17 +13,17 @@
  * Everything else about identity comes from the signed token on each request;
  * this exists because making somebody an admin or an author has to change
  * Keycloak itself, so that the role is in their next token and visible to
- * anyone checking the realm's own role lists.
+ * anyone checking the client's own role lists.
+ *
+ * The realm is shared with other applications, so everything here is scoped to
+ * the app's own client (KEYCLOAK_CLIENT_ID): both roles are *client* roles on
+ * it, and this never reads, grants or removes a realm role, and never creates,
+ * edits or deletes an account. The accounts belong to the realm, not to us.
  *
  * It signs in as a service account — a confidential client using the client
  * credentials grant — rather than as a person, so no admin password is stored
- * anywhere. That client needs the realm-management roles `view-users`,
- * `manage-users`, `view-clients` and `view-realm`; setup is in docs/keycloak.md.
- *
- * Both roles are *realm* roles. Older setups (docs/CMS.md) granted them as
- * client roles on the app's client instead, and the auth middleware honours
- * both, so reading a role's holders and removing a role cover both; granting
- * only ever adds the realm role.
+ * anywhere. That client needs to view users, view the app's client, and map the
+ * app's client roles; setup is in docs/keycloak.md.
  */
 
 export const ADMIN_ROLE = 'admin';
@@ -64,16 +65,13 @@ function config(): KeycloakConfig | null {
   const serviceClientId = process.env.KEYCLOAK_SERVICE_CLIENT_ID;
   const serviceClientSecret = process.env.KEYCLOAK_SERVICE_CLIENT_SECRET;
   if (!serviceClientId || !serviceClientSecret) return null;
+  const settings = keycloakSettings();
   return {
     // Where the backend reaches Keycloak, which inside Docker is not the
-    // browser-facing KEYCLOAK_URL — hence a variable of its own.
-    baseUrl: (
-      process.env.KEYCLOAK_ADMIN_URL ??
-      process.env.KEYCLOAK_URL ??
-      'http://localhost:4000'
-    ).replace(/\/+$/, ''),
-    realm: process.env.KEYCLOAK_REALM ?? 'learningapp',
-    appClientId: process.env.KEYCLOAK_CLIENT_ID ?? 'learning-client',
+    // browser-facing KEYCLOAK_URL.
+    baseUrl: settings.internalUrl,
+    realm: settings.realm,
+    appClientId: settings.clientId,
     serviceClientId,
     serviceClientSecret,
   };
@@ -94,15 +92,17 @@ const PAGE = 100;
 
 export default class KeycloakGateway {
   private static cachedToken: { value: string; expiresAt: number } | null = null;
+  private static cachedClientUuid: string | null = null;
 
   /** Whether the service account is set up. Without it, admin access is read-only. */
   static isConfigured(): boolean {
     return config() !== null;
   }
 
-  /** Forgets the cached token. For tests, and after a credentials change. */
+  /** Forgets the cached token and client id. For tests, and after a credentials change. */
   static resetToken() {
     KeycloakGateway.cachedToken = null;
+    KeycloakGateway.cachedClientUuid = null;
   }
 
   private static require(): KeycloakConfig {
@@ -184,15 +184,6 @@ export default class KeycloakGateway {
     }
   }
 
-  /** The internal id of the app's own client, which legacy admin client roles hang off. */
-  private static async appClientUuid(): Promise<string | null> {
-    const { appClientId } = KeycloakGateway.require();
-    const clients = await KeycloakGateway.api<Array<{ id: string }>>(
-      `/clients?clientId=${encodeURIComponent(appClientId)}`,
-    );
-    return clients[0]?.id ?? null;
-  }
-
   /** Runs a call that is allowed to find nothing — a role that was never created. */
   private static async optional<T>(call: () => Promise<T>): Promise<T | null> {
     try {
@@ -203,21 +194,32 @@ export default class KeycloakGateway {
     }
   }
 
-  /** The email of everyone holding a role, as a realm role or the older client role. */
+  /** The internal id of the app's own client, which every role call hangs off. Fetched once. */
+  private static async appClientUuid(): Promise<string> {
+    if (KeycloakGateway.cachedClientUuid) return KeycloakGateway.cachedClientUuid;
+    const { appClientId } = KeycloakGateway.require();
+    const clients = await KeycloakGateway.api<Array<{ id: string }>>(
+      `/clients?clientId=${encodeURIComponent(appClientId)}`,
+    );
+    const uuid = clients[0]?.id;
+    if (!uuid) {
+      throw new KeycloakError(`The realm has no "${appClientId}" client`, 404);
+    }
+    KeycloakGateway.cachedClientUuid = uuid;
+    return uuid;
+  }
+
+  /** Path of one of the app's client roles, or of its role mappings for a user. */
+  private static async clientPath(suffix: string): Promise<string> {
+    return `/clients/${await KeycloakGateway.appClientUuid()}${suffix}`;
+  }
+
+  /** The email of everyone holding one of the app's client roles. */
   static async roleEmails(roleName: AppRole): Promise<Set<string>> {
-    const role = encodeURIComponent(roleName);
-    const realmHolders =
-      (await KeycloakGateway.optional(() => KeycloakGateway.members(`/roles/${role}/users`))) ?? [];
-
-    const clientUuid = await KeycloakGateway.optional(() => KeycloakGateway.appClientUuid());
-    const clientHolders = clientUuid
-      ? ((await KeycloakGateway.optional(() =>
-          KeycloakGateway.members(`/clients/${clientUuid}/roles/${role}/users`),
-        )) ?? [])
-      : [];
-
+    const path = await KeycloakGateway.clientPath(`/roles/${encodeURIComponent(roleName)}/users`);
+    const holders = (await KeycloakGateway.optional(() => KeycloakGateway.members(path))) ?? [];
     return new Set(
-      [...realmHolders, ...clientHolders]
+      holders
         .map((user) => user.email?.toLowerCase())
         .filter((email): email is string => Boolean(email)),
     );
@@ -232,77 +234,51 @@ export default class KeycloakGateway {
     return match?.id ?? null;
   }
 
-  /**
-   * Removes the account from the realm, so it can no longer sign in. An account
-   * that is already gone counts as done: a retry after a half-finished delete
-   * must not fail on the half that worked.
-   */
-  static async deleteUser(userId: string): Promise<void> {
-    await KeycloakGateway.optional(() =>
-      KeycloakGateway.api(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
-    );
+  /** Where a user's mappings to the app's client roles live. */
+  private static async userMappingsPath(userId: string): Promise<string> {
+    const clientUuid = await KeycloakGateway.appClientUuid();
+    return `/users/${encodeURIComponent(userId)}/role-mappings/clients/${clientUuid}`;
   }
 
-  /** The realm roles a user holds directly, by name. */
-  static async userRealmRoles(userId: string): Promise<string[]> {
+  /** The app's client roles a user holds directly, by name. */
+  static async userClientRoles(userId: string): Promise<string[]> {
     const roles = await KeycloakGateway.api<RoleRepresentation[]>(
-      `/users/${encodeURIComponent(userId)}/role-mappings/realm`,
+      await KeycloakGateway.userMappingsPath(userId),
     );
     return (roles ?? []).map((role) => role.name);
   }
 
-  private static async realmRole(roleName: AppRole): Promise<RoleRepresentation> {
-    const role = await KeycloakGateway.optional(() =>
-      KeycloakGateway.api<RoleRepresentation>(`/roles/${encodeURIComponent(roleName)}`),
-    );
-    if (!role) {
-      throw new KeycloakError(
-        `The realm has no "${roleName}" realm role yet — create it under Realm roles`,
-        404,
-      );
-    }
-    return role;
+  /** One of the app's client roles, or null when it has not been created. */
+  private static async clientRole(roleName: AppRole): Promise<RoleRepresentation | null> {
+    const path = await KeycloakGateway.clientPath(`/roles/${encodeURIComponent(roleName)}`);
+    return KeycloakGateway.optional(() => KeycloakGateway.api<RoleRepresentation>(path));
   }
 
   /**
-   * Gives a user one of the app's realm roles. Fails with a 404 if the realm role has not been
-   * created in Keycloak.
+   * Gives a user one of the app's client roles. Fails with a 404 if the role has not been created
+   * on the client.
    */
   static async grantRole(userId: string, roleName: AppRole): Promise<void> {
-    const role = await KeycloakGateway.realmRole(roleName);
-    await KeycloakGateway.api(`/users/${encodeURIComponent(userId)}/role-mappings/realm`, {
+    const role = await KeycloakGateway.clientRole(roleName);
+    if (!role) {
+      throw new KeycloakError(
+        `The app's Keycloak client has no "${roleName}" role yet — create it under the client's Roles tab`,
+        404,
+      );
+    }
+    await KeycloakGateway.api(await KeycloakGateway.userMappingsPath(userId), {
       method: 'POST',
       body: JSON.stringify([role]),
     });
   }
 
-  /**
-   * Takes a role away, whichever way it was given. Removing only the realm role
-   * would leave someone granted it the older client-role way still holding it.
-   */
+  /** Takes one of the app's client roles away. A role that was never created is already gone. */
   static async revokeRole(userId: string, roleName: AppRole): Promise<void> {
-    const user = encodeURIComponent(userId);
-    const role = encodeURIComponent(roleName);
-    const realmRole = await KeycloakGateway.optional(() =>
-      KeycloakGateway.api<RoleRepresentation>(`/roles/${role}`),
-    );
-    if (realmRole) {
-      await KeycloakGateway.api(`/users/${user}/role-mappings/realm`, {
-        method: 'DELETE',
-        body: JSON.stringify([realmRole]),
-      });
-    }
-
-    const clientUuid = await KeycloakGateway.optional(() => KeycloakGateway.appClientUuid());
-    if (!clientUuid) return;
-    const clientRole = await KeycloakGateway.optional(() =>
-      KeycloakGateway.api<RoleRepresentation>(`/clients/${clientUuid}/roles/${role}`),
-    );
-    if (clientRole) {
-      await KeycloakGateway.api(`/users/${user}/role-mappings/clients/${clientUuid}`, {
-        method: 'DELETE',
-        body: JSON.stringify([clientRole]),
-      });
-    }
+    const role = await KeycloakGateway.clientRole(roleName);
+    if (!role) return;
+    await KeycloakGateway.api(await KeycloakGateway.userMappingsPath(userId), {
+      method: 'DELETE',
+      body: JSON.stringify([role]),
+    });
   }
 }

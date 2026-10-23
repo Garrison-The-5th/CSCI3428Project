@@ -186,7 +186,7 @@ describe('UsersList — author access', () => {
 describe('UsersList — deleting an account', () => {
   it('deletes only after the pop-up is confirmed, then drops them from the list', async () => {
     renderPage();
-    http.delete.mockResolvedValue({ keycloakDeleted: true });
+    http.delete.mockResolvedValue({ rolesRemoved: true });
     fireEvent.click(await screen.findByRole('button', { name: 'Open Ada' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
@@ -197,19 +197,21 @@ describe('UsersList — deleting an account', () => {
 
     await waitFor(() => expect(http.delete).toHaveBeenCalledWith('auth/users/2'));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      "Ada's account and all of their data have been deleted",
+      "Ada's data has been deleted and their access to this app removed",
     );
     expect(names()).not.toContain('Open Ada');
   });
 
-  it('says when the Keycloak login could not be removed', async () => {
+  it('says when their roles in this app could not be checked', async () => {
     renderPage();
-    http.delete.mockResolvedValue({ keycloakDeleted: false });
+    http.delete.mockResolvedValue({ rolesRemoved: false });
     fireEvent.click(await screen.findByRole('button', { name: 'Open Ada' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
     const confirm = screen.getByRole('dialog', { name: 'Delete this account?' });
     fireEvent.click(within(confirm).getByRole('button', { name: 'Delete account' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/Keycloak login is still there/);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      /roles in this app could not be checked/,
+    );
   });
 
   it('keeps them, and says why, when the server refuses', async () => {

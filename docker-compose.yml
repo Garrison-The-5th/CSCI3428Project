@@ -121,6 +121,9 @@ services:
       APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}
       # Only tokens issued to this Keycloak client are accepted.
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-learning-client}
+      # Alias of the Google identity provider in the realm, for the login page's
+      # Google button (docs/google_oauth.md names it oauth2 locally).
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-oauth2}
       # Only needed to send through something other than Gmail, or on 587 when
       # 465 is blocked. See docs/email.md.
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
@@ -153,11 +156,6 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      args:
-        # Which Keycloak client config to bake in. The default is the local
-        # realm, so a plain `docker compose up` is signed-in-able; the deploy
-        # pipeline overrides it with keycloak_ttg.json.
-        KEYCLOAK_CONFIG: ${KEYCLOAK_CONFIG:-keycloak.json}
     image: tartigrade/boilerplate-frontend:v1.1.0
     container_name: learning-frontend
     restart: unless-stopped

@@ -15,8 +15,8 @@
 # the repo root — not to frontend/. That is why every rule below is written with
 # `**/` rather than as a bare filename.
 #
-# Configuration reaches the build through --build-arg (see KEYCLOAK_CONFIG) and
-# the container through the environment, never by being copied in.
+# Configuration reaches the app at runtime from the backend (GET /auth-config),
+# never by being copied in.
 
 **/node_modules/
 **/.env

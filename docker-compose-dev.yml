@@ -84,6 +84,9 @@ services:
       APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}
       # Only tokens issued to this Keycloak client are accepted.
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-learning-client}
+      # Alias of the Google identity provider in the realm, for the login page's
+      # Google button (docs/google_oauth.md names it oauth2 locally).
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-oauth2}
 
 
   frontend:

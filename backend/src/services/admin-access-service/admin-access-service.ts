@@ -2,8 +2,8 @@
  * File: admin-access-service.ts
  * Description: Who is an admin or an author, and granting or removing either — in Keycloak, where the roles live.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Modified by: Jacob Matthews
- * Date: 2026-10-16
+ * Modified by: rware <rware@ttgteams.com>
+ * Date: 2026-10-23
  */
 import { logger, logSecurityEvent } from '@/config/logger';
 import { ConflictError, ForbiddenError, NotFoundError } from '@/controllers/http-errors';
@@ -37,8 +37,9 @@ function localRole(roles: string[]): LocalRole {
  * Being named on one course is separate from both: it lets somebody edit that
  * course and nothing else, and is managed on the course, not here.
  *
- * Keycloak is the source of truth: a role is changed there, so it is in the
- * person's next token and shows in the realm's own role lists. The local
+ * Keycloak is the source of truth: a role is changed there — as a client role
+ * on the app's own client, never a realm role, since the realm is shared — so
+ * it is in the person's next token and shows in the client's own role lists. The local
  * `User.role` column is kept in step as a fallback for when Keycloak cannot be
  * reached, and is never what access decisions are made on.
  *
@@ -110,7 +111,7 @@ export default class AdminAccessService {
       // Read back rather than worked out, so the local copy is what Keycloak
       // now says — removing admin from somebody who is also an author leaves
       // them an author, not a plain user.
-      remaining = await KeycloakGateway.userRealmRoles(keycloakId);
+      remaining = await KeycloakGateway.userClientRoles(keycloakId);
     } catch (error) {
       if (error instanceof KeycloakError) {
         logger.error({ err: error, target: target.email }, 'Keycloak role change failed');
@@ -136,16 +137,17 @@ export default class AdminAccessService {
   }
 
   /**
-   * Deletes somebody's account and all of their data, for good.
+   * Deletes somebody's data here, for good, and takes away this app's roles.
    *
-   * Keycloak goes first: if it refuses, nothing here has changed and the admin
-   * can try again. The other way round, a failure would leave a login with no
-   * record behind it, which signs straight back in as a fresh, empty person.
+   * Their Keycloak account is left alone: it belongs to the shared realm and
+   * signs them in to other applications too. What makes the delete stick here
+   * is removing the app's client roles — they could still sign in, but only as
+   * a brand-new, empty learner.
    *
-   * Without Keycloak admin access the data is still deleted, and the answer says
-   * the login is still there — the person could sign in again, but with nothing.
-   * Refused for the caller themselves, so an admin cannot delete their own way
-   * in by mistake.
+   * The roles go first: if Keycloak refuses, nothing here has changed and the
+   * admin can try again. Without Keycloak admin access the data is still
+   * deleted, and the answer says any roles may remain. Refused for the caller
+   * themselves, so an admin cannot delete their own way in by mistake.
    */
   static async deleteUser(actor: { id: number; email: string }, targetId: number) {
     const target = await AuthGateway.getUserById(targetId);
@@ -155,25 +157,28 @@ export default class AdminAccessService {
       throw new ForbiddenError('You cannot delete your own account. Ask another admin to do it.');
     }
 
-    let keycloakDeleted = false;
-    // Somebody who has never signed in has no login to remove.
+    let rolesRemoved = false;
+    // Somebody who has never signed in has no account to hold a role.
     if (target.lastSignInAt !== null || target.keycloakSubject) {
       if (KeycloakGateway.isConfigured()) {
         try {
           const keycloakId =
             target.keycloakSubject ?? (await KeycloakGateway.findUserId(target.email));
-          if (keycloakId) await KeycloakGateway.deleteUser(keycloakId);
-          keycloakDeleted = true;
+          if (keycloakId) {
+            await KeycloakGateway.revokeRole(keycloakId, ADMIN_ROLE);
+            await KeycloakGateway.revokeRole(keycloakId, AUTHOR_ROLE);
+          }
+          rolesRemoved = true;
         } catch (error) {
           if (error instanceof KeycloakError) {
-            logger.error({ err: error, target: target.email }, 'Keycloak account delete failed');
-            throw new Error(`Keycloak did not delete the account: ${error.message}`);
+            logger.error({ err: error, target: target.email }, 'Keycloak role removal failed');
+            throw new Error(`Keycloak did not remove their roles: ${error.message}`);
           }
           throw error;
         }
       }
     } else {
-      keycloakDeleted = true;
+      rolesRemoved = true;
     }
 
     const { assignmentsDeleted } = await AuthGateway.deleteUser(target.id, target.email);
@@ -181,10 +186,12 @@ export default class AdminAccessService {
       userId: actor.id,
       email: target.email,
       resource: `user:${target.id}`,
-      reason: keycloakDeleted ? 'account and data deleted' : 'data deleted; Keycloak login kept',
+      reason: rolesRemoved
+        ? 'data deleted and app roles removed'
+        : 'data deleted; roles not checked',
     });
 
-    return { id: target.id, keycloakDeleted, assignmentsDeleted };
+    return { id: target.id, rolesRemoved, assignmentsDeleted };
   }
 
   /**

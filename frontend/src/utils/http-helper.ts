@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Date: 2026-08-10
  */
-import { keycloak } from '@/utils/keycloak';
+import { getKeycloak } from '@/utils/keycloak';
 import { logger } from '@/utils/logger';
 import { API_BASE_URL } from '@/utils/utils';
 
@@ -37,6 +37,7 @@ async function toError(response: Response, method: string, endpoint: string): Pr
 
 class HttpHelper {
   public static async checkToken(): Promise<string> {
+    const keycloak = getKeycloak();
     if (!keycloak.authenticated) {
       await keycloak.login();
     }

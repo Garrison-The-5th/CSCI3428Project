@@ -23,7 +23,6 @@ class KeycloakStub {
   logout = jest.fn();
   updateToken = jest.fn().mockResolvedValue(false);
   hasResourceRole = jest.fn().mockReturnValue(false);
-  hasRealmRole = jest.fn().mockReturnValue(false);
 }
 
 export default KeycloakStub;
