@@ -1,0 +1,147 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/vex/2026-10-24-pr40081330187-watch-nightly-deps-bumped.openvex.json",
+  "version": 1,
+  "timestamp": "2026-10-24T09:38:05.023Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "1.0.0",
+    "invocation_id": "40081330187"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-111181",
+        "description": "body-parser: Denial of Service via unhandled decompression stream error"
+      },
+      "products": [{ "@id": "pkg:npm/body-parser@2.3.0" }],
+      "status": "fixed",
+      "fixed_in_version": "2.4.0",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "body-parser is a transitive dep via express@^5.1.0 (which depends on body-parser@^2.2.1). Lifted it past the fix by adding `body-parser: ^2.4.0` to backend/package.json overrides; backend/package-lock.json now resolves body-parser@2.4.0. Backend unit tests (680) pass; lint, backend typecheck, and build all green.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-111181",
+        "https://github.com/expressjs/body-parser"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-110180",
+        "description": "fast-uri: Security policy bypass via improper host canonicalization"
+      },
+      "products": [{ "@id": "pkg:npm/fast-uri@3.1.8" }],
+      "status": "fixed",
+      "fixed_in_version": "3.1.9",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "fast-uri is a devOptional transitive via ajv@^8.20.0 (`fast-uri: ^3.0.1`). Existing override was `^3.1.7`; bumped to `^3.1.9` in backend/package.json so the lockfile now resolves fast-uri@3.1.9. Verified via lint, backend unit tests (680 passing), backend typecheck, and build.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-110180",
+        "https://github.com/fastify/fast-uri"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-110306",
+        "description": "fast-uri: Cross-Site Scripting via improper URI scheme decoding"
+      },
+      "products": [{ "@id": "pkg:npm/fast-uri@3.1.8" }],
+      "status": "fixed",
+      "fixed_in_version": "3.1.9",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "Same bump as CVE-2026-110180: fast-uri override lifted from `^3.1.7` to `^3.1.9` in backend/package.json; lockfile resolves fast-uri@3.1.9. Verified via lint, backend unit tests, typecheck, and build.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-110306",
+        "https://github.com/fastify/fast-uri"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-113872",
+        "description": "multer: Denial of Service via aborted request during asynchronous file filtering"
+      },
+      "products": [{ "@id": "pkg:npm/multer@2.4.0" }],
+      "status": "fixed",
+      "fixed_in_version": "2.5.0",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "multer is a direct backend runtime dep (used for multipart upload parsing). Bumped from `^2.4.0` to `^2.5.0` in backend/package.json; lockfile resolves multer@2.5.0. Backend unit tests (680) all pass, including upload-handling suites; lint, typecheck, and build green.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://avd.aquasec.com/nvd/cve-2026-113872",
+        "https://github.com/expressjs/multer"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-85x2-q946-cp5h",
+        "description": "nodemailer: '>' inside a quoted local part ends an angle-addr early in addressparser, delivering to a domain the header does not name"
+      },
+      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "status": "fixed",
+      "fixed_in_version": "10.1.4",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "nodemailer is a direct backend runtime dep. Bumped from `^10.0.2` to `^10.1.4` in backend/package.json; lockfile now resolves nodemailer@10.2.1 (satisfies the fix at 10.1.4). Backend unit tests (680) pass; lint, typecheck, and build green.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-85x2-q946-cp5h",
+        "https://github.com/nodemailer/nodemailer/releases/tag/v10.1.4"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-8c8m-p3m8-cjg8",
+        "description": "nodemailer: A nested comment ends early in addressparser, releasing the rest of the comment as a recipient"
+      },
+      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "status": "fixed",
+      "fixed_in_version": "10.1.4",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "Same bump as GHSA-85x2-q946-cp5h: nodemailer lifted from `^10.0.2` to `^10.1.4` in backend/package.json; lockfile resolves nodemailer@10.2.1. Verified via lint, backend unit tests, typecheck, and build.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-8c8m-p3m8-cjg8",
+        "https://github.com/nodemailer/nodemailer/releases/tag/v10.1.4"
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-m943-m63m-w62w",
+        "description": "nodemailer: A ';' inside a quoted string or comment ends an address group early in addressparser, turning display text into a recipient"
+      },
+      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "status": "fixed",
+      "fixed_in_version": "10.1.4",
+      "action_reference": "bot-sec/security@HEAD",
+      "impact_statement": "Same bump as GHSA-85x2-q946-cp5h: nodemailer lifted from `^10.0.2` to `^10.1.4` in backend/package.json; lockfile resolves nodemailer@10.2.1. Verified via lint, backend unit tests, typecheck, and build.",
+      "confidence": 95,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": null,
+      "references": [
+        "https://github.com/advisories/GHSA-m943-m63m-w62w",
+        "https://github.com/nodemailer/nodemailer/releases/tag/v10.1.4"
+      ]
+    }
+  ]
+}
