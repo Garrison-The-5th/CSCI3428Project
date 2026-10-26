@@ -2,12 +2,13 @@
  * File: auth-context.tsx
  * Description: Auth context for the learning platform.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Modified by: rware <rware@ttgteams.com>
+ * Date: 2026-10-23
  */
+import type Keycloak from 'keycloak-js';
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 
-import { keycloak } from '@/utils/keycloak';
+import { getKeycloak } from '@/utils/keycloak';
 import { logger } from '@/utils/logger';
 
 export interface KeycloakUser {
@@ -28,26 +29,22 @@ interface AuthContextType {
   isAdmin: boolean;
   /** May author learning content: admin or contributor. */
   isAuthor: boolean;
-  keycloak: typeof keycloak;
+  keycloak: Keycloak;
 }
 
 /**
- * A role may be mapped on the client or on the realm in Keycloak; either counts.
- * The backend applies the same rule in authMiddleware.ts, so what the UI shows
- * always matches what the API will accept.
+ * Only roles on this app's own Keycloak client count — never realm roles. The
+ * realm is shared with other applications, so a realm-wide `admin` means
+ * nothing here. The backend applies the same rule in auth-middleware.ts, so
+ * what the UI shows always matches what the API will accept.
  */
-const hasEitherRole = (role: string) =>
-  keycloak.hasResourceRole(role) || keycloak.hasRealmRole(role);
+const hasClientRole = (role: string) => getKeycloak().hasResourceRole(role);
 
-/**
- * Whether the signed-in user holds the admin role, in either place Keycloak
- * can put it — realm-level or on this client. Checking only one of the two has
- * been the cause of "my admin cannot see the admin tabs" more than once.
- */
-export const isAdminUser = () => hasEitherRole('admin');
+/** Whether the signed-in user holds the app's admin role. */
+export const isAdminUser = () => hasClientRole('admin');
 
 /** Contributors have the same authoring rights as admins over courses and quizzes. */
-export const isAuthorUser = () => isAdminUser() || hasEitherRole('contributor');
+export const isAuthorUser = () => isAdminUser() || hasClientRole('contributor');
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -56,6 +53,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * login/logout to the app.
  */
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const keycloak = getKeycloak();
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<KeycloakUser | null>(null);
@@ -126,13 +124,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     keycloak.logout();
   };
 
-  /**
-   * Client or realm mapping counts, matching hasEitherRole above and the rule the
-   * backend applies in authMiddleware. Checking only the realm — as this used to —
-   * would deny someone whose role is mapped on the client, and the API would then
-   * accept the very request the UI had just hidden.
-   */
-  const hasRole = (role: string): boolean => hasEitherRole(role);
+  /** A role on this app's client, matching the rule the backend applies. */
+  const hasRole = (role: string): boolean => hasClientRole(role);
 
   return (
     <AuthContext.Provider

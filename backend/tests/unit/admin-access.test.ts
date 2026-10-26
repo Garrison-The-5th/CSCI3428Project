@@ -2,8 +2,8 @@
  * File: admin-access.test.ts
  * Description: Unit tests for granting and removing admin and author access, and the Keycloak admin API calls behind it.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Modified by: Jacob Matthews
- * Date: 2026-10-16
+ * Modified by: rware <rware@ttgteams.com>
+ * Date: 2026-10-23
  */
 import { ConflictError, ForbiddenError, NotFoundError } from '@/controllers/http-errors';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
@@ -83,13 +83,19 @@ describe('AdminAccessService.setRole — the rules', () => {
   });
 });
 
+/** The app's client, which every role call goes through. */
+const CLIENT = { '/clients?clientId=': [{ id: 'client-uuid' }] };
+const ADMIN = { id: 'role-1', name: 'admin' };
+const AUTHOR = { id: 'role-2', name: 'contributor' };
+
 describe('AdminAccessService.setRole — Keycloak', () => {
-  it('grants the realm admin role and records it locally', async () => {
+  it('grants the admin client role on the app client and records it locally', async () => {
     auth.getUserById.mockResolvedValue(signedIn());
     const calls = fakeKeycloak({
-      '/role-mappings/realm': [{ id: 'role-1', name: 'admin' }],
+      '/role-mappings/clients/client-uuid': [ADMIN],
       '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
-      '/roles/admin': { id: 'role-1', name: 'admin' },
+      '/clients/client-uuid/roles/admin': ADMIN,
+      ...CLIENT,
     });
 
     await expect(AdminAccessService.setRole(actor, 2, 'admin', true)).resolves.toEqual({
@@ -101,17 +107,34 @@ describe('AdminAccessService.setRole — Keycloak', () => {
     const grant = calls.find(
       (call) => call.method === 'POST' && call.url.includes('role-mappings'),
     );
-    expect(grant?.url).toContain('/users/kc-2/role-mappings/realm');
-    expect(grant?.body).toEqual([{ id: 'role-1', name: 'admin' }]);
+    expect(grant?.url).toContain('/users/kc-2/role-mappings/clients/client-uuid');
+    expect(grant?.body).toEqual([ADMIN]);
     expect(auth.setRole).toHaveBeenCalledWith(2, 'admin');
   });
 
-  it('grants author as the realm "contributor" role', async () => {
+  it('never touches a realm role — the realm is shared with other apps', async () => {
+    auth.getUserById.mockResolvedValue(signedIn({ role: 'admin' }));
+    const calls = fakeKeycloak({
+      '/role-mappings/clients/client-uuid': [],
+      '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
+      '/clients/client-uuid/roles/admin': ADMIN,
+      ...CLIENT,
+    });
+
+    await AdminAccessService.setRole(actor, 2, 'admin', true);
+    await AdminAccessService.setRole(actor, 2, 'admin', false);
+
+    expect(calls.some((call) => call.url.includes('/role-mappings/realm'))).toBe(false);
+    expect(calls.some((call) => /\/admin\/realms\/[^/]+\/roles\//.test(call.url))).toBe(false);
+  });
+
+  it('grants author as the "contributor" client role', async () => {
     auth.getUserById.mockResolvedValue(signedIn());
     const calls = fakeKeycloak({
-      '/role-mappings/realm': [{ id: 'role-2', name: 'contributor' }],
+      '/role-mappings/clients/client-uuid': [AUTHOR],
       '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
-      '/roles/contributor': { id: 'role-2', name: 'contributor' },
+      '/clients/client-uuid/roles/contributor': AUTHOR,
+      ...CLIENT,
     });
 
     await expect(AdminAccessService.setRole(actor, 2, 'author', true)).resolves.toEqual({
@@ -121,38 +144,52 @@ describe('AdminAccessService.setRole — Keycloak', () => {
     });
 
     const grant = calls.find((call) => call.method === 'POST');
-    expect(grant?.body).toEqual([{ id: 'role-2', name: 'contributor' }]);
+    expect(grant?.body).toEqual([AUTHOR]);
     expect(auth.setRole).toHaveBeenCalledWith(2, 'author');
+  });
+
+  it('says plainly when the role has not been created on the client', async () => {
+    auth.getUserById.mockResolvedValue(signedIn());
+    fakeKeycloak({
+      '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
+      ...CLIENT,
+    });
+    await expect(AdminAccessService.setRole(actor, 2, 'admin', true)).rejects.toThrow(
+      /no "admin" role/,
+    );
+    expect(auth.setRole).not.toHaveBeenCalled();
   });
 
   it('lets an admin remove their own author role — only their admin role is protected', async () => {
     auth.getUserById.mockResolvedValue(signedIn({ id: 1, email: 'boss@example.com' }));
     fakeKeycloak({
-      '/role-mappings/realm': [{ id: 'role-1', name: 'admin' }],
+      '/role-mappings/clients/client-uuid': [ADMIN],
       '/users?email=': [{ id: 'kc-1', email: 'boss@example.com' }],
-      '/roles/contributor': { id: 'role-2', name: 'contributor' },
+      '/clients/client-uuid/roles/contributor': AUTHOR,
+      ...CLIENT,
     });
     await expect(AdminAccessService.setRole(actor, 1, 'author', false)).resolves.toMatchObject({
       isAdmin: true,
     });
   });
 
-  it('removes admin both as a realm role and as the older client role', async () => {
+  it('removes admin from the app client', async () => {
     auth.getUserById.mockResolvedValue(signedIn({ role: 'admin' }));
     const calls = fakeKeycloak({
-      '/role-mappings/realm': [],
+      '/role-mappings/clients/client-uuid': [],
       '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
-      '/clients/client-uuid/roles/admin': { id: 'client-role', name: 'admin' },
-      '/clients?clientId=': [{ id: 'client-uuid' }],
-      '/roles/admin': { id: 'role-1', name: 'admin' },
+      '/clients/client-uuid/roles/admin': ADMIN,
+      ...CLIENT,
     });
 
     await AdminAccessService.setRole(actor, 2, 'admin', false);
 
-    const removed = calls.filter((call) => call.method === 'DELETE').map((call) => call.url);
+    const removed = calls.filter((call) => call.method === 'DELETE');
     expect(removed).toEqual([
-      expect.stringContaining('/users/kc-2/role-mappings/realm'),
-      expect.stringContaining('/users/kc-2/role-mappings/clients/client-uuid'),
+      expect.objectContaining({
+        url: expect.stringContaining('/users/kc-2/role-mappings/clients/client-uuid'),
+        body: [ADMIN],
+      }),
     ]);
     expect(auth.setRole).toHaveBeenCalledWith(2, 'user');
   });
@@ -160,9 +197,10 @@ describe('AdminAccessService.setRole — Keycloak', () => {
   it('leaves somebody an author when admin is removed and they also hold author', async () => {
     auth.getUserById.mockResolvedValue(signedIn({ role: 'admin' }));
     fakeKeycloak({
-      '/role-mappings/realm': [{ id: 'role-2', name: 'contributor' }],
+      '/role-mappings/clients/client-uuid': [AUTHOR],
       '/users?email=': [{ id: 'kc-2', email: 'ada@example.com' }],
-      '/roles/admin': { id: 'role-1', name: 'admin' },
+      '/clients/client-uuid/roles/admin': ADMIN,
+      ...CLIENT,
     });
     await AdminAccessService.setRole(actor, 2, 'admin', false);
     expect(auth.setRole).toHaveBeenCalledWith(2, 'author');
@@ -179,15 +217,14 @@ describe('AdminAccessService.setRole — Keycloak', () => {
 });
 
 describe('AdminAccessService.roleHolders', () => {
-  it('lists realm and client role holders together, by lower-cased email', async () => {
+  it("lists the app client's role holders, by lower-cased email", async () => {
     fakeKeycloak({
-      '/clients/client-uuid/roles/admin/users': [{ id: 'b', email: 'Old@Example.com' }],
-      '/clients?clientId=': [{ id: 'client-uuid' }],
-      '/roles/admin/users': [{ id: 'a', email: 'ada@example.com' }],
-      '/roles/contributor/users': [{ id: 'c', email: 'cleo@example.com' }],
+      '/clients/client-uuid/roles/admin/users': [{ id: 'a', email: 'Ada@Example.com' }],
+      '/clients/client-uuid/roles/contributor/users': [{ id: 'c', email: 'cleo@example.com' }],
+      ...CLIENT,
     });
     expect(await AdminAccessService.roleHolders()).toEqual({
-      admins: new Set(['ada@example.com', 'old@example.com']),
+      admins: new Set(['ada@example.com']),
       authors: new Set(['cleo@example.com']),
     });
   });
@@ -233,17 +270,25 @@ describe('AdminAccessService.deleteUser', () => {
     await expect(AdminAccessService.deleteUser(actor, 9)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('deletes the bound Keycloak account, then the data', async () => {
+  it("removes the app's roles, never the shared account, then deletes the data", async () => {
     auth.getUserById.mockResolvedValue(signedIn({ keycloakSubject: 'kc-2' }));
-    const calls = fakeKeycloak({});
+    const calls = fakeKeycloak({
+      '/clients/client-uuid/roles/admin': ADMIN,
+      '/clients/client-uuid/roles/contributor': AUTHOR,
+      ...CLIENT,
+    });
 
     await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toEqual({
       id: 2,
-      keycloakDeleted: true,
+      rolesRemoved: true,
       assignmentsDeleted: 2,
     });
-    expect(calls).toEqual([expect.objectContaining({ method: 'DELETE' })]);
-    expect(calls[0].url).toMatch(/\/users\/kc-2$/);
+    const deletes = calls.filter((call) => call.method === 'DELETE');
+    expect(deletes.map((call) => call.body)).toEqual([[ADMIN], [AUTHOR]]);
+    expect(
+      deletes.every((call) => call.url.endsWith('/users/kc-2/role-mappings/clients/client-uuid')),
+    ).toBe(true);
+    expect(calls.some((call) => /\/users\/kc-2$/.test(call.url))).toBe(false);
     expect(auth.deleteUser).toHaveBeenCalledWith(2, 'ada@example.com');
   });
 
@@ -263,16 +308,16 @@ describe('AdminAccessService.deleteUser', () => {
     auth.getUserById.mockResolvedValue(signedIn({ lastSignInAt: null, keycloakSubject: null }));
     const calls = fakeKeycloak({});
     await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toMatchObject({
-      keycloakDeleted: true,
+      rolesRemoved: true,
     });
     expect(calls).toEqual([]);
   });
 
-  it('still deletes the data without Keycloak admin access, and says the login remains', async () => {
+  it('still deletes the data without Keycloak admin access, and says roles were not checked', async () => {
     delete process.env.KEYCLOAK_SERVICE_CLIENT_ID;
     auth.getUserById.mockResolvedValue(signedIn({ keycloakSubject: 'kc-2' }));
     await expect(AdminAccessService.deleteUser(actor, 2)).resolves.toMatchObject({
-      keycloakDeleted: false,
+      rolesRemoved: false,
     });
     expect(auth.deleteUser).toHaveBeenCalled();
   });

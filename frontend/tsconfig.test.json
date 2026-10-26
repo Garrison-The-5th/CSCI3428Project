@@ -10,7 +10,6 @@
     "erasableSyntaxOnly": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    // keycloak.json is imported directly by utils/keycloak.ts.
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,

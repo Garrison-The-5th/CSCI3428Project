@@ -15,12 +15,10 @@ target "backend" {
 }
 
 target "frontend" {
-  # Root context: the build copies config/keycloak*.json, a sibling of
-  # frontend/, and bundles it into the Vite build (see frontend/src/utils/keycloak.ts).
+  # Root context, matching docker-compose.yml. No Keycloak settings are baked
+  # in: the realm and client come from the backend at runtime (GET /auth-config),
+  # so staging and production run the same image.
   context    = "."
   dockerfile = "frontend/Dockerfile"
-  # Bake the PRODUCTION Keycloak config (realm learningapp on
-  # auth.ttgteams.com). Local `docker compose` builds keep the dev default.
-  args       = { KEYCLOAK_CONFIG = "keycloak_ttg.json" }
   tags       = ["tartigrade/learning-app-frontend:${VERSION}"]
 }

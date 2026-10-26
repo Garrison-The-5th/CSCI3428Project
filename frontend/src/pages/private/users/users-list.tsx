@@ -222,10 +222,10 @@ const UsersList = () => {
       setUsers((current) => current.filter((candidate) => candidate.id !== target.id));
       const who = target.name || target.email;
       setAdminNotice(
-        response?.keycloakDeleted === false
-          ? `${who}'s data has been deleted, but their Keycloak login is still there. ` +
-              'Remove it in Keycloak, or they can sign in again to an empty account.'
-          : `${who}'s account and all of their data have been deleted.`,
+        response?.rolesRemoved === false
+          ? `${who}'s data has been deleted, but their roles in this app could not be checked. ` +
+              "Remove any admin or author role on the app's Keycloak client."
+          : `${who}'s data has been deleted and their access to this app removed.`,
       );
       setConfirmingDelete(false);
       setOpenUserId(null);
@@ -639,7 +639,8 @@ const UsersList = () => {
             <>
               <p>
                 <strong>{openUser.name || openUser.email}</strong> will be deleted for good: their
-                Keycloak login, assignments, progress, quiz results, course completions and notes.
+                assignments, progress, quiz results, course completions and notes, and their admin
+                or author role here. Their company sign-in is not affected.
               </p>
               <p className="mt-2 text-sm">
                 Courses and quizzes they created stay, with no author credited. This cannot be

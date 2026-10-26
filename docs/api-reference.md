@@ -34,7 +34,7 @@ hour.
 |---|---|
 | public | No authentication |
 | signed in | Any valid Keycloak session |
-| author/admin | Holds the `admin` or `contributor` role, on the client or the realm |
+| author/admin | Holds the `admin` or `contributor` client role on the app's Keycloak client (realm roles do not count) |
 | admin | Holds the `admin` role |
 | can edit this course | Created that course, or was named as an author on it. A global authoring role adds only the courses that predate ownership being recorded |
 | rate limited | Carries a tighter per-user or per-address limit than the global one |
@@ -82,6 +82,14 @@ Defined in `backend/src/controllers/**/assignment-controller.ts`.
 | `POST` | `/assignments/:id/resend` | signed in, can edit this course | Sends the same message again, on demand |
 | `DELETE` | `/assignments/:id` | signed in, can edit this course | Takes an assignment away, and the progress inside it |
 
+### `/auth-config`
+
+Defined in `backend/src/controllers/config-controller/config-controller.ts`.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/auth-config` | public | The Keycloak address, realm, client and Google provider alias the browser signs in with — read at start-up, so the realm is chosen by the backend's environment, not baked into the bundle |
+
 ### `/auth`
 
 Defined in `backend/src/controllers/**/auth-controller.ts`.
@@ -91,7 +99,7 @@ Defined in `backend/src/controllers/**/auth-controller.ts`.
 | `GET` | `/auth/all-users` | signed in, admin | Generous enough for a person, tight enough to stop a script |
 | `GET` | `/auth/users` | signed in, admin | Generous enough for a person, tight enough to stop a script |
 | `PUT` | `/auth/users/:id/admin` | signed in, admin | Grants or removes admin access in Keycloak. Body `{ admin: boolean }`; 403 for your own account, 409 if they have never signed in |
-| `PUT` | `/auth/users/:id/author` | signed in, admin | Grants or removes author access (the `contributor` realm role) in Keycloak. Body `{ author: boolean }`; 409 if they have never signed in |
+| `PUT` | `/auth/users/:id/author` | signed in, admin | Grants or removes author access (the `contributor` client role) in Keycloak. Body `{ author: boolean }`; 409 if they have never signed in |
 | `GET` | `/auth/search` | signed in, author/admin | Type-ahead for pickers that name a person — assigning contributors or students |
 | `POST` | `/auth/subscribe` | public | Public by design — anyone may put their address down |
 | `POST` | `/auth/send-email-to-subscribers` | signed in, admin | Public by design — anyone may put their address down |

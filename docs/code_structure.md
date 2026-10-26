@@ -111,7 +111,7 @@ Superseded versions stay readable for 14 days (`ARCHIVE_DAYS`) and are then swep
 
 ```
 /
-├── config/                    # Keycloak realm config, shared with the frontend
+├── config/                    # Keycloak login theme
 ├── frontend/                  # React app
 ├── backend/                   # Express API
 ├── docker-compose-dev.yml     # postgres + keycloak + backend + frontend
