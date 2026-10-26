@@ -4,21 +4,19 @@ A collaborative full-stack software project developed as part of a software engi
 
 The project applies software engineering practices throughout the **Software Development Life Cycle (SDLC)**, from requirements gathering and system design through implementation, testing, and continuous integration.
 
-This is a fork of this repository [here](https://github.com/connorrmcneil/software-engineering-2025-project), and the continuation is being developed by team Garrison the 5th during the fall semester of CSCI 3428.
-
 ## Tech Stack
 
 * **Languages:** TypeScript, JavaScript, CSS
 * **Frontend:** React, Vite
 * **Backend:** TypeScript API
 * **Testing:** Cypress
-* **Tooling:** Bun, TypeScript, Prettier
-* **DevOps:** Docker, GitHub Actions
+* **Tooling:** Node.js, npm, TypeScript, Prettier
+* **DevOps:** GitHub Actions
 * **Version Control:** Git, GitHub
 
 ## Architecture
 
-The project uses a **Bun workspace monorepo**, separating the application into frontend and backend packages while maintaining a unified development environment.
+The project uses an **npm workspaces monorepo** running on **Node.js**, separating the application into frontend and backend packages while maintaining a unified development environment.
 
 ```text
 .
@@ -27,13 +25,40 @@ The project uses a **Bun workspace monorepo**, separating the application into f
 │   └── api/             # Backend API
 ├── cypress/             # End-to-end tests
 ├── .github/workflows/   # CI/CD workflows
-├── Dockerfile
 ├── cypress.config.ts
 ├── tsconfig.json
 └── package.json
 ```
 
 The architecture allows the frontend and backend to be developed independently while sharing project tooling, dependencies, and configuration.
+
+---
+
+# Getting Started
+
+Requires **Node.js `^20.19.0` or `>=22.12.0`** (and npm, which ships with Node.js).
+
+```bash
+# 1. install dependencies (from the repository root)
+npm install
+
+# 2. configure the API environment
+cp packages/api/.env.example packages/api/.env      # on Windows: copy packages\api\.env.example packages\api\.env
+
+# 3. create the SQLite database, apply migrations and seed the default data (run once)
+npm run setup
+
+# 4. start the front-end (http://localhost:5173) and the API (http://localhost:5050)
+npm run dev
+```
+
+The seed creates a default admin account (username `admin`, password `admin`) and imports the starter words.
+
+To run a production-style build served entirely by the API on http://localhost:5050:
+
+```bash
+npm start
+```
 
 ---
 

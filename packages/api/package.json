@@ -1,26 +1,24 @@
 {
   "name": "api",
-  "module": "src/main.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch src/main.ts",
-    "setup-prisma": "prisma generate && prisma db push && prisma db seed",
-    "build": "bun build src/main.ts --bundle --outfile dist/server.js --minify --target bun",
+    "dev": "tsx watch src/main.ts",
+    "setup-prisma": "prisma generate && prisma migrate deploy && prisma db seed",
     "postinstall": "prisma generate",
-    "start": "prisma migrate deploy && bun run dist/server.js"
+    "start": "prisma migrate deploy && tsx src/main.ts"
   },
   "prisma": {
-    "seed": "bun run prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.7.0",
-    "@types/bun": "latest",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
-    "@types/multer": "^2.0.0"
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.0.0"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
@@ -36,6 +34,7 @@
     "multer": "^2.0.2",
     "nanoid": "^5.1.6",
     "prisma": "^6.19.0",
+    "tsx": "^4.19.0",
     "zod": "^4.1.13"
   }
 }

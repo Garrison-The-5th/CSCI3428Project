@@ -6,7 +6,7 @@
 
 import {compare} from 'bcryptjs'
 import {Router} from 'express'
-import {sign} from 'jsonwebtoken'
+import jwt from 'jsonwebtoken'
 
 import {prisma} from '@/prisma'
 
@@ -24,6 +24,6 @@ auth.post('/', async (req, res) => {
   }
 
   // create a signed JWT token valid for 7 days
-  const token = sign({sub: user.id}, process.env.JWT_SECRET, {expiresIn: '7d'})
+  const token = jwt.sign({sub: user.id}, process.env.JWT_SECRET, {expiresIn: '7d'})
   return res.json({token})
 })

@@ -6,7 +6,9 @@
 
 import 'dotenv/config' // load env variables from a .env file
 
+import fs from 'fs'
 import path from 'path'
+import {fileURLToPath} from 'url'
 import cors from 'cors'
 import express from 'express'
 import morgan from 'morgan'
@@ -51,11 +53,17 @@ function bootstrap() {
   // public assets
   app.use('/public', express.static('public'))
 
-  // client bundle
-  app.use(express.static('client'))
-  app.get('/*splat', async (_req, res) => {
-    return res.sendFile(path.join(process.cwd(), 'client', 'index.html'))
-  })
+  // client bundle (the production build of the front-end, created by `npm run build`)
+  const clientDir = fileURLToPath(new URL('../../front-end/dist', import.meta.url))
+  const clientIndex = path.join(clientDir, 'index.html')
+  if (fs.existsSync(clientIndex)) {
+    app.use(express.static(clientDir))
+    app.get('/*splat', async (_req, res) => {
+      return res.sendFile(clientIndex)
+    })
+  } else {
+    console.log('ℹ️  No front-end build found, serving the API only (run `npm run build` to build the front-end)')
+  }
 
   // start server
   const port = process.env.PORT || 5050

@@ -10,18 +10,19 @@
     "typescript": "^5.9.3"
   },
   "private": true,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
-    "dev": "concurrently \"bun run --filter=front-end dev\" \"bun run --filter=api dev\"",
+    "setup": "npm run setup-prisma -w api",
+    "dev": "concurrently \"npm run dev -w front-end\" \"npm run dev -w api\"",
     "format": "prettier --write ./packages/**/*.{js,jsx,ts,tsx,json,css,md}",
     "typecheck": "tsc -b --noEmit packages/*",
-    "build": "concurrently \"bun run --filter=front-end build\" \"bun run --filter=api build\"",
+    "build": "npm run build -w front-end",
+    "start": "npm run build && npm run start -w api",
     "test": "cypress open"
   },
   "workspaces": [
     "packages/*"
-  ],
-  "trustedDependencies": [
-    "@swc/core",
-    "api"
   ]
 }
