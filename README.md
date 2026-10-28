@@ -1,4 +1,4 @@
-# Mi'kmaq Language Learning Game - Software Engineering 2025
+# Mi'kmaq Language Learning Game - Software Engineering 2026
 
 A collaborative full-stack software project developed as part of a software engineering course. The project is a **Mi'kmaq language-learning game designed for use by the community of Eskasoni, Nova Scotia**, providing an interactive way for users to practice and engage with the Mi'kmaq language.
 
