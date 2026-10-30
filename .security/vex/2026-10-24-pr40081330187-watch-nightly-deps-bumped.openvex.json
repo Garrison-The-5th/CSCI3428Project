@@ -11,10 +11,10 @@
     "invocation_id": "40081330187"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "rware@ttgteams.com",
+    "reviewed_at": "2026-10-30T16:51:50Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
@@ -22,7 +22,11 @@
         "name": "CVE-2026-111181",
         "description": "body-parser: Denial of Service via unhandled decompression stream error"
       },
-      "products": [{ "@id": "pkg:npm/body-parser@2.3.0" }],
+      "products": [
+        {
+          "@id": "pkg:npm/body-parser@2.3.0"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.4.0",
       "action_reference": "bot-sec/security@HEAD",
@@ -40,7 +44,11 @@
         "name": "CVE-2026-110180",
         "description": "fast-uri: Security policy bypass via improper host canonicalization"
       },
-      "products": [{ "@id": "pkg:npm/fast-uri@3.1.8" }],
+      "products": [
+        {
+          "@id": "pkg:npm/fast-uri@3.1.8"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "3.1.9",
       "action_reference": "bot-sec/security@HEAD",
@@ -58,7 +66,11 @@
         "name": "CVE-2026-110306",
         "description": "fast-uri: Cross-Site Scripting via improper URI scheme decoding"
       },
-      "products": [{ "@id": "pkg:npm/fast-uri@3.1.8" }],
+      "products": [
+        {
+          "@id": "pkg:npm/fast-uri@3.1.8"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "3.1.9",
       "action_reference": "bot-sec/security@HEAD",
@@ -76,7 +88,11 @@
         "name": "CVE-2026-113872",
         "description": "multer: Denial of Service via aborted request during asynchronous file filtering"
       },
-      "products": [{ "@id": "pkg:npm/multer@2.4.0" }],
+      "products": [
+        {
+          "@id": "pkg:npm/multer@2.4.0"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "2.5.0",
       "action_reference": "bot-sec/security@HEAD",
@@ -94,7 +110,11 @@
         "name": "GHSA-85x2-q946-cp5h",
         "description": "nodemailer: '>' inside a quoted local part ends an angle-addr early in addressparser, delivering to a domain the header does not name"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@10.0.12"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "10.1.4",
       "action_reference": "bot-sec/security@HEAD",
@@ -112,7 +132,11 @@
         "name": "GHSA-8c8m-p3m8-cjg8",
         "description": "nodemailer: A nested comment ends early in addressparser, releasing the rest of the comment as a recipient"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@10.0.12"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "10.1.4",
       "action_reference": "bot-sec/security@HEAD",
@@ -130,7 +154,11 @@
         "name": "GHSA-m943-m63m-w62w",
         "description": "nodemailer: A ';' inside a quoted string or comment ends an address group early in addressparser, turning display text into a recipient"
       },
-      "products": [{ "@id": "pkg:npm/nodemailer@10.0.12" }],
+      "products": [
+        {
+          "@id": "pkg:npm/nodemailer@10.0.12"
+        }
+      ],
       "status": "fixed",
       "fixed_in_version": "10.1.4",
       "action_reference": "bot-sec/security@HEAD",
