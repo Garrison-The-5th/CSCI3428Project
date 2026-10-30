@@ -16,13 +16,14 @@ import {
   Tooltip
 } from '@mantine/core'
 import {useDisclosure} from '@mantine/hooks'
-import {BooksIcon, MagnifyingGlassIcon, SpeakerHighIcon} from '@phosphor-icons/react'
+import {ArrowLeftIcon, BooksIcon, CardsIcon, MagnifyingGlassIcon, SpeakerHighIcon} from '@phosphor-icons/react'
 import Fuse from 'fuse.js'
 import {useRef, useState} from 'react'
 import {useLoaderData} from 'react-router'
 
 import {wordsLoader} from '@/router/words.loader'
 import {toStorageUrl} from '@/utils'
+import {Flashcards} from './Flashcards'
 
 export function Dictionary() {
   const {words} = useLoaderData<typeof wordsLoader>()
@@ -41,6 +42,12 @@ export function Dictionary() {
   })
 
   const [query, setQuery] = useState('')
+  const [showFlashcards, setShowFlashcards] = useState(false)
+
+  const onClose = () => {
+    close()
+    setShowFlashcards(false)
+  }
 
   const _words = query.length ? fuse.search(query).map(result => result.item) : words
   const wordCards = _words.map(word => <DictionaryCard key={word.id} word={word} />)
@@ -59,7 +66,7 @@ export function Dictionary() {
       </Button>
       <Modal
         opened={opened}
-        onClose={close}
+        onClose={onClose}
         title={
           <Group gap="sm">
             <Text fw="bold">Kllusuwaqnn Kwilmumkl - Dictionary</Text>
@@ -71,16 +78,51 @@ export function Dictionary() {
         centered
         scrollAreaComponent={ScrollArea.Autosize}
       >
-        <Stack>
-          <TextInput
-            placeholder="Search words..."
-            leftSection={<MagnifyingGlassIcon size={20} />}
-            value={query}
-            onChange={e => setQuery(e.currentTarget.value)}
-            aria-label="Search dictionary"
-          />
-          <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
-        </Stack>
+        {showFlashcards ? (
+          <Stack>
+            <Group>
+              <Button
+                variant="default"
+                leftSection={<ArrowLeftIcon size={16} />}
+                onClick={() => setShowFlashcards(false)}
+              >
+                Back to dictionary
+              </Button>
+            </Group>
+            <Flashcards words={words} />
+          </Stack>
+        ) : (
+          <Stack>
+            <Group wrap="nowrap">
+              <TextInput
+                placeholder="Search words..."
+                leftSection={<MagnifyingGlassIcon size={20} />}
+                value={query}
+                onChange={e => setQuery(e.currentTarget.value)}
+                aria-label="Search dictionary"
+                style={{flex: 1}}
+              />
+              <Button
+                variant="default"
+                leftSection={<CardsIcon size={20} />}
+                onClick={() => setShowFlashcards(true)}
+                h="auto"
+                p="4px 16px"
+              >
+                <Stack gap={0} align="center" p="2px">
+                  {/* TODO: placeholder until an official Mi'kmaq translation is provided by a translator */}
+                  <Text size="sm" fw={500}>
+                    [Mi'kmaq translation needed]
+                  </Text>
+                  <Text size="12px" style={{opacity: 0.8}}>
+                    Flashcards
+                  </Text>
+                </Stack>
+              </Button>
+            </Group>
+            <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
+          </Stack>
+        )}
       </Modal>
     </>
   )
