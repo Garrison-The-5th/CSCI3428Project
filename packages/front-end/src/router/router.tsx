@@ -10,7 +10,7 @@ import {createBrowserRouter, Outlet, RouterProvider} from 'react-router'
 
 import {Footer} from '@/components/Footer'
 import {Header} from '@/components/Header'
-import {AdminPage, ErrorPage, FAQ, HomePage, IslandGamePage, PrivacyPolicy, SigninPage, WordMatchGame} from '@/pages'
+import {AdminPage, ErrorPage, FAQ, HomePage, IslandGamePage, PrivacyPolicy, SentenceBuilderGame, SigninPage, WordMatchGame} from '@/pages'
 import {adminLoader} from './admin.loader'
 import {signinLoader} from './signin.loader'
 import {wordsLoader} from './words.loader'
@@ -32,6 +32,10 @@ const router = createBrowserRouter([
       {
         path: '/eskasoni-island-game',
         element: <IslandGamePage />
+      },
+      {
+        path: '/sentence-builder-game',
+        element: <SentenceBuilderGame />
       },
       {
         path: '/faq',

@@ -63,6 +63,15 @@ export function GameSelectionModal({opened, onClose}: GameSelectionModalProps) {
           color="green"
           icon={<img src={islandimg} alt="Island Game" style={{width: '70%', height: '70%'}} />}
         />
+
+        {/* Sentence Builder Game */}
+        <GameOptionCard
+          to="/sentence-builder-game"
+          title="Sentence Builder"
+          description="Build Sentences"
+          color="orange"
+          icon={<Text fw={700}>A B</Text>}
+        />
       </SimpleGrid>
     </Modal>
   )
