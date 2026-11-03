@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Date: 2026-08-10
  */
-import { User } from '../../../generated/prisma';
+import { TourStatus, User } from '../../../generated/prisma';
 
 /** What `User.role` holds: the highest app role somebody has. */
 export type LocalRole = 'admin' | 'author' | 'user';
@@ -219,6 +219,23 @@ export default class AuthGateway {
     return await prisma.user.findMany({
       where: { subscribed: true },
       orderBy: { email: 'asc' },
+    });
+  }
+
+  /** Where this person is in the first-login walkthrough. */
+  static getTour(userId: number) {
+    return prisma.user.findUnique({
+      where: { id: userId },
+      select: { tourStatus: true, tourStep: true },
+    });
+  }
+
+  /** Records where this person is in the walkthrough. */
+  static setTour(userId: number, tourStatus: TourStatus, tourStep: number) {
+    return prisma.user.update({
+      where: { id: userId },
+      data: { tourStatus, tourStep },
+      select: { tourStatus: true, tourStep: true },
     });
   }
 }

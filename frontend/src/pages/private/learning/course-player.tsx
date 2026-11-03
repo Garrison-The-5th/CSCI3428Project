@@ -38,6 +38,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import { NewBadge, newMarkers } from '@/components/common/new-badge';
 import QuizRunner from '@/components/common/quiz-runner';
+import { signalTour } from '@/components/tour/tour-signal';
+import { PLAYER_STEP_SIGNAL } from '@/components/tour/tour-steps';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -527,6 +529,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
 
       event.preventDefault();
       go(target);
+      signalTour(PLAYER_STEP_SIGNAL);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -760,7 +763,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
             {/* min-h-0 on the children is what lets them scroll inside the stage
                 rather than stretching it — a flex item defaults to min-height:auto,
                 which refuses to shrink below its content. */}
-            <CardContent className={`flex flex-col p-4 ${STAGE_HEIGHT}`}>
+            <CardContent className={`flex flex-col p-4 ${STAGE_HEIGHT}`} data-tour="player-stage">
               {selection === null ? (
                 <p className="py-16 text-center text-dark-gray">This course has no content yet.</p>
               ) : selection.kind === 'quiz' ? (
@@ -821,9 +824,17 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
           {/* Step through the course without touching the rail. Runs past the end
               of a section straight into the next one, and answers to the arrow keys. */}
           {flatItems.length > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div
+              className="flex flex-wrap items-center justify-between gap-3"
+              data-tour={preview ? undefined : 'player-prev-next'}
+            >
               <Button
-                onClick={() => previousItem && pick(previousItem)}
+                onClick={() => {
+                  if (!previousItem) return;
+                  pick(previousItem);
+                  // The walkthrough's "try it" step waits for exactly this.
+                  signalTour(PLAYER_STEP_SIGNAL);
+                }}
                 disabled={!previousItem}
                 variant="outline"
                 className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
@@ -839,7 +850,11 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
               </p>
 
               <Button
-                onClick={() => nextItem && pick(nextItem)}
+                onClick={() => {
+                  if (!nextItem) return;
+                  pick(nextItem);
+                  signalTour(PLAYER_STEP_SIGNAL);
+                }}
                 disabled={!nextItem}
                 className={`gap-2 ${nextItem ? 'bg-navy text-white hover:bg-navy-hover' : ''}`}
                 variant={nextItem ? 'default' : 'outline'}
@@ -858,7 +873,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
           )}
 
           {/* Tabs under the player */}
-          <Card className="bg-light-gray shadow-sm">
+          <Card className="bg-light-gray shadow-sm" data-tour="player-tabs">
             <div className="flex gap-1 border-b border-gray-300 px-4 pt-4">
               {(['tools', 'notes'] as const).map((key) => (
                 <button
@@ -1006,7 +1021,7 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
         </div>
 
         {/* ---- Course content rail ---- */}
-        <aside className="lg:sticky lg:top-20 lg:self-start">
+        <aside className="lg:sticky lg:top-20 lg:self-start" data-tour="player-rail">
           <Card className="gap-0 bg-light-gray p-0 shadow-sm">
             <div className="border-b border-gray-300 p-4">
               <h2 className="font-semibold text-dark-gray">Course content</h2>

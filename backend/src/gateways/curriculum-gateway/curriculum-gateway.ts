@@ -126,12 +126,69 @@ export default class CurriculumGateway {
   static accessibleCourses(userId: number, includeUnowned: CourseReach): Prisma.CourseWhereInput {
     if (includeUnowned === 'all') return {};
     return {
+      /*
+        The default tutorial is admins' alone, whatever else is true.
+
+        It is created by the system with no owner, so the unowned-course rule
+        just below would otherwise hand it to every global author, and anybody
+        named on it as a contributor would get it too. It is the one course
+        every account in the organisation reads, so who may change it is a
+        decision for admins rather than for whoever happens to hold the author
+        role. Expressed here, in the one rule every editor listing and
+        `requireCourseEditor` already go through, so there is no second place
+        for it to be forgotten.
+      */
+      isDefaultTutorial: false,
       OR: [
         { createdById: userId },
         { contributors: { some: { id: userId } } },
         ...(includeUnowned ? [{ createdById: null }] : []),
       ],
     };
+  }
+
+  /** The default tutorial's id, or null before it has been created. */
+  static async getDefaultTutorialId(): Promise<string | null> {
+    const course = await prisma.course.findFirst({
+      where: { isDefaultTutorial: true },
+      select: { id: true },
+    });
+    return course?.id ?? null;
+  }
+
+  /**
+   * Creates the default tutorial's course row, flagged, with the one module
+   * every course starts with.
+   *
+   * Only the shell: the section and its content go in through the ordinary
+   * service calls, so numbering and sanitising follow the same rules as any
+   * other course. The partial unique index on `isDefaultTutorial` makes a
+   * second, concurrent creation fail here rather than succeed.
+   */
+  static createDefaultTutorial(content: {
+    title: string;
+    shortDescription: string;
+    moduleTitle: string;
+  }) {
+    return prisma.$transaction(async (db) => {
+      const course = await db.course.create({
+        data: {
+          title: content.title,
+          shortDescription: content.shortDescription,
+          kind: CourseKind.LESSON,
+          isDefaultTutorial: true,
+          required: false,
+          dueDate: null,
+          // Nothing to shut: there is no deadline. Off so that stays true even
+          // if an admin later gives the course a date by mistake.
+          lockAfterDue: false,
+        },
+      });
+      await db.module.create({
+        data: { courseId: course.id, number: 1, title: content.moduleTitle },
+      });
+      return course;
+    });
   }
 
   /**

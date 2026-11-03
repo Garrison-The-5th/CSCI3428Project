@@ -31,6 +31,7 @@ import { fail } from '@/controllers/http-errors';
 import { enforceUploadQuota } from '@/controllers/middleware/rate-limit';
 import CurriculumService from '@/services/curriculum-service/curriculum-service';
 import DashboardService from '@/services/dashboard-service/dashboard-service';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
 import EditLeaseService, {
   EDIT_LEASE_HEARTBEAT_MS,
@@ -298,11 +299,13 @@ export default class CurriculumController {
 
       // New content is announced only once it can actually be reached, which is
       // now rather than when the author typed it.
-      if (result.hasNewContent) {
-        void NotificationService.announceNewContent(
-          param(req as Request, 'id'),
-          originFromRequest(req as Request),
-        );
+      //
+      // Never for the default tutorial. Everybody who has finished it is on it,
+      // which is everybody, and an admin polishing the guide should not mail
+      // the whole organisation. The New marks inside the course still appear.
+      const courseId = param(req as Request, 'id');
+      if (result.hasNewContent && !(await DefaultTutorialService.is(courseId))) {
+        void NotificationService.announceNewContent(courseId, originFromRequest(req as Request));
       }
 
       return res.send({

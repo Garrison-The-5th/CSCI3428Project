@@ -22,6 +22,7 @@ import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CourseMapService from '@/services/course-map-service/course-map-service';
 import DashboardService from '@/services/dashboard-service/dashboard-service';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 import EmailService from '@/services/email-service/email-service';
 import PublicationService, { NewIds } from '@/services/publication-service/publication-service';
 import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
@@ -238,6 +239,10 @@ export default class AssignmentService {
     if (courseId) {
       const course = await CurriculumGateway.getCourseById(courseId);
       if (!course) throw new NotFoundError(`Course with ID ${courseId} not found`);
+      // Everybody already holds the tutorial, with no deadline. An assignment
+      // for it would add nothing but a row the admin dashboard then counted as
+      // learning somebody had been given.
+      await DefaultTutorialService.assertNotTutorial(courseId, 'assign');
       title = course.title;
       defaultDays = course.daysRemaining ?? null;
 
@@ -258,6 +263,10 @@ export default class AssignmentService {
     } else {
       const quiz = await QuizGateway.getQuizById(quizId!);
       if (!quiz) throw new NotFoundError(`Quiz with ID ${quizId} not found`);
+      // A quiz inside the tutorial is reached through the tutorial, which
+      // everybody has; sending it on its own is the same no-op as above.
+      const owner = await CurriculumGateway.courseIdFromQuiz(quizId!);
+      if (owner) await DefaultTutorialService.assertNotTutorial(owner, 'assign');
       title = quiz.title;
       // A quiz that sits in a course gets the course's length, not one of its
       // own: it is due with the course around it, and an exam inside a lesson
@@ -698,7 +707,6 @@ export default class AssignmentService {
         { ...mine, dueDate: due, locked: isLockedOut(due, mine.lockAfterDue) }
       : null;
 
-    const courses = course ? [course] : [];
     // A course link carries the quizzes inside that course; a quiz link carries
     // just that quiz.
     const quizzes = course
@@ -712,7 +720,46 @@ export default class AssignmentService {
         ? [{ ...directQuiz, dueDate: due ?? endOfDueDay(directQuiz.dueDate) }]
         : [];
 
+    /*
+      The default tutorial rides along with every link.
+
+      The rule above — a link opens exactly its one item — is about not handing
+      out other people's work by accident. The tutorial is nobody's work: every
+      account has it, and the walkthrough a guest is shown on arrival walks them
+      into it, so a link that could not open it would strand them half way
+      through. Every guest route reads this catalogue, so this is the one place
+      it needs adding: listing, the dashboard, progress, notes and its quizzes
+      all follow.
+
+      No deadline and never locked, as for a signed-in learner.
+    */
+    const tutorial = await AssignmentService.tutorialFor(user.id, assignment.courseId);
+    const courses = [...(course ? [course] : []), ...(tutorial ? [tutorial] : [])];
+    if (tutorial) {
+      quizzes.push(
+        ...tutorial.sections.flatMap((section) =>
+          section.quizzes.map((quiz) => ({ ...quiz, dueDate: null })),
+        ),
+      );
+    }
+
     return { user, assignment, assignments: [assignment], courses, quizzes };
+  }
+
+  /**
+   * The default tutorial as one link holder sees it: published, narrowed to
+   * their branches, with no deadline. Null when there is no tutorial yet, or
+   * when the link is for the tutorial itself and it is already in the list.
+   */
+  private static async tutorialFor(userId: number, linkedCourseId: string | null) {
+    const tutorialId = await DefaultTutorialService.id();
+    if (!tutorialId || tutorialId === linkedCourseId) return null;
+
+    const snapshot = await PublicationService.getLiveSnapshot(tutorialId);
+    if (!snapshot) return null;
+
+    const mine = await CourseMapService.forLearner(snapshot, userId);
+    return { ...mine, dueDate: null, locked: false };
   }
 
   /**
@@ -766,6 +813,7 @@ export default class AssignmentService {
           dueDate: course.dueDate ? new Date(course.dueDate) : null,
           lockAfterDue: course.lockAfterDue,
           contentUpdatedAt: row?.contentUpdatedAt ?? new Date(0),
+          isDefaultTutorial: course.isDefaultTutorial === true,
           sections: course.sections.map((section) => ({
             id: section.id,
             estimatedMinutes: section.estimatedMinutes,

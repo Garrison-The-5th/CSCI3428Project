@@ -134,6 +134,13 @@ export interface Course {
   title: string;
   /** Absent on older payloads, which were all lessons. */
   kind?: CourseKind;
+  /**
+   * The default tutorial: the one course everybody has without being assigned
+   * it. Badged "Start here" for learners and "Default tutorial" for admins, and
+   * the course the first-login walkthrough walks people into. Absent reads as
+   * false.
+   */
+  isDefaultTutorial?: boolean;
   /** One-line pitch under the title. */
   shortDescription: string | null;
   description: string | null;
@@ -476,6 +483,8 @@ export interface CourseProgress {
   /** They finished this course once and content has been added since. */
   hasNewContent?: boolean;
   newSectionCount?: number;
+  /** The default tutorial — badged "Start here", and what the walkthrough points at. */
+  isDefaultTutorial?: boolean;
 }
 
 /**

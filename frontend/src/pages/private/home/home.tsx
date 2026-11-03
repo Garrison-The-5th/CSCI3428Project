@@ -116,7 +116,9 @@ const HomePage = () => {
   const totals = dashboard?.totals;
 
   return (
-    <div className="page-container flex flex-col">
+    // Loaded — or failed — so the walkthrough can stop waiting for the
+    // tutorial card and fall back to Learning if it is not here.
+    <div className="page-container flex flex-col" data-tour-ready="home">
       <header className="responsive-page-header">
         <h1 className="page-title font-bold text-dark-gray mb-2">
           Welcome, {user?.name || 'Guest'}!
@@ -203,6 +205,9 @@ const HomePage = () => {
                       <Link
                         to={`/learning/${course.courseId}`}
                         title={course.title}
+                        data-tour={
+                          course.isDefaultTutorial ? 'outstanding-tutorial-card' : undefined
+                        }
                         className="flex flex-col items-center gap-1 rounded-lg py-1
                           transition-colors hover:bg-white/70"
                       >
@@ -229,6 +234,8 @@ const HomePage = () => {
                             way in greyed out. */}
                         {course.locked ? (
                           <Badge className="bg-danger px-2 text-xs text-white">Closed</Badge>
+                        ) : course.isDefaultTutorial ? (
+                          <Badge className="bg-green px-2 text-xs text-navy">Start here</Badge>
                         ) : (
                           course.required && (
                             <Badge className="bg-navy px-2 text-xs text-white">Required</Badge>

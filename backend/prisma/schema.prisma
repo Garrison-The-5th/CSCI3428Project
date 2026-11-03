@@ -31,6 +31,17 @@ model User {
   /// `name` cannot stand in for it — not every realm sends a name claim, which
   /// left genuine accounts looking like bare email addresses.
   lastSignInAt      DateTime?
+  /// Where this person is in the first-login walkthrough.
+  ///
+  /// NOT_STARTED is what "first login" means: the tour starts the next time the
+  /// app shell is shown to them. A row created by assigning work to an address
+  /// that has never signed in starts here too, so the tour still greets them on
+  /// their first real sign-in. Guests on a link keep this in their browser
+  /// instead — see `tour-store.ts` — because a link is not an account.
+  tourStatus        TourStatus          @default(NOT_STARTED)
+  /// The step they were on, so a reload or another device resumes the tour
+  /// where it was left. Bounded by TOUR_STEP_COUNT in `config/validation.ts`.
+  tourStep          Int                 @default(0)
   sectionViews      SectionProgress[]
   elementViews      ElementProgress[]
   quizAttempts      QuizAttempt[]
@@ -63,6 +74,19 @@ model User {
   directedChoices   DirectedChoice[]
 }
 
+/// Where someone is in the first-login walkthrough.
+enum TourStatus {
+  /// Never shown. The tour starts on their next visit to the app shell.
+  NOT_STARTED
+  /// Part way through; `User.tourStep` says where.
+  IN_PROGRESS
+  /// Reached the last step.
+  COMPLETED
+  /// Turned it down. Remembered exactly like finishing, and undone the same way:
+  /// Replay tour on the Profile page.
+  SKIPPED
+}
+
 /// What kind of thing a Course is.
 ///
 /// Both are the same shape — modules holding sections holding content — and
@@ -78,21 +102,21 @@ enum CourseKind {
 
 /// The top-level container an admin creates by name, then fills with content.
 model Course {
-  id               String     @id @default(uuid())
-  title            String
+  id                String     @id @default(uuid())
+  title             String
   /// Lesson or quiz set. Decides which tab lists it and what the editor offers.
-  kind             CourseKind @default(LESSON)
+  kind              CourseKind @default(LESSON)
   /// One-line pitch shown under the title on the course page.
-  shortDescription String?
+  shortDescription  String?
   /// The long description shown further down the course page.
-  description      String?
-  tags             String[]   @default([])
-  languages        String[]   @default([])
+  description       String?
+  tags              String[]   @default([])
+  languages         String[]   @default([])
   /// Bullet points for the "What you'll learn" box.
-  whatYouWillLearn String[]   @default([])
-  prerequisites    String[]   @default([])
-  required         Boolean    @default(false) // required learning
-  dueDate          DateTime? // when required learning must be finished
+  whatYouWillLearn  String[]   @default([])
+  prerequisites     String[]   @default([])
+  required          Boolean    @default(false) // required learning
+  dueDate           DateTime? // when required learning must be finished
   /// How long someone gets once this is handed to them, in days.
   ///
   /// The deadline an author sets is a length rather than a date: a course
@@ -101,10 +125,10 @@ model Course {
   /// assignment's own `dueDate` is stamped from this at the moment it is made —
   /// see AssignmentService.assign — and `dueDate` above stays as the single
   /// course-wide deadline for anything that never went through an assignment.
-  daysRemaining    Int?
-  published        Boolean    @default(false) // hidden from learners until published
+  daysRemaining     Int?
+  published         Boolean    @default(false) // hidden from learners until published
   /// When on, a section stays locked until every earlier section is finished.
-  sequential       Boolean    @default(false)
+  sequential        Boolean    @default(false)
   /// Whether the deadline shuts the course, or only reports that it passed.
   ///
   /// On, and once the due date has gone the learner cannot open anything: the
@@ -119,7 +143,7 @@ model Course {
   /// On by default, because that is what a deadline meant here before this was
   /// a choice, and quietly opening every existing course would be a change
   /// nobody asked for.
-  lockAfterDue     Boolean    @default(true)
+  lockAfterDue      Boolean    @default(true)
   /// Whether this course's path is built from a map rather than read straight
   /// through.
   ///
@@ -132,7 +156,16 @@ model Course {
   ///
   /// Only meaningful on a LESSON. A quiz set has one module and a section per
   /// quiz; there is no path through it to direct.
-  directedLearning Boolean    @default(false)
+  directedLearning  Boolean    @default(false)
+  /// The one course every account and every link holder has without being
+  /// assigned it: the guide the first-login walkthrough hands people into.
+  ///
+  /// At most one course carries this — a partial unique index in the migration
+  /// enforces it, since Prisma cannot declare one — and it is created on start-up
+  /// by `DefaultTutorialService.ensure` rather than by the seed, which production
+  /// never runs. It cannot be deleted, unpublished or assigned, and only admins
+  /// may edit it; see `DefaultTutorialService` for each of those rules.
+  isDefaultTutorial Boolean    @default(false)
   /// When the content was last staged to the map, or null if never.
   ///
   /// Staging is the soft publish between writing content and mapping it: it
@@ -140,33 +173,33 @@ model Course {
   /// stands, and is what puts newly written sections in front of the person
   /// doing the mapping. Nothing about it reaches a learner — that is still
   /// `publish`.
-  stagedAt         DateTime?
+  stagedAt          DateTime?
   /// The modules and sections that existed when the course was last staged.
   ///
   /// Mapping is refused while anything has been added since: the staging pool
   /// and the map would otherwise disagree about what there is to place. Ids
   /// rather than a count, so adding one section and deleting another still
   /// reads as "something new to stage".
-  stagedContentIds String[]   @default([])
-  publishedAt      DateTime? // stamped the first time it is published
+  stagedContentIds  String[]   @default([])
+  publishedAt       DateTime? // stamped the first time it is published
   /// Which CoursePublication learners are currently served. 0 means the course
   /// has never been published, so there is nothing for a learner to read.
   ///
   /// Authors edit the live rows below freely; none of it reaches a learner until
   /// a publish snapshots it. That is what lets an edit to existing content be
   /// held back as surely as a brand new section.
-  publishedVersion Int        @default(0)
+  publishedVersion  Int        @default(0)
   /// Touched by every content edit. Compared against the current publication's
   /// date to answer "are there unpublished changes?" without diffing the tree.
-  draftUpdatedAt   DateTime   @default(now())
-  imageData        String?    @db.Text // base64 cover photo shown on the Learning page
-  imageType        String? // MIME type of the cover photo
-  deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @default(now()) @updatedAt
+  draftUpdatedAt    DateTime   @default(now())
+  imageData         String?    @db.Text // base64 cover photo shown on the Learning page
+  imageType         String? // MIME type of the cover photo
+  deletedAt         DateTime? // soft delete: recoverable from the admin dashboard
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @default(now()) @updatedAt
   /// Bumped only when a section or quiz is added. Compared against a learner's
   /// completion date to tell them there is something new.
-  contentUpdatedAt DateTime   @default(now())
+  contentUpdatedAt  DateTime   @default(now())
   /// Who made this, and so who owns it.
   ///
   /// Authoring rights used to follow from the Keycloak role alone, which made
@@ -179,8 +212,8 @@ model Course {
   /// Null on courses that predate this column and could not be attributed to
   /// anyone (see the backfill in the migration). Those stay visible to global
   /// authors, because otherwise they would belong to nobody and be unreachable.
-  createdById      Int?
-  createdBy        User?      @relation("CourseAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById       Int?
+  createdBy         User?      @relation("CourseAuthor", fields: [createdById], references: [id], onDelete: SetNull)
 
   modules         Module[]
   sections        Section[]
@@ -770,18 +803,18 @@ model EditLease {
 /// parents and can never be given any, which is what makes it the place every
 /// learner starts, and it is not deletable.
 model CourseMapNode {
-  id       String  @id @default(uuid())
-  courseId String
-  course   Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  title    String
+  id           String             @id @default(uuid())
+  courseId     String
+  course       Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title        String
   /// Where the box sits on the canvas.
   ///
   /// Not decoration. `x` is also the learner's reading order among everything at
   /// the same depth — the course runs left to right and top to bottom of the
   /// tree exactly as it is drawn — so moving a box is an edit to the course, not
   /// to the picture of it.
-  x        Int
-  y        Int
+  x            Int
+  y            Int
   /// Jumps from the root, and so which layer quiz offers this node.
   ///
   /// One more than its *shallowest* parent, because a node reachable by a short
@@ -789,9 +822,9 @@ model CourseMapNode {
   /// for a longer one. Derived from the edges and stored: ordering the whole
   /// course reads it on every page load, and walking the graph each time to
   /// re-derive it would cost the same read many times over.
-  depth    Int     @default(0)
+  depth        Int                @default(0)
   /// True on the one node the map starts from. See the note above.
-  isRoot   Boolean @default(false)
+  isRoot       Boolean            @default(false)
   /// Set when this node is a copy of another course's node, brought in as part
   /// of a linked map. Such a node is read-only here and is kept in step with
   /// `sourceNodeId` whenever the source course's map changes.
@@ -800,9 +833,9 @@ model CourseMapNode {
   sourceNodeId String?
 
   /// Connections into this node, and out of it.
-  parents  CourseMapEdge[] @relation("EdgeChild")
-  children CourseMapEdge[] @relation("EdgeParent")
-  items    CourseMapItem[]
+  parents           CourseMapEdge[]     @relation("EdgeChild")
+  children          CourseMapEdge[]     @relation("EdgeParent")
+  items             CourseMapItem[]
   /// Linked maps hung off this node — it stands in for their root.
   anchoredSubgraphs CourseMapSubgraph[] @relation("SubgraphAnchor")
 
@@ -819,18 +852,18 @@ model CourseMapNode {
 /// reason: a node with two parents is offered twice in its layer quiz, once per
 /// route in, and ticking either is what brings it in.
 model CourseMapEdge {
-  id       String        @id @default(uuid())
-  courseId String
-  course   Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  parentId String
-  parent   CourseMapNode @relation("EdgeParent", fields: [parentId], references: [id], onDelete: Cascade)
-  childId  String
-  child    CourseMapNode @relation("EdgeChild", fields: [childId], references: [id], onDelete: Cascade)
+  id         String             @id @default(uuid())
+  courseId   String
+  course     Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  parentId   String
+  parent     CourseMapNode      @relation("EdgeParent", fields: [parentId], references: [id], onDelete: Cascade)
+  childId    String
+  child      CourseMapNode      @relation("EdgeChild", fields: [childId], references: [id], onDelete: Cascade)
   /// The option in the child's layer quiz that selects it through this route.
   /// Rewritten by the generator; null only between an edge being drawn and the
   /// quizzes being regenerated.
-  optionId String?       @unique
-  option   Option?       @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  optionId   String?            @unique
+  option     Option?            @relation(fields: [optionId], references: [id], onDelete: SetNull)
   /// Set when this connection belongs to a linked map, which fixes it in place.
   subgraphId String?
   subgraph   CourseMapSubgraph? @relation(fields: [subgraphId], references: [id], onDelete: Cascade)
@@ -847,12 +880,12 @@ model CourseMapEdge {
 /// the map before it may go out, while an imported course is a shelf to take
 /// three sections off and leave the fourth.
 model CourseMapItem {
-  id             String        @id @default(uuid())
+  id             String             @id @default(uuid())
   nodeId         String
-  node           CourseMapNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  node           CourseMapNode      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
   order          Int
   sectionId      String
-  section        Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section        Section            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   sourceCourseId String
   /// Set when this placement was written by a linked map rather than the author.
   subgraphId     String?

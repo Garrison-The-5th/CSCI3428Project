@@ -3,7 +3,7 @@
  * Description: Navbar for the learning platform.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-09-22
+ * Date: 2026-10-30
  */
 import '@/components/navbar/navbar.css';
 
@@ -32,6 +32,21 @@ interface Page {
 }
 
 /**
+ * What the walkthrough calls each learner item, by path.
+ *
+ * Named rather than counted: authors and admins have extra items in the rail,
+ * so "the third item" would mean something different to each of them. Only the
+ * learner items are named, because only they are taught.
+ */
+const TOUR_NAMES: Record<string, string> = {
+  '/': 'nav-home',
+  '/profile': 'nav-profile',
+  '/learning': 'nav-learning',
+  '/quizzes': 'nav-quizzes',
+  '/contact': 'nav-contact',
+};
+
+/**
  * The unread mark.
  *
  * Carries a label rather than being decoration only: a coloured dot means
@@ -51,6 +66,7 @@ const NavItem = ({
   onClick,
   showDot = false,
   exact = false,
+  tourName,
 }: {
   item: Page;
   onClick?: () => void;
@@ -62,6 +78,8 @@ const NavItem = ({
    * Set for an item that has another item nested under it — see `isPrefixOfAnother`.
    */
   exact?: boolean;
+  /** The walkthrough's name for this item, if it points at it. */
+  tourName?: string;
 }) => {
   const Icon = item.Icon;
 
@@ -71,7 +89,11 @@ const NavItem = ({
   if (onClick) {
     return (
       <li>
-        <button onClick={onClick} className={`group hover:bg-white/10 ${baseClass}`}>
+        <button
+          onClick={onClick}
+          className={`group hover:bg-white/10 ${baseClass}`}
+          data-tour={tourName}
+        >
           {Icon && (
             <span
               className="w-6 h-6 flex items-center justify-center text-text-secondary
@@ -93,6 +115,7 @@ const NavItem = ({
       <NavLink
         to={item.path ?? '/'}
         end={exact}
+        data-tour={tourName}
         className={({ isActive }) =>
           `group ${baseClass}
           ${isActive ? 'text-green bg-green/20 cursor-default' : 'text-text-secondary hover:bg-white/10'}`
@@ -197,6 +220,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 // one tab the mark can point at without being vague.
                 showDot={page.path === '/learning' && hasNewContent}
                 exact={isPrefixOfAnother(page.path ?? '/', pages)}
+                tourName={TOUR_NAMES[page.path ?? '']}
               />
             ))}
           </ul>
@@ -209,6 +233,7 @@ const Navbar: React.FC<NavbarProps> = ({
             <button
               aria-label={`Switch to ${isDarkMode ? 'light' : 'dark'} mode`}
               aria-pressed={isDarkMode}
+              data-tour="theme-toggle"
               className="theme-toggle flex w-full items-center justify-between rounded-lg px-4 py-3
                 text-text-secondary transition-colors duration-150 hover:bg-white/10
                 hover:text-green"
@@ -232,6 +257,7 @@ const Navbar: React.FC<NavbarProps> = ({
           <ul className="px-3 py-4">
             <NavItem
               item={isGuest ? { ...logoutItem, text: 'Leave' } : logoutItem}
+              tourName="nav-logout"
               onClick={() => {
                 if (isGuest) {
                   endSession();

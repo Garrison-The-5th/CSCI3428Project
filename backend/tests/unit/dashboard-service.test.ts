@@ -377,3 +377,60 @@ describe('completion recording', () => {
     expect(result.updatedCourses).toHaveLength(1);
   });
 });
+
+describe('the default tutorial on the dashboard', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const tutorial = () =>
+    course({ id: 'tutorial', title: 'Getting started', isDefaultTutorial: true, dueDate: null });
+
+  /** It is in the Home rail until finished, which is what the walkthrough points at. */
+  it('lists the tutorial as outstanding, flagged, until it is finished', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(1, [tutorial()], []);
+
+    expect(result.outstandingCourses).toHaveLength(1);
+    expect(result.outstandingCourses[0]).toMatchObject({
+      courseId: 'tutorial',
+      isDefaultTutorial: true,
+      required: false,
+      dueDate: null,
+      locked: false,
+    });
+  });
+
+  /**
+   * No deadline and not required, so it can never be overdue, never sit on the
+   * Upcoming due dates list, and never count among required learning.
+   */
+  it('never puts the tutorial on the deadlines list', async () => {
+    givenProgress([], []);
+
+    const result = await DashboardService.build(1, [tutorial(), course()], []);
+
+    expect(result.upcomingDeadlines).toEqual([]);
+    expect(result.courseProgress.filter((c) => c.required)).toEqual([]);
+  });
+
+  /** Everything else reads exactly as it did before the tutorial existed. */
+  it('leaves every other course unflagged and its figures unchanged', async () => {
+    givenProgress(['m1'], []);
+
+    const withTutorial = await DashboardService.build(1, [course(), tutorial()], []);
+    const without = await DashboardService.build(1, [course()], []);
+
+    const fire = withTutorial.courseProgress.find((c) => c.courseId === 'course-1')!;
+    expect(fire.isDefaultTutorial).toBe(false);
+    expect(fire).toEqual(without.courseProgress[0]);
+  });
+
+  it('drops the tutorial from the rail once it is finished', async () => {
+    givenProgress(['m1', 'm2'], ['quiz-1']);
+
+    const result = await DashboardService.build(1, [tutorial()], []);
+
+    expect(result.outstandingCourses).toEqual([]);
+    expect(result.courseProgress[0].percentComplete).toBe(100);
+  });
+});

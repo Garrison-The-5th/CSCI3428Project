@@ -93,6 +93,35 @@ already see, and it then offers only those routes. A branch that simply ends
 therefore ends: picking it does not produce a further question whose every answer
 leads somewhere unreachable.
 
+### The default tutorial and the first-login tour
+
+One course carries `Course.isDefaultTutorial` — at most one, enforced by a
+partial unique index in the migration. It is a real lesson, edited in the
+Course Editor and published like any other, but it reaches people differently:
+
+- **Everybody holds it without an assignment.** `EnrolmentService.forEmail`
+  adds it to every signed-in person's enrolment, and
+  `AssignmentService.getSessionCatalogue` adds it to what every link opens,
+  both with no deadline. Every learner read goes through one of those two, so
+  that is the whole of making it visible. No `Assignment` row ever names it,
+  which is also what keeps it out of the admin dashboard's figures.
+- **Nobody can take it away.** `DefaultTutorialService.assertNotTutorial`
+  refuses deleting, unpublishing, changing its kind and assigning it, for
+  everyone. The Course Editor hides those controls for it.
+- **Only admins edit it.** `CurriculumGateway.accessibleCourses` excludes it for
+  anyone who is not an admin, which covers every editor listing and
+  `requireCourseEditor` at once.
+- **It is created on start-up**, by `ensureDefaultTutorial`
+  (`default-tutorial-bootstrap.ts`), because production never runs the seed and
+  only `PublicationService` can build the snapshot learners read. The seed calls
+  the same function.
+
+The **first-login tour** (`frontend/src/components/tour/`) walks a new person
+through the sidebar and into that course. Where each person is in it is
+`User.tourStatus` / `User.tourStep` for an account (`/me/tour`), and
+localStorage keyed by a hash of the link for a guest. The migration that added
+those columns marked everyone who had already signed in as `SKIPPED`.
+
 ### Versioned publishing
 
 **Learners never read the rows an author is editing.** They read a snapshot taken
@@ -170,6 +199,7 @@ backend/
     │   ├── assignment-controller/   # author-facing assignment management
     │   ├── public-controller/       # token-authenticated guest routes
     │   ├── privacy-controller/      # data export and erasure for the signed-in user
+    │   ├── tour-controller/         # /me/tour — the first-login walkthrough's state
     │   └── table-controller/        # demo data table
     │
     ├── services/              # business logic; no HTTP knowledge
@@ -187,6 +217,8 @@ backend/
     │   ├── edit-lease-service/      # advisory "someone else is editing this" claims
     │   ├── edit-attribution-service/# "last edited by" stamps
     │   ├── privacy-service/         # export and erasure
+    │   ├── default-tutorial-service/# the course everybody has; created on start-up
+    │   ├── tour-service/            # where a signed-in person is in the first-login tour
     │   ├── admin-access-service/    # granting roles through Keycloak
     │   ├── auth-service/            # user rows and Keycloak sign-in matching
     │   └── table-service/           # demo data table
@@ -242,7 +274,8 @@ frontend/src/
 │   ├── learner-api.ts         # ⭐ one interface over the JWT and token APIs
 │   ├── course-progress.ts     # unlocking and progress rules, client side
 │   ├── due-dates.ts           # how a deadline reads
-│   └── one-time-link.ts
+│   ├── one-time-link.ts
+│   └── tour-store.ts          # where the tour keeps its place: server or browser
 │
 ├── hooks/
 │   └── use-auto-save.ts       # debounced save; no save buttons in the editor
@@ -260,6 +293,9 @@ frontend/src/
 │   │   └── confirm-dialog.tsx, toast-notification.tsx, unauthorized.tsx
 │   ├── canvas/                # canvas element: model (pure geometry), editor, view
 │   ├── navbar/
+│   ├── tour/                  # first-login walkthrough: tour-steps.ts (the script and
+│   │                          #   all its wording), tour-context (TourProvider, useTour),
+│   │                          #   tour-overlay (spotlight), use-tour-target, tour-signal
 │   └── ui/                    # shadcn-style primitives + progress-donut, toggle-switch
 │
 ├── pages/
@@ -377,6 +413,11 @@ the area it names.
    signed-in and the token implementation, or it works for one audience only.
 10. **A new route is not live until its controller is imported in `index.ts`,**
    and should be added to [the API reference](./api-reference.md) by hand.
+11. **The tour finds things by `data-tour`.** Renaming or removing one of those
+   attributes on the sidebar, Home, Learning, Profile, the course page or the
+   player makes that step fall back to a centred card. Adding or removing a step
+   in `tour-steps.ts` means changing `TOUR_STEP_COUNT` in `config/validation.ts`
+   as well, or the server refuses to save the last steps.
 
 ---
 

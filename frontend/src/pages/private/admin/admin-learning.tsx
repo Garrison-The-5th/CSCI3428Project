@@ -185,6 +185,9 @@ const AdminLearning = () => {
             <CardTitle className="break-words text-lg text-dark-gray">{course.title}</CardTitle>
             <div className="mt-2 flex flex-wrap gap-2">
               {course.required && <Badge className="bg-navy px-2 text-white">Required</Badge>}
+              {course.isDefaultTutorial && (
+                <Badge className="bg-green px-2 text-navy">Default tutorial</Badge>
+              )}
               {!course.published && <Badge className="bg-gray-400 px-2 text-white">Draft</Badge>}
             </div>
           </CardHeader>

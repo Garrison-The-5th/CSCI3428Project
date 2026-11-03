@@ -312,3 +312,13 @@ export function isLockedOut(
   // answer when nobody has said otherwise.
   return (lockAfterDue ?? true) && isPastDue(due, now);
 }
+
+/**
+ * How many steps the first-login walkthrough has.
+ *
+ * The server stores which step someone is on, and refuses a step outside the
+ * script rather than storing a number the browser will never be able to show.
+ * Must match the length of `TOUR_STEPS` in `frontend/src/components/tour/tour-steps.ts`;
+ * a frontend test pins that side of it.
+ */
+export const TOUR_STEP_COUNT = 15;

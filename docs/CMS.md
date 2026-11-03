@@ -17,6 +17,26 @@ Admins grant and remove Author and Admin from the Users page — click a user
 and use the switches. See [keycloak.md](keycloak.md#admin-role-management) for
 the one-off Keycloak setup that needs. The manual steps below still work.
 
+## Editing the default tutorial
+
+Every account and every assignment link has one course without being given it:
+the **default tutorial**, marked *Default tutorial* in Create a Lesson and
+*Start here* for learners. The first-login tour ends inside it, so it is where
+the rest of the getting-started guide belongs.
+
+- **Only admins can edit it.** Open it from **Create a Lesson** like any lesson.
+  Authors and per-course contributors do not see it in their lists, and the API
+  refuses their edits.
+- **Edit, then Publish.** Learners keep reading the last published version
+  until you press **Publish updated course**, exactly as for any course.
+  Publishing it sends no "new content" email — everyone is on it.
+- **It cannot be deleted, unpublished or assigned**, so those controls are not
+  shown for it. Its *Course access* pane explains why.
+- **No deadline, never required.** It never shows as overdue and never counts
+  towards required learning.
+- A fresh database gets a one-section placeholder ("Tutorial content coming
+  soon"), created when the backend starts. Replace it with the real content.
+
 ## Setup & Testing
 
 ### Creating an Admin User in Keycloak

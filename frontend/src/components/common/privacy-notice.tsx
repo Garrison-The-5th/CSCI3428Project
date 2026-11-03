@@ -100,7 +100,7 @@ const PrivacyNotice = ({ onNotify }: PrivacyNoticeProps) => {
 
   return (
     <>
-      <Card className="mt-8 w-full max-w-3xl bg-light-gray shadow-sm">
+      <Card className="mt-8 w-full max-w-3xl bg-light-gray shadow-sm" data-tour="privacy-card">
         <CardHeader className="flex-row items-center gap-3 p-4">
           <ShieldCheckIcon className="w-6 h-6 shrink-0 text-navy" />
           <CardTitle className="text-lg text-dark-gray">Your data and privacy</CardTitle>

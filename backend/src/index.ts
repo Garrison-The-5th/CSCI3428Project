@@ -4,7 +4,7 @@
  *   retention sweeps.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-10
+ * Date: 2026-10-30
  */
 import 'dotenv/config'; // Load environment variables from .env file
 // import these to ensure controllers are registered
@@ -17,6 +17,7 @@ import '@/controllers/privacy-controller/privacy-controller';
 import '@/controllers/public-controller/public-assignment-controller';
 import '@/controllers/quiz-controller/quiz-controller';
 import '@/controllers/table-controller/table-controller';
+import '@/controllers/tour-controller/tour-controller';
 
 import cors from 'cors';
 import express from 'express';
@@ -31,6 +32,7 @@ import { requestLogger } from '@/controllers/middleware/request-logger';
 import CurriculumService, {
   RECYCLE_BIN_DAYS,
 } from '@/services/curriculum-service/curriculum-service';
+import { ensureDefaultTutorial } from '@/services/default-tutorial-service/default-tutorial-bootstrap';
 import EmailService from '@/services/email-service/email-service';
 import PublicationService, {
   ARCHIVE_DAYS,
@@ -230,6 +232,18 @@ async function startServer() {
   // Say once, at boot, whether this deployment can send mail — see
   // EmailService.reportConfiguration. Never throws and never blocks readiness.
   EmailService.reportConfiguration();
+
+  /*
+    Make sure the default tutorial exists and is published.
+
+    Here rather than in the seed because production never runs the seed — the
+    container runs `migrate deploy` and then this file — and rather than in a
+    migration because only PublicationService can build the snapshot learners
+    read. Does nothing after the first start. Never throws, and is not awaited
+    before listening: a slow or failed attempt must not hold the API back, and
+    the next start tries again. See `ensureDefaultTutorial`.
+  */
+  void ensureDefaultTutorial();
 
   /**
    * Expire the recycle bin.

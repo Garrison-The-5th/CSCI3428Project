@@ -460,6 +460,15 @@ const CourseEditor = ({
               >
                 {course.published ? 'Published' : 'Draft'}
               </Badge>
+              {/* Says why Delete, Unpublish and assigning are missing here. */}
+              {course.isDefaultTutorial && (
+                <Badge
+                  className="bg-green px-2 text-navy"
+                  title="Every account has this course. It cannot be deleted, unpublished or assigned, and only admins can edit it."
+                >
+                  Default tutorial
+                </Badge>
+              )}
             </div>
             <p className="page-subtitle mt-1 text-sm text-dark-gray">
               {isQuizSet ? (
@@ -519,33 +528,38 @@ const CourseEditor = ({
                   <CloudArrowUpIcon className="w-5 h-5" />
                   {publishing ? 'Publishing...' : 'Publish updated course'}
                 </Button>
-                <Button
-                  onClick={() =>
-                    run(
-                      () => curriculumApi.updateCourse(course.id, { published: false }),
-                      'Unpublished — learners can no longer reach it',
-                      'Failed to unpublish',
-                    )
-                  }
-                  variant="outline"
-                  className="bg-white text-dark-gray hover:bg-light-gray"
-                >
-                  Unpublish
-                </Button>
+                {/* The server refuses both for the default tutorial, so neither is offered. */}
+                {!course.isDefaultTutorial && (
+                  <Button
+                    onClick={() =>
+                      run(
+                        () => curriculumApi.updateCourse(course.id, { published: false }),
+                        'Unpublished — learners can no longer reach it',
+                        'Failed to unpublish',
+                      )
+                    }
+                    variant="outline"
+                    className="bg-white text-dark-gray hover:bg-light-gray"
+                  >
+                    Unpublish
+                  </Button>
+                )}
               </>
             )}
 
-            <Button
-              onClick={() =>
-                setPendingDelete({ kind: 'course', id: course.id, label: course.title })
-              }
-              variant="ghost"
-              size="icon"
-              className="hover:text-danger-hover"
-              title="Delete lesson"
-            >
-              <TrashIcon className="w-6 h-6" />
-            </Button>
+            {!course.isDefaultTutorial && (
+              <Button
+                onClick={() =>
+                  setPendingDelete({ kind: 'course', id: course.id, label: course.title })
+                }
+                variant="ghost"
+                size="icon"
+                className="hover:text-danger-hover"
+                title="Delete lesson"
+              >
+                <TrashIcon className="w-6 h-6" />
+              </Button>
+            )}
           </div>
         </header>
 

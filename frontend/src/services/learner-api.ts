@@ -3,7 +3,7 @@
  * Description: One learner-facing API surface over the JWT and token endpoints.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-10-30
  */
 /**
  * One learner-facing API surface, whichever way you got in.
@@ -23,6 +23,7 @@ import {
   Note,
 } from '@/services/curriculum-api';
 import { AttemptResult, Quiz, QuizAnswers, quizApi, QuizSession } from '@/services/quiz-api';
+import { accountTourStore, guestTourStore, TourState } from '@/services/tour-store';
 
 export interface LearnerApi {
   getCourses: () => Promise<Course[]>;
@@ -55,6 +56,15 @@ export interface LearnerApi {
   createNote: (courseId: string, body: string, sectionId?: string | null) => Promise<unknown>;
   updateNote: (noteId: string, body: string) => Promise<unknown>;
   deleteNote: (noteId: string) => Promise<unknown>;
+  /**
+   * Where this visitor is in the first-login walkthrough, and the course it
+   * hands them into (null before the tutorial exists).
+   *
+   * On the account for somebody signed in, in the browser for a guest — see
+   * `tour-store.ts`. The walkthrough calls this and never learns which.
+   */
+  getTour: () => Promise<TourState & { tutorialCourseId: string | null }>;
+  saveTour: (state: TourState) => Promise<void>;
 }
 
 /**
@@ -88,6 +98,19 @@ export function makeLearnerApi(token: string | null): LearnerApi {
         assignmentApi.createNote(token, courseId, body, sectionId),
       updateNote: (noteId, body) => assignmentApi.updateNote(token, noteId, body),
       deleteNote: (noteId) => assignmentApi.deleteNote(token, noteId),
+      getTour: async () => {
+        // A link's catalogue is its own course plus the tutorial, so finding
+        // the tutorial in it costs one small read the guest pages make anyway.
+        const [state, courses] = await Promise.all([
+          guestTourStore(token).load(),
+          assignmentApi.getCourses(token),
+        ]);
+        return {
+          ...state,
+          tutorialCourseId: courses.find((course) => course.isDefaultTutorial)?.id ?? null,
+        };
+      },
+      saveTour: (state) => guestTourStore(token).save(state),
     };
   }
 
@@ -107,6 +130,8 @@ export function makeLearnerApi(token: string | null): LearnerApi {
     createNote: (courseId, body, sectionId) => curriculumApi.createNote(courseId, body, sectionId),
     updateNote: (noteId, body) => curriculumApi.updateNote(noteId, body),
     deleteNote: (noteId) => curriculumApi.deleteNote(noteId),
+    getTour: () => accountTourStore.load(),
+    saveTour: (state) => accountTourStore.save(state),
   };
 }
 

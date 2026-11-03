@@ -8,6 +8,8 @@
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
 import AuthService, { IdentityConflictError } from '@/services/auth-service/auth-service';
 
+import { Prisma } from '../../generated/prisma';
+
 jest.mock('@/gateways/auth-gateway/auth-gateway');
 const gateway = AuthGateway as jest.Mocked<typeof AuthGateway>;
 
@@ -103,5 +105,44 @@ describe('resolveSignedInUser', () => {
       await AuthService.resolveSignedInUser(claims({ emailVerified: false }));
       expect(gateway.bindSubject).toHaveBeenCalled();
     });
+  });
+});
+
+describe('resolveSignedInUser — several requests on one first sign-in', () => {
+  const duplicate = () =>
+    new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+
+  /**
+   * The app makes several calls the moment somebody first lands, and each finds
+   * no row. The ones that lose the insert used to fail as a 401 — which, when
+   * the loser was the first-login tour's request, meant the tour never started.
+   */
+  it('hands a request that lost the insert the row the winner wrote', async () => {
+    gateway.createUser.mockRejectedValue(duplicate());
+    gateway.getUserBySubject
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(row({ id: 42, keycloakSubject: 'sub-ada' }));
+
+    const user = await AuthService.resolveSignedInUser(claims());
+
+    expect(user).toMatchObject({ id: 42 });
+  });
+
+  it('still fails on any other database error', async () => {
+    gateway.createUser.mockRejectedValue(new Error('connection lost'));
+
+    await expect(AuthService.resolveSignedInUser(claims())).rejects.toThrow('connection lost');
+  });
+
+  /** A duplicate with no row behind it is not a race; it is a real conflict. */
+  it('fails when the duplicate is not the same person', async () => {
+    gateway.createUser.mockRejectedValue(duplicate());
+
+    await expect(AuthService.resolveSignedInUser(claims())).rejects.toThrow(
+      'Unique constraint failed',
+    );
   });
 });

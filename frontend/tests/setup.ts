@@ -8,6 +8,17 @@
  */
 import '@testing-library/jest-dom';
 
+import { TextDecoder, TextEncoder } from 'util';
+
+/**
+ * jsdom has no TextEncoder, and react-router needs one to build a router.
+ * Node's is the same API, so the walkthrough's tests — which move between real
+ * routes — can use a MemoryRouter rather than mocking navigation away.
+ */
+if (!globalThis.TextEncoder) {
+  Object.assign(globalThis, { TextEncoder, TextDecoder });
+}
+
 /**
  * `import.meta.env` only exists inside a Vite build. Anything importing
  * `utils/logger` or `utils/utils` reads it, so it is defined here rather than
