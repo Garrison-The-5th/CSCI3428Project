@@ -42,14 +42,14 @@ post-merge finalize workflow from the PR review form.
 |---|---|---|---|
 | `vulnerability.name` | Agent | Always | CVE or GHSA ID (e.g., `CVE-2026-42033`) |
 | `vulnerability.aliases` | Agent | Optional | Other IDs for the same vuln |
-| `vulnerability.description` | Agent | Recommended | Short title from advisory |
+| `vulnerability.description` | Agent | Always (agent ≥ 2.0.0) | Title + plain-English explanation (format below) |
 | `products[].@id` | Agent | Always | Package URL: `pkg:npm/<name>@<version>` |
 | `status` | Agent | Always | `not_affected` / `affected` / `fixed` / `under_investigation` |
 | `justification` | Agent | When `status: not_affected` | One of the 5 OpenVEX values (below) |
-| `impact_statement` | Agent | Recommended | 2–3 sentences citing evidence |
+| `impact_statement` | Agent | Always (agent ≥ 2.0.0) | Exposure verdict + evidence + what we did (format below) |
 | `action_statement` | Agent | When `status: affected` | Concrete plan: what + when + how |
 | `fixed_in_version` | Agent | When `status: fixed` | Version containing the fix |
-| `action_reference` | Agent | When `status: fixed` | PR URL or commit SHA |
+| `action_reference` | Agent | When `status: fixed` | PR URL, commit SHA, or `merge run=<id>` / `watch run=<id>` (the bot can't know its PR URL when it commits) |
 | `confidence` | Agent | Always (extension) | 0–100, path-specific meaning (below) |
 | `owner` | Agent → Human | Recommended | Accountable party (email or GitHub team) |
 | `reevaluate_after` | Agent | When status is active | ISO date; `null` when `fixed` |
@@ -89,22 +89,50 @@ The single `confidence` number is interpreted against the `status` it's paired w
 
 ---
 
+## Plain-English description + exposure verdict
+
+Required on documents with `agent.version` ≥ 2.0.0 (older documents are
+exempt — they are immutable). The validator enforces both rules.
+
+**`vulnerability.description`** describes the vulnerability itself — true for
+anyone using the package. Written for a junior developer:
+
+```
+<advisory title>. What it is: <plain English>. How it could be exploited: <one concrete example attack>.
+```
+
+**`impact_statement`** describes OUR situation. It starts with exactly one
+verdict, then gives evidence (file:line, grep result), then what we did or
+the plan:
+
+| Status | Allowed verdict |
+|---|---|
+| `fixed` | `Exposed:` or `Not exposed:` |
+| `not_affected` | `Not exposed:` |
+| `affected` | `Exposed:` |
+| `under_investigation` | `Unknown:` or `Exposed:` |
+
+`fixed` carries either verdict because we bump whenever a fixed version
+exists, whether or not we were exposed.
+
+---
+
 ## Example statement
 
 ```json
 {
   "vulnerability": {
-    "name": "CVE-2026-41242",
-    "description": "protobufjs: Arbitrary code execution via injected protobuf type fields"
+    "name": "CVE-2026-31938",
+    "description": "jsPDF: Cross site scripting via unsanitized output options. What it is: some output modes open the PDF in a new browser window by building HTML, and the filename/options weren't escaped, so script could be injected into that page. How it could be exploited: an app that opens PDFs in a new window titled with a user-chosen name lets an attacker name something '<script>...</script>'; anyone who opens it runs the attacker's script in their logged-in session."
   },
-  "products": [{ "@id": "pkg:npm/protobufjs@7.5.3" }],
+  "products": [{ "@id": "pkg:npm/jspdf@3.0.4" }],
   "status": "fixed",
-  "fixed_in_version": "7.6.1",
-  "action_reference": "https://github.com/your-org/your-repo/pull/123",
-  "impact_statement": "Closed by PR #168 dependency bumps. protobufjs 7.5.3 -> 7.6.1 (transitive, resolved via npm update). Verified: full test suite passed.",
-  "confidence": 95,
+  "fixed_in_version": "4.2.1",
+  "action_reference": "merge run=40868223443",
+  "impact_statement": "Not exposed: our only jspdf call is output(\"blob\") at frontend/src/utils/transcriptExport.ts:103, which builds no HTML. Bumped jspdf 3.0.4 -> 4.2.1 anyway; build, lint, tests and tsc pass.",
+  "confidence": 90,
   "owner": "rware@ttgteams.com",
   "reevaluate_after": null,
-  "references": ["https://avd.aquasec.com/nvd/cve-2026-41242"]
+  "references": ["https://avd.aquasec.com/nvd/cve-2026-31938"]
 }
 ```

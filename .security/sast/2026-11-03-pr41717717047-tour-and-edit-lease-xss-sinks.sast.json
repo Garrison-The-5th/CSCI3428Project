@@ -1,0 +1,67 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-11-03-pr41717717047-tour-and-edit-lease-xss-sinks.sast.json",
+  "version": 1,
+  "timestamp": "2026-11-03T21:11:01.817Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "2.0.0",
+    "invocation_id": "41717717047"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:c17e3ec627f6",
+        "location": {
+          "file": "backend/src/controllers/tour-controller/tour-controller.ts",
+          "start_line": 52,
+          "end_line": 52,
+          "commit_sha": "dbed0cb2050e307510a53e4f195295dca049f03e"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Not exposed: new sink introduced by PR #51's first-login walkthrough. At tour-controller.ts:52, `res.send(await TourService.save(req.user!.id, req.body))` sends the return value of TourService.save (tour-service.ts:58-65), which is `{ status: TourStatus, step: number, tutorialCourseId: string | null }`. Nothing from `req.body` reaches the response as a string: TourService.parse (tour-service.ts:68-85) strict-validates `status` against the TourStatus Prisma enum (`STATUSES.includes(status)`) and coerces `step` through `boundedInteger(..., { min: 0, max: TOUR_STEP_COUNT - 1 })`, so the returned `status` is one of a fixed enum set and `step` is an integer; `tutorialCourseId` is a server-computed DB id from DefaultTutorialService.id(). Express `res.send` on an object auto-serialises to JSON with Content-Type application/json, which browsers cannot render as HTML. Same pattern and disposition as the sibling sinks in curriculum-controller.ts.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-02-01",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    },
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 539,
+          "end_line": 539,
+          "commit_sha": "dbed0cb2050e307510a53e4f195295dca049f03e"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Not exposed: REEVALUATE (touched) — curriculum-controller.ts was edited by PR #51 (course-access additions upstream in the file), so the standing not_affected needs re-verification. Re-verified: the sink at line 539 is unchanged in shape — `res.send(result)` where `result` is either EditLeaseService.release (edit-lease-service.ts:84-86, returns `{ released: boolean }` from `count > 0`) or EditLeaseService.releaseAll (edit-lease-service.ts:90-92, returns `{ released: number }` from a Prisma `updateMany` count). Neither payload interpolates any user-supplied string — the shape is a single literal key and a server-computed primitive. Express `res.send` on an object serialises to JSON with Content-Type application/json, which browsers cannot render as HTML. The nosemgrep marker on line 538 is intact. Original disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-02-01",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
