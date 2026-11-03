@@ -26,6 +26,7 @@ import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import AuthService from '@/services/auth-service/auth-service';
 import CourseMapService from '@/services/course-map-service/course-map-service';
 import { DirectedLock } from '@/services/course-map-service/directed-path';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 import EnrolmentService, {
   dueFor,
   Enrolment,
@@ -421,10 +422,20 @@ export default class CurriculumService {
       published?: boolean;
       sequential?: boolean;
       instructorIds?: string[];
+      /** Never accepted; named here only so the tutorial's guard below can see it. */
+      kind?: unknown;
     },
   ) {
     const course = await CurriculumGateway.getCourseById(id);
     if (!course) throw new NotFoundError(`Course with ID ${id} not found`);
+
+    // Unpublishing is the one way this route takes content away from learners,
+    // and the default tutorial is the one course that must never go. `kind` is
+    // never written by this route for any course; it is refused outright for
+    // the tutorial so that a request trying it gets an answer rather than a
+    // silent no-op.
+    if (data.published === false) await DefaultTutorialService.assertNotTutorial(id, 'unpublish');
+    if (data.kind !== undefined) await DefaultTutorialService.assertNotTutorial(id, 'kind');
 
     if (data.title !== undefined && !data.title.trim()) {
       throw new Error('title cannot be empty');
@@ -666,6 +677,7 @@ export default class CurriculumService {
   static async deleteCourse(id: string) {
     const course = await CurriculumGateway.getCourseById(id);
     if (!course) throw new NotFoundError(`Course with ID ${id} not found`);
+    await DefaultTutorialService.assertNotTutorial(id, 'delete');
     return CurriculumGateway.softDeleteCourse(id);
   }
 
@@ -741,6 +753,9 @@ export default class CurriculumService {
    * calling this endpoint directly.
    */
   static async purgeCourse(id: string) {
+    // Cannot be in the bin to begin with — `deleteCourse` refuses it — but a
+    // permanent delete is worth a second lock.
+    await DefaultTutorialService.assertNotTutorial(id, 'delete');
     const course = await CurriculumGateway.findDeletedCourse(id);
     if (!course) throw new NotFoundError(`Course with ID ${id} is not in the recycle bin`);
     return CurriculumGateway.hardDeleteCourse(id);

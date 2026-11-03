@@ -169,10 +169,23 @@ test.describe('critical workflows (signed in)', () => {
       .click();
 
     await page.getByLabel(/username|email/i).fill(process.env.E2E_TEST_USER!);
-    await page.getByLabel(/password/i).fill(process.env.E2E_TEST_PASSWORD!);
+    await page.locator('input[type="password"]').fill(process.env.E2E_TEST_PASSWORD!);
     await page.getByRole('button', { name: /sign in|log ?in/i }).click();
 
     await expect(page).toHaveURL(/\/$|\/learning/);
+
+    // A test account that has never seen the first-login tour gets it here, and
+    // its overlay would sit over everything below. These specs are not about
+    // the tour (tour.spec.ts is), so it is dismissed if it appears.
+    const tour = page.getByTestId('tour-card');
+    const shown = await tour
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (shown) {
+      await page.keyboard.press('Escape');
+      await expect(tour).toBeHidden();
+    }
   });
 
   test('a learner reaches their dashboard', async ({ page }) => {

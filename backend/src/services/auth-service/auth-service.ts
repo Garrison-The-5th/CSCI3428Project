@@ -10,7 +10,7 @@ import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
 import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 
-import { User } from '../../../generated/prisma';
+import { Prisma, User } from '../../../generated/prisma';
 
 /** A sign-in that would land on somebody else's record. Answered with a 403. */
 export class IdentityConflictError extends Error {}
@@ -258,7 +258,25 @@ export default class AuthService {
 
     const existing = await AuthGateway.getUserByEmail(email);
     if (!existing) {
-      return AuthGateway.createUser({ email, name, keycloakSubject: claims.subject });
+      try {
+        return await AuthGateway.createUser({ email, name, keycloakSubject: claims.subject });
+      } catch (error) {
+        /*
+          Lost a race with another request from the same first sign-in.
+
+          The app fires several calls the moment someone lands — the dashboard,
+          their edit rights, the first-login tour — and each one reaches here
+          with no row yet. One insert wins; the rest hit the unique index on
+          email or subject. Failing those as 401s meant whichever lost simply
+          did not happen, and when the loser was the tour's request the tour
+          never started on the one sign-in it exists for. The row the winner
+          wrote is the right answer for every one of them, so it is read back.
+        */
+        if (!isUniqueViolation(error)) throw error;
+        const winner = await AuthGateway.getUserBySubject(claims.subject);
+        if (!winner) throw error;
+        return winner;
+      }
     }
 
     if (existing.keycloakSubject && existing.keycloakSubject !== claims.subject) {
@@ -315,4 +333,9 @@ export default class AuthService {
       throw error;
     }
   }
+}
+
+/** Prisma's unique-constraint failure: another request inserted the same row first. */
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }

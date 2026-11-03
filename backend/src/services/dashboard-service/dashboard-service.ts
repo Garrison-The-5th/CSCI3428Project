@@ -38,6 +38,12 @@ export interface CourseProgress {
   hasNewContent: boolean;
   /** How many such items there are. */
   newSectionCount: number;
+  /**
+   * The default tutorial, which the Home rail badges "Start here" and the
+   * walkthrough points at. It is outstanding like any course, but never
+   * required and never due — its enrolment carries no deadline.
+   */
+  isDefaultTutorial: boolean;
 }
 
 /**
@@ -99,6 +105,8 @@ interface DashboardCourse {
    */
   lockAfterDue?: boolean;
   contentUpdatedAt: Date;
+  /** Absent reads as false: only the one course carries it. */
+  isDefaultTutorial?: boolean;
   sections: Array<{
     id: string;
     estimatedMinutes: number;
@@ -175,6 +183,7 @@ export default class DashboardService {
       ),
       lockAfterDue: snapshot.lockAfterDue,
       contentUpdatedAt: stampById.get(snapshot.id) ?? new Date(0),
+      isDefaultTutorial: snapshot.isDefaultTutorial === true,
       sections: snapshot.sections.map((section) => ({
         id: section.id,
         estimatedMinutes: section.estimatedMinutes,
@@ -294,6 +303,7 @@ export default class DashboardService {
         quizCount: course.sections.reduce((sum, section) => sum + section.quizzes.length, 0),
         hasNewContent,
         newSectionCount: newCount,
+        isDefaultTutorial: course.isDefaultTutorial === true,
       };
     });
 

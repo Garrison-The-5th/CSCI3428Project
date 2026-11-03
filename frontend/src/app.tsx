@@ -3,15 +3,16 @@
  * Description: Application routing and the signed-in app shell.
  * Author: TTG Full-Stack Web Boilerplate
  * Modified by: Jacob Matthews <Jacob.Matthews@ttgteams.com>
- * Date: 2026-08-10
+ * Date: 2026-10-30
  */
 /* eslint-disable import/max-dependencies */
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 
 import Unauthorized from '@/components/common/unauthorized';
 import Navbar from '@/components/navbar/navbar';
 import { ProtectedRoute } from '@/components/protected-route';
+import { TourProvider } from '@/components/tour/tour-context';
 import { useAuth } from '@/contexts/auth-context';
 import { useEditorAccess } from '@/contexts/editor-access-context';
 import { useGuest } from '@/contexts/guest-context';
@@ -78,6 +79,8 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') ?? 'light');
   /** Opens or closes the sidebar. */
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
+  /** Sets the sidebar outright — the walkthrough opens it for the steps about the menu. */
+  const setSidebar = useCallback((open: boolean) => setSidebarOpen(open), []);
   /** Switches between light and dark themes. */
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   const { pages } = useMemo(
@@ -120,186 +123,194 @@ function App() {
 
   return (
     <Router>
-      {showShell && (
-        <Navbar
-          isDarkMode={theme === 'dark'}
-          pages={pages}
-          sidebarOpen={sidebarOpen}
-          toggleSidebar={toggleSidebar}
-          toggleTheme={toggleTheme}
-        />
-      )}
-      {/* Main Content Area with proper spacing */}
-      <div
-        className={
-          showShell
-            ? `app-main app-main--authenticated ${sidebarOpen ? 'app-main--sidebar-open' : ''}`
-            : 'w-full'
-        }
-      >
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            {/* Public Routes - No authentication required */}
-            {/* Assignment links: the token in the URL is the credential, so this
+      {/*
+        The first-login walkthrough. Inside the router because it moves people
+        between pages and watches where they go — and App renders the router
+        itself, so this is the outermost place that can. It wraps the shell
+        rather than sitting up with the providers in index.tsx for the same
+        reason, and is handed the sidebar's state because App owns it.
+      */}
+      <TourProvider enabled={showShell} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebar}>
+        {showShell && (
+          <Navbar
+            isDarkMode={theme === 'dark'}
+            pages={pages}
+            sidebarOpen={sidebarOpen}
+            toggleSidebar={toggleSidebar}
+            toggleTheme={toggleTheme}
+          />
+        )}
+        {/* Main Content Area with proper spacing */}
+        <div
+          className={
+            showShell
+              ? `app-main app-main--authenticated ${sidebarOpen ? 'app-main--sidebar-open' : ''}`
+              : 'w-full'
+          }
+        >
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              {/* Public Routes - No authentication required */}
+              {/* Assignment links: the token in the URL is the credential, so this
               must stay outside ProtectedRoute. */}
-            <Route path="/a/:token" element={<AssignmentEntry />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/public" element={<PublicPage />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/unauthorized" element={<Unauthorized />} />
+              <Route path="/a/:token" element={<AssignmentEntry />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/public" element={<PublicPage />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/unauthorized" element={<Unauthorized />} />
 
-            {/* Protected Routes - Authentication required */}
+              {/* Protected Routes - Authentication required */}
 
-            {/* admin side routes. The dashboard is open to authors as well:
+              {/* admin side routes. The dashboard is open to authors as well:
                 an author can do everything except manage users. */}
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute isAuthor={true}>
-                  <AdminPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/users"
-              element={
-                <ProtectedRoute isAdmin={true}>
-                  <UsersList />
-                </ProtectedRoute>
-              }
-            />
-            {/* Authoring routes - admins and contributors */}
-            <Route
-              path="/admin/learning"
-              element={
-                <ProtectedRoute isAuthor={true}>
-                  <AdminLearning />
-                </ProtectedRoute>
-              }
-            />
-            {/* The editor is only reachable by picking a lesson card. Contributors
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute isAuthor={true}>
+                    <AdminPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <ProtectedRoute isAdmin={true}>
+                    <UsersList />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Authoring routes - admins and contributors */}
+              <Route
+                path="/admin/learning"
+                element={
+                  <ProtectedRoute isAuthor={true}>
+                    <AdminLearning />
+                  </ProtectedRoute>
+                }
+              />
+              {/* The editor is only reachable by picking a lesson card. Contributors
               get here through Course Editor, so it is gated on edit rights rather
               than the global author role. */}
-            <Route
-              path="/admin/learning/:courseId"
-              element={
-                <ProtectedRoute canEdit={true}>
-                  <CourseEditor />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/course-editor"
-              element={
-                <ProtectedRoute canEdit={true}>
-                  <CourseEditorList />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/quizzes"
-              element={
-                <ProtectedRoute isAuthor={true}>
-                  <AdminQuizzes />
-                </ProtectedRoute>
-              }
-            />
-            {/* user side routes */}
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <HomePage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/learning"
-              element={
-                <ProtectedRoute>
-                  <Learning />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/learning/:courseId"
-              element={
-                <ProtectedRoute>
-                  <CourseLanding />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/learning/:courseId/content"
-              element={
-                <ProtectedRoute>
-                  <CoursePlayer />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/quizzes"
-              element={
-                <ProtectedRoute>
-                  <Quizzes />
-                </ProtectedRoute>
-              }
-            />
-            {/* A quiz that belongs to no course has no course page to sit under,
+              <Route
+                path="/admin/learning/:courseId"
+                element={
+                  <ProtectedRoute canEdit={true}>
+                    <CourseEditor />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/course-editor"
+                element={
+                  <ProtectedRoute canEdit={true}>
+                    <CourseEditorList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/quizzes"
+                element={
+                  <ProtectedRoute isAuthor={true}>
+                    <AdminQuizzes />
+                  </ProtectedRoute>
+                }
+              />
+              {/* user side routes */}
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <HomePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/learning"
+                element={
+                  <ProtectedRoute>
+                    <Learning />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/learning/:courseId"
+                element={
+                  <ProtectedRoute>
+                    <CourseLanding />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/learning/:courseId/content"
+                element={
+                  <ProtectedRoute>
+                    <CoursePlayer />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quizzes"
+                element={
+                  <ProtectedRoute>
+                    <Quizzes />
+                  </ProtectedRoute>
+                }
+              />
+              {/* A quiz that belongs to no course has no course page to sit under,
               so it gets its own. Declared before the course routes because
               "standalone" is a real path segment rather than a course id. */}
-            <Route
-              path="/quizzes/standalone/:quizId"
-              element={
-                <ProtectedRoute>
-                  <StandaloneQuiz />
-                </ProtectedRoute>
-              }
-            />
-            {/* The start page, then the player. Which quiz is open is in the URL so
+              <Route
+                path="/quizzes/standalone/:quizId"
+                element={
+                  <ProtectedRoute>
+                    <StandaloneQuiz />
+                  </ProtectedRoute>
+                }
+              />
+              {/* The start page, then the player. Which quiz is open is in the URL so
               a timed run survives a reload. */}
-            <Route
-              path="/quizzes/:courseId"
-              element={
-                <ProtectedRoute>
-                  <QuizLanding />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/quizzes/:courseId/take/:quizId"
-              element={
-                <ProtectedRoute>
-                  <QuizPlayer />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/table"
-              element={
-                <ProtectedRoute>
-                  <TablePage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/contact"
-              element={
-                <ProtectedRoute>
-                  <ContactUs />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/quizzes/:courseId"
+                element={
+                  <ProtectedRoute>
+                    <QuizLanding />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quizzes/:courseId/take/:quizId"
+                element={
+                  <ProtectedRoute>
+                    <QuizPlayer />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/table"
+                element={
+                  <ProtectedRoute>
+                    <TablePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/contact"
+                element={
+                  <ProtectedRoute>
+                    <ContactUs />
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Add more protected routes here
+              {/* Add more protected routes here
           <Route 
             path="/dashboard" 
             element={
@@ -310,11 +321,12 @@ function App() {
           />
           */}
 
-            {/* Catch all - redirect to home */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </div>
+              {/* Catch all - redirect to home */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </div>
+      </TourProvider>
     </Router>
   );
 }

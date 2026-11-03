@@ -118,6 +118,12 @@ export interface CourseSnapshot {
    * before there were maps.
    */
   map?: SnapshotMap | null;
+  /**
+   * Whether this is the default tutorial, which the learner pages badge and the
+   * walkthrough walks people into. Absent on every snapshot taken before the
+   * tutorial existed, which reads as false — none of those courses is it.
+   */
+  isDefaultTutorial?: boolean;
   publishedAt: Date | string | null;
   kind: CourseKind;
   imageData: string | null;
@@ -401,6 +407,7 @@ export default class PublicationService {
     return {
       directedLearning: course.directedLearning,
       map,
+      isDefaultTutorial: course.isDefaultTutorial,
       id: course.id,
       title: course.title,
       shortDescription: course.shortDescription,

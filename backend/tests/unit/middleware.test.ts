@@ -23,6 +23,7 @@ import {
   UPLOAD_MAX_FILES_PER_WINDOW,
 } from '@/controllers/middleware/rate-limit';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
 jest.mock('@/gateways/publication-gateway/publication-gateway');
@@ -524,6 +525,30 @@ describe('requireCourseEditor — whose course it is', () => {
     expect(curriculum.canEditCourse).toHaveBeenCalledWith(1, 'course-1', 'all');
   });
 
+  /**
+   * The refusal comes from `canEditCourse` (the gateway keeps the tutorial to
+   * admins); the middleware only has to say why, so an author who edits every
+   * other course they were given is not left thinking something broke.
+   */
+  it('tells an author the default tutorial is for admins only', async () => {
+    curriculum.canEditCourse.mockResolvedValue(false);
+    curriculum.getDefaultTutorialId.mockResolvedValue('course-1');
+    DefaultTutorialService.clearCache();
+    const res = responseDouble();
+    const next = jest.fn() as NextFunction;
+
+    await requireCourseEditor(resolve)(
+      requestDouble({ ...author, method: 'PUT' }) as never,
+      res,
+      next,
+    );
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ errorMessage: 'Only admins can edit the default tutorial' });
+    expect(next).not.toHaveBeenCalled();
+    DefaultTutorialService.clearCache();
+  });
+
   it('does not extend that flag to someone without an authoring role', async () => {
     curriculum.canEditCourse.mockResolvedValue(true);
 
@@ -548,13 +573,26 @@ describe('CurriculumGateway.accessibleCourses', () => {
 
   it('limits an author to their own, ones they are named on, and unowned ones', () => {
     expect(RealGateway.accessibleCourses(1, true)).toEqual({
+      isDefaultTutorial: false,
       OR: [{ createdById: 1 }, { contributors: { some: { id: 1 } } }, { createdById: null }],
     });
   });
 
   it('limits anyone else to their own and ones they are named on', () => {
     expect(RealGateway.accessibleCourses(1, false)).toEqual({
+      isDefaultTutorial: false,
       OR: [{ createdById: 1 }, { contributors: { some: { id: 1 } } }],
     });
+  });
+
+  /**
+   * The tutorial has no owner, so without its own clause the unowned-course
+   * rule would hand it to every global author — and naming somebody on it as a
+   * contributor would hand it to them. It is admins' alone.
+   */
+  it('keeps the default tutorial from everyone but an admin', () => {
+    expect(RealGateway.accessibleCourses(1, true)).toMatchObject({ isDefaultTutorial: false });
+    expect(RealGateway.accessibleCourses(1, false)).toMatchObject({ isDefaultTutorial: false });
+    expect(RealGateway.accessibleCourses(1, 'all')).not.toHaveProperty('isDefaultTutorial');
   });
 });

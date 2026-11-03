@@ -239,16 +239,49 @@ drift within a release.
 
 ## 5. Onboarding (§2.1.2)
 
-**Current state: not implemented.** There is no demo mode and no guided tour.
+**A first-login walkthrough, and a course everybody has.**
 
-What softens it today: assignment emails link straight to the item rather than
-to a home page, empty states explain what to do next ("No lessons yet. Create
-one above to get started"), and the guest flow drops someone directly onto the
-dashboard with only their own work on it.
+On their first visit — a new account's first sign-in, or a guest's first time
+through a link — a spotlight tour starts on Home. It takes fifteen steps:
 
-**Recommended.** A first-run tour of the four sidebar destinations for learners,
-and a separate one for the course editor's six panes — the densest screen in the
-product. Tracked as a gap rather than claimed as done.
+```
+ /  Welcome ─▶ Home ─▶ [click Profile]
+ /profile   Your details ─▶ Data and privacy ─▶ Learning ─▶ Quizzes
+            ─▶ Contact · Dark mode · Logout
+ /          [click the "Start here" course]     (or Learning, then the card)
+ /learning/:id          [click Start course / Continue]
+ /learning/:id/content  Course content rail ─▶ What you are reading
+            ─▶ [press Next or →] ─▶ Learning tools and Notes ─▶ You're ready
+```
+
+Bracketed steps wait for the learner to do the real thing: the card offers no
+Next, and the highlighted item stays clickable through the cut-out. Every step
+has Skip tour, Esc skips, and Replay tour on Profile brings it back. A reload
+mid-tour resumes on the same step and page; wandering off offers "Continue
+tour" rather than snapping back.
+
+It ends inside the **default tutorial**, a real course on every account, badged
+"Start here" on Home and Learning. Admins write its content in the Course
+Editor, so the tour stays short — it teaches where things are and how a course
+works — and the guide itself is edited like any lesson.
+
+*Design justification.* Learning by doing: the steps that matter (opening a
+course, starting it, stepping through it) are only passed by actually doing
+them, so the first course a person opens is opened by them. Only learner items
+are taught, for every audience: authors and admins see extra sidebar items,
+but the tour finds its targets by name rather than position, so those extras
+never shift it.
+
+*Alternatives considered.* A tour library — rejected: the dependency set is
+deliberately small, and the steps that wait for a real route change are not
+what those libraries are built around. A static welcome page — rejected: it
+describes the sidebar instead of pointing at it. Showing the tour to every
+existing user on release — rejected: the migration marks everyone who has
+already signed in as having skipped it, so it reaches only new people, and
+Replay is there for anyone else who wants it.
+
+**Still a gap:** a separate tour of the course editor's panes, the densest
+screen in the product.
 
 ---
 

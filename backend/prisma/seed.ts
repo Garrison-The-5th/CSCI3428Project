@@ -3,8 +3,10 @@
  * Description: Seed for the learning platform.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-10-30
  */
+import { ensureDefaultTutorial } from '@/services/default-tutorial-service/default-tutorial-bootstrap';
+
 import { prisma } from './prisma-client';
 
 const users = [
@@ -42,8 +44,17 @@ const users = [
   },
 ];
 
-/** Inserts the sample users above into an empty database. */
+/**
+ * Creates the default tutorial, then inserts the sample users above into an empty database.
+ *
+ * The tutorial goes first, and through the same function the server runs on
+ * start-up, so a seeded database and a production one end up with the same
+ * course. It is idempotent; the users below are not, and fail on a second run.
+ */
 async function main() {
+  console.log('Ensuring the default tutorial...');
+  await ensureDefaultTutorial();
+
   console.log('Seeding users...');
   for (const user of users) {
     await prisma.user.create({ data: user });

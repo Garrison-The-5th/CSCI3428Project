@@ -655,6 +655,7 @@ const CourseLanding = ({ previewCourse, preview = false }: CourseLandingProps) =
               <Button
                 onClick={() => openAt(started && resumeAt ? itemId(resumeAt) : undefined)}
                 disabled={locked}
+                data-tour={preview ? undefined : 'start-course-button'}
                 title={locked ? lockedReason : preview ? 'Disabled while previewing' : undefined}
                 className="w-full bg-navy py-6 text-md text-white hover:bg-navbar-hover
                   disabled:cursor-not-allowed disabled:bg-dark-gray/40"

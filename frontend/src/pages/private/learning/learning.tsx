@@ -101,7 +101,8 @@ const Learning = () => {
   }
 
   return (
-    <div className="page-container flex flex-col">
+    // Loaded: the walkthrough can stop waiting for the tutorial card — see READY_ATTRIBUTE.
+    <div className="page-container flex flex-col" data-tour-ready="learning">
       <header className="responsive-page-header">
         <h1 className="page-title font-bold text-dark-gray mb-2">Learning</h1>
         <p className="page-subtitle text-dark-gray font-medium">Choose a course to get started.</p>
@@ -153,6 +154,7 @@ const Learning = () => {
               <Card
                 key={course.id}
                 onClick={() => navigate(`/learning/${course.id}`)}
+                data-tour={course.isDefaultTutorial ? 'learning-tutorial-card' : undefined}
                 className={`relative flex aspect-[4/5] cursor-pointer flex-col gap-0 overflow-hidden
                   bg-light-gray p-0 shadow-sm transition-all duration-300 hover:-translate-y-1
                   hover:shadow-lg ${hasNew ? 'ring-2 ring-new' : ''}`}
@@ -190,6 +192,10 @@ const Learning = () => {
                       )}
                       {course.required && !course.locked && (
                         <Badge className="w-fit bg-navy px-2 text-white">Required</Badge>
+                      )}
+                      {/* The one course everybody has: where a newcomer should begin. */}
+                      {course.isDefaultTutorial && (
+                        <Badge className="w-fit bg-green px-2 text-navy">Start here</Badge>
                       )}
                       {hasNew && <NewBadge label="New content" />}
                     </div>

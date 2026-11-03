@@ -272,6 +272,26 @@ const CourseAccess = ({ course, canManageAuthors, mode = 'lesson', onNotify }: P
       </ul>
     );
 
+  /*
+    The default tutorial is nobody's to hand out — everybody already has it,
+    with no deadline — and only admins edit it, so there are no extra authors
+    to name either. The server refuses both; this says so instead of offering
+    controls that would only fail.
+  */
+  if (course.isDefaultTutorial) {
+    return (
+      <Card className="bg-light-gray shadow-sm">
+        <CardContent className="p-6 text-dark-gray">
+          <p className="font-semibold">Everyone has this course</p>
+          <p className="mt-2 text-sm">
+            This is the default tutorial. It is on every account and every assignment link
+            automatically, with no deadline, so it cannot be assigned. Only admins can edit it, so
+            no other authors can be named on it.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   return (
     <div className="flex flex-col gap-6">
       <div>

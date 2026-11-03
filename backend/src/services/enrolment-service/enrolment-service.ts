@@ -3,10 +3,11 @@
  * Description: What a signed-in learner is entitled to see.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
- * Date: 2026-08-10
+ * Date: 2026-10-30
  */
 import { endOfDueDay } from '@/config/validation';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 
 /**
  * What a signed-in learner is entitled to see.
@@ -17,8 +18,12 @@ import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway'
  * meant to stay outside the platform, so being sent one never adds the course to
  * the sender's Learning page.
  *
- * Deliberately reads nothing but the assignment table, so every caller can
- * import it without dragging the curriculum and quiz services into a cycle.
+ * Plus one course nobody assigns: the default tutorial, which every account
+ * holds. See `forEmail`.
+ *
+ * Deliberately reads nothing but the assignment table and the tutorial's id, so
+ * every caller can import it without dragging the curriculum and quiz services
+ * into a cycle.
  */
 export interface Enrolment {
   courseIds: Set<string>;
@@ -76,7 +81,10 @@ export default class EnrolmentService {
    * and quiz (the newest assignment's, where one was assigned twice).
    */
   static async forEmail(email: string): Promise<Enrolment> {
-    const assignments = await AssignmentGateway.listPlatformForEmail(email.trim().toLowerCase());
+    const [assignments, tutorialId] = await Promise.all([
+      AssignmentGateway.listPlatformForEmail(email.trim().toLowerCase()),
+      DefaultTutorialService.id(),
+    ]);
 
     // Newest assignment first, so where the same item was handed over twice the
     // most recent deadline is the one that stands — that is what re-assigning
@@ -93,6 +101,25 @@ export default class EnrolmentService {
         dueByQuizId.set(assignment.quizId, due);
       }
     }
+
+    /*
+      The default tutorial, for everybody.
+
+      Added here rather than as an assignment row per account: rows would have
+      to be written for every account, and again for every account created
+      afterwards, and the admin dashboard would then report the tutorial as
+      learning somebody had handed out. Every reader of "what is this person
+      on" — the Learning tab, one course, the dashboard, the quiz list, quiz
+      access — goes through this method, so this one line is what makes the
+      tutorial open everywhere rather than listing on Learning and refusing to
+      open.
+
+      Mapped to null — no deadline — so it is never overdue, never locked and
+      never counted among required learning. Nothing can assign it (the
+      assignment service refuses), so there is no assignment deadline here to
+      overrule.
+    */
+    if (tutorialId && !dueByCourseId.has(tutorialId)) dueByCourseId.set(tutorialId, null);
 
     return {
       courseIds: new Set(dueByCourseId.keys()),

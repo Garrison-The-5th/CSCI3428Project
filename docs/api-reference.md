@@ -1,6 +1,6 @@
 # API Reference
 
-Every HTTP endpoint the backend exposes: **112 routes** across eight controllers.
+Every HTTP endpoint the backend exposes: **114 routes** across nine controllers.
 
 TTG Technology Standards §1.8 requires "detailed documentation covering all
 endpoints, parameters, request/response formats, and error codes".
@@ -195,6 +195,34 @@ Defined in `backend/src/controllers/**/privacy-controller.ts`.
 |---|---|---|---|
 | `GET` | `/me/data` | signed in, rate limited | Downloads everything held about the caller, as a JSON attachment |
 | `DELETE` | `/me/data` | signed in, rate limited | Erases the caller's personal data |
+
+### `/me/tour`
+
+Defined in `backend/src/controllers/tour-controller/tour-controller.ts`.
+
+The caller's place in the first-login walkthrough. Guests have no route here:
+their tour state is kept in their browser (see `frontend/src/services/tour-store.ts`).
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/me/tour` | signed in | `{ status, step, tutorialCourseId }` — where the caller is in the tour, and the course it leads into (null before the tutorial exists) |
+| `PUT` | `/me/tour` | signed in, rate limited | Records where the caller is. Body `{ status, step }`: `status` is `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED` or `SKIPPED`; `step` is a whole number from 0 to 15. Anything else is a `400`. Replay is `{ status: "IN_PROGRESS", step: 0 }` |
+
+## The default tutorial
+
+One course, flagged `isDefaultTutorial`, is held by every account and every
+link holder without being assigned. Routes treat it like any other course,
+with these exceptions:
+
+| Route | For the default tutorial |
+|---|---|
+| `GET /curriculum/courses`, `GET /curriculum/courses/:id`, `GET /curriculum/dashboard`, `GET /quizzes` | Always included, with `dueDate: null` and `locked: false`; carries `isDefaultTutorial: true` |
+| every `/public/assignments/:token/...` route | Included alongside the link's own item |
+| every route guarded by *can edit this course* | `403 Only admins can edit the default tutorial` for anyone but an admin |
+| `DELETE /curriculum/courses/:id`, `DELETE /curriculum/deleted/courses/:id` | `403` for everyone, admins included |
+| `PUT /curriculum/courses/:id` with `published: false` or `kind` | `403` for everyone |
+| `POST /assignments` naming it, or a quiz inside it | `403` — everybody already has it |
+| `POST /curriculum/courses/:id/publish` | Works as usual, but sends no new-content email |
 
 ### `/public/assignments`
 

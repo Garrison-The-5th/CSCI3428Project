@@ -15,6 +15,7 @@ import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway'
 import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import PublicationGateway from '@/gateways/publication-gateway/publication-gateway';
+import DefaultTutorialService from '@/services/default-tutorial-service/default-tutorial-service';
 import EditAttributionService, {
   EditedKind,
 } from '@/services/edit-attribution-service/edit-attribution-service';
@@ -24,7 +25,8 @@ import EditAttributionService, {
  * changing it.
  *
  * Three ways to pass: you created the course, you were named on it as an
- * author, or you are an admin, who reaches every course. The author role alone
+ * author, or you are an admin, who reaches every course. The default tutorial
+ * takes only the last of those: it is admins' alone. The author role alone
  * is not enough — it says this person may write learning content, not that they
  * may open somebody else's. What it still buys is the courses that predate
  * ownership being recorded; see `CurriculumGateway.accessibleCourses`.
@@ -235,6 +237,11 @@ export function requireCourseEditor(
       req.courseId = courseId;
 
       if (!(await CurriculumGateway.canEditCourse(req.user.id, courseId, isGlobalAuthor))) {
+        // The refusal itself comes from `accessibleCourses`, which keeps the
+        // default tutorial to admins. It is only named here so the answer says
+        // why — "you do not have access" reads as a fault to an author who can
+        // edit every other course they were given.
+        const isTutorial = await DefaultTutorialService.is(courseId);
         logSecurityEvent('access.denied', {
           userId: req.user.id,
           email: req.auth.email,
@@ -242,9 +249,15 @@ export function requireCourseEditor(
           method: req.method,
           path: req.path,
           resource: courseId,
-          reason: 'did not create this course and is not named on it',
+          reason: isTutorial
+            ? 'the default tutorial is editable by admins only'
+            : 'did not create this course and is not named on it',
         });
-        return res.status(403).send({ errorMessage: 'You do not have edit access to that course' });
+        return res.status(403).send({
+          errorMessage: isTutorial
+            ? 'Only admins can edit the default tutorial'
+            : 'You do not have edit access to that course',
+        });
       }
 
       // Successful decisions are recorded too (§3.4.2): an audit that only

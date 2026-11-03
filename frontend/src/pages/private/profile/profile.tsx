@@ -7,17 +7,27 @@
  */
 import '@/pages/private/profile/profile.css';
 
-import { EnvelopeIcon, FingerPrintIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import {
+  EnvelopeIcon,
+  FingerPrintIcon,
+  MapIcon,
+  UserCircleIcon,
+} from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 
 import PrivacyNotice from '@/components/common/privacy-notice';
 import ToastNotification from '@/components/common/toast-notification';
-import { Card, CardContent } from '@/components/ui/card';
+import { useTour } from '@/components/tour/tour-context';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
+import { useGuest } from '@/contexts/guest-context';
 
 /** The learner's own details, and the privacy and data controls that go with them. */
 const Profile = () => {
   const { user } = useAuth();
+  const { isGuest, email: guestEmail } = useGuest();
+  const { replay, active: touring } = useTour();
   const [loading, setLoading] = useState(true);
   /**
    * Export and erasure report through a toast.
@@ -73,21 +83,23 @@ const Profile = () => {
       <h1 className="page-title font-bold text-dark-gray">Profile</h1>
       <hr className="mt-4 mb-8 h-0.5 border-t-0 bg-gray-400" />
 
-      <Card className="responsive-panel bg-light-gray">
+      <Card className="responsive-panel bg-light-gray" data-tour="profile-card">
         <CardContent className="flex flex-col gap-8 divide-y divide-gray-300 px-6 py-8">
           <div>
             <div className={labelContainer}>
               <UserCircleIcon className={iconStyles} />
               <label className={fieldLabel}>Full Name</label>
             </div>
-            <p className={`${fieldValue} mb-6`}>{user?.name || 'Not Provided'}</p>
+            <p className={`${fieldValue} mb-6`}>
+              {user?.name || (isGuest ? 'Guest' : 'Not Provided')}
+            </p>
           </div>
           <div>
             <div className={labelContainer}>
               <EnvelopeIcon className={iconStyles} />
               <label className={fieldLabel}>Email</label>
             </div>
-            <p className={`${fieldValue} mb-6`}>{user?.email || 'Not Provided'}</p>
+            <p className={`${fieldValue} mb-6`}>{user?.email || guestEmail || 'Not Provided'}</p>
           </div>
           <div>
             <div className={labelContainer}>
@@ -114,6 +126,32 @@ const Profile = () => {
           onNotify={(message, type = 'success') => setToast({ show: true, message, type })}
         />
       </div>
+
+      {/*
+        Replay, beside the privacy card.
+
+        The same button for a guest as for an account: it is the same tour, and
+        LearnerApi decides where the restart is recorded. Hidden while the tour
+        is running, because pressing it then would only restart what is already
+        on screen.
+      */}
+      {!touring && (
+        <Card className="responsive-panel mt-8 w-full max-w-3xl bg-light-gray shadow-sm">
+          <CardHeader className="flex-row items-center gap-3 p-4">
+            <MapIcon className="w-6 h-6 shrink-0 text-navy" />
+            <CardTitle className="text-lg text-dark-gray">Tour of the platform</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 text-dark-gray">
+            <p className="text-sm">
+              The short walkthrough shown on your first visit: the menu, then a first look inside a
+              course.
+            </p>
+            <Button onClick={replay} className="bg-navy text-white hover:bg-navy-hover">
+              Replay tour
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <ToastNotification
         show={toast.show}
