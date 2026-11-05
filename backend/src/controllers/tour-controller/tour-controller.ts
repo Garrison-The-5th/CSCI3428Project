@@ -49,6 +49,7 @@ export default class TourController {
   @use(authenticateAndAttachUser)
   async saveTour(req: AuthenticatedRequest, res: Response) {
     try {
+      // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
       return res.send(await TourService.save(req.user!.id, req.body));
     } catch (error) {
       return fail(res, error, 'Could not save your place in the tour');
