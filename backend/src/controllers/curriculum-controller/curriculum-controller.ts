@@ -914,6 +914,46 @@ export default class CurriculumController {
     }
   }
 
+  /**
+   * The items new canvases in this canvas's course start with. Items only — the
+   * pictures stay on the server until a canvas is made from them.
+   */
+  @get('/elements/:id/canvas-template')
+  @use(requireCourseEditor(fromElementParam('id')))
+  @use(authenticateAndAttachUser)
+  async getCanvasTemplate(req: AuthenticatedRequest, res: Response) {
+    try {
+      if (!req.courseId) return res.status(404).send({ errorMessage: 'Canvas not found' });
+      return res.send(await CurriculumService.getCanvasTemplate(req.courseId));
+    } catch (error) {
+      return fail(res, error, 'Error loading the canvas defaults');
+    }
+  }
+
+  /**
+   * Adds one of this canvas's items to its course's defaults (`include: true`),
+   * or takes it out. Defaults only shape canvases made later, which learners
+   * never see until they are published, so this does not mark the draft edited.
+   */
+  @put('/elements/:id/canvas-template')
+  @use(requireCourseEditor(fromElementParam('id'), { marksDraftEdited: false }))
+  @use(authenticateAndAttachUser)
+  async setCanvasTemplateItem(req: AuthenticatedRequest, res: Response) {
+    try {
+      if (!req.courseId) return res.status(404).send({ errorMessage: 'Canvas not found' });
+      const { item, include } = (req.body ?? {}) as { item?: unknown; include?: unknown };
+      const template = await CurriculumService.setCanvasTemplateItem(
+        param(req as Request, 'id'),
+        req.courseId,
+        item,
+        include === true,
+      );
+      return res.send({ message: 'Canvas defaults updated', ...template });
+    } catch (error) {
+      return fail(res, error, 'Error updating the canvas defaults');
+    }
+  }
+
   /** Permanently removes an element — elements are not recycled. */
   @del('/elements/:id')
   @use(requireCourseEditor(fromElementParam('id'), { attributes: { kind: 'ELEMENT' } }))

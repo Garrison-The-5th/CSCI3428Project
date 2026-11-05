@@ -14,8 +14,8 @@
  * and text boxes do the opposite. Double-click a text box to write in it, with
  * the same toolbar a text block has.
  *
- * Pictures arrive by dragging them onto the slide from the computer or through
- * the Upload button, and are stored straight away — the slide only remembers
+ * Pictures arrive by dragging them onto the slide from the computer, pasting
+ * them, or through the Upload button, and are stored straight away — the slide only remembers
  * which picture goes where. Everything else is layout, saved by the element's
  * own auto-save like any other edit.
  *
@@ -36,6 +36,7 @@ import {
   PencilSquareIcon,
   ScissorsIcon,
   Square2StackIcon,
+  StarIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
 import { CSSProperties, Fragment, RefObject, useEffect, useRef, useState } from 'react';
@@ -73,7 +74,11 @@ import {
 } from '@/components/canvas/canvas-model';
 import { useBoxSize, useImageSources } from '@/components/canvas/canvas-view';
 import ColorPicker from '@/components/common/color-picker';
-import { pastePlainText, RichTextToolbar } from '@/components/common/rich-text-editor';
+import {
+  indentOnTab,
+  pastePlainText,
+  RichTextToolbar,
+} from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { IMAGE_ONLY_ACCEPT, imageSrc } from '@/services/curriculum-api';
 
@@ -84,6 +89,86 @@ interface CanvasEditorProps {
   images: Record<string, CanvasImageAsset>;
   /** Stores one picture and resolves with its id once the server has it. */
   onUpload: (file: File) => Promise<{ imageId: string; asset: CanvasImageAsset }>;
+  /**
+   * The items every new canvas in this course starts with, or null while they
+   * load. Leave out, with `onToggleDefault`, to hide the Default button.
+   */
+  defaults?: CanvasItem[] | null;
+  /** Makes an item one of the course's defaults, or stops it being one. */
+  onToggleDefault?: (item: CanvasItem, include: boolean) => Promise<void>;
+}
+
+/**
+ * What a copied item carries: the item, and for a picture the picture itself,
+ * so it can be pasted into a different canvas, which has its own picture pool.
+ */
+interface CanvasClipboard {
+  items: CanvasItem[];
+  assets: Record<string, CanvasImageAsset>;
+}
+
+/** The clipboard format a copied canvas item travels under. */
+const CLIPBOARD_TYPE = 'application/x-fec-canvas-items';
+
+/**
+ * The last thing copied, kept in memory as well, for browsers that will not
+ * carry a custom clipboard format. Shared by every canvas on the page, so an
+ * item copied from one canvas pastes into the next.
+ */
+let lastCopied: { stamp: string; data: CanvasClipboard } | null = null;
+
+/** Reads a copied-items payload, or null when it is not one. */
+function parseClipboard(raw: string): CanvasClipboard | null {
+  try {
+    const value = JSON.parse(raw) as CanvasClipboard;
+    return Array.isArray(value?.items) && value.assets && typeof value.assets === 'object'
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A stored picture as a file, so it can be uploaded into another canvas. */
+function assetToFile(asset: CanvasImageAsset): File {
+  const bytes = Uint8Array.from(atob(asset.data), (c) => c.charCodeAt(0));
+  const extension = asset.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
+  return new File([bytes], asset.fileName ?? `pasted.${extension}`, { type: asset.mimeType });
+}
+
+/** Image files on the clipboard — a screenshot, or a picture copied from a page. */
+function clipboardImages(data: DataTransfer): File[] {
+  const files = Array.from(data.files).filter((file) => file.type.startsWith('image/'));
+  if (files.length > 0) return files;
+  return Array.from(data.items)
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => !!file);
+}
+
+/** True when two numbers are the same once the server has rounded them. */
+const near = (a: unknown, b: unknown) =>
+  typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 0.01 : a === b;
+
+/**
+ * Whether an item still matches its copy in the course defaults. Text is not
+ * compared — a default text box is stored empty — and colours are compared
+ * without regard to case, which the server lowercases.
+ */
+function matchesDefault(item: CanvasItem, saved: CanvasItem): boolean {
+  const a = item as unknown as Record<string, unknown>;
+  const b = saved as unknown as Record<string, unknown>;
+  return Object.keys(a).every((key) => {
+    if (key === 'html') return true;
+    const [x, y] = [a[key], b[key]];
+    if (typeof x === 'string' && typeof y === 'string') return x.toLowerCase() === y.toLowerCase();
+    if (x && y && typeof x === 'object' && typeof y === 'object') {
+      return Object.keys(x).every((k) =>
+        near((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k]),
+      );
+    }
+    return near(x, y);
+  });
 }
 
 type Point = { x: number; y: number };
@@ -98,6 +183,10 @@ type Gesture =
 const HISTORY_LIMIT = 100;
 const HANDLE_PX = 10;
 const ROTATE_OFFSET_PX = 28;
+/** How far the pointer must travel, in screen pixels, before a press becomes a drag. */
+const MOVE_THRESHOLD_PX = 4;
+/** How wide the grab strip around a text box being written in is, in screen pixels. */
+const EDIT_GRAB_PX = 10;
 
 const btn =
   'h-8 min-w-8 gap-1 px-2 text-sm bg-white text-dark-gray hover:bg-light-gray border border-gray-300';
@@ -224,6 +313,7 @@ const CanvasTextContent = ({
       aria-label={editing ? 'Text box' : undefined}
       onInput={emit}
       onBlur={emit}
+      onKeyDown={(e) => indentOnTab(e, emit)}
       onPaste={(e) => pastePlainText(e, emit)}
       data-placeholder={editing ? 'Type here…' : 'Double-click to type'}
       className={`focus:outline-none empty:before:text-gray-400
@@ -238,7 +328,14 @@ const CanvasTextContent = ({
  * dragged, resized, rotated, cropped and styled, with undo/redo. Emits the whole layout on every
  * change; the parent saves it.
  */
-const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps) => {
+const CanvasEditor = ({
+  layout,
+  onChange,
+  images,
+  onUpload,
+  defaults,
+  onToggleDefault,
+}: CanvasEditorProps) => {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
   const scale = box.width > 0 ? box.width / CANVAS_WIDTH : 0;
 
@@ -250,7 +347,9 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   const [dropActive, setDropActive] = useState(false);
   const [shapesOpen, setShapesOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [savingDefault, setSavingDefault] = useState(false);
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -261,6 +360,9 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   useDismiss(adjustRef, adjustOpen, () => setAdjustOpen(false));
 
   const sources = useImageSources(images);
+  /** The newest picture pool, for pastes that finish after an upload. */
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
 
   /**
    * The newest layout, for code that runs outside a render — window drag
@@ -402,7 +504,8 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   useEffect(() => {
     const element = editorRef.current;
     if (!editingId || !element) return;
-    element.focus();
+    // Without preventScroll the browser scrolls the page to the box as it focuses.
+    element.focus({ preventScroll: true });
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
@@ -436,12 +539,26 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   const beginGesture = (event: React.PointerEvent, gesture: Gesture) => {
     event.preventDefault();
     event.stopPropagation();
-    containerRef.current?.focus({ preventScroll: true });
-    const before = layoutRef.current;
     const id = gesture.start.id;
+    // Moving or resizing the box being written in leaves the caret where it is,
+    // so typing carries on once the drag ends.
+    if (id !== editingId) containerRef.current?.focus({ preventScroll: true });
+    const before = layoutRef.current;
+
+    /**
+     * A move only starts once the pointer has travelled a few pixels, so a
+     * click — or the two clicks of a double-click — never nudges the item.
+     */
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let moving = gesture.kind !== 'move';
 
     /** Applies the gesture for the pointer's current position. */
     const onMove = (move: PointerEvent) => {
+      if (!moving) {
+        if (Math.hypot(move.clientX - startX, move.clientY - startY) < MOVE_THRESHOLD_PX) return;
+        moving = true;
+      }
       const point = toCanvas(move.clientX, move.clientY);
       const dx = 'from' in gesture ? point.x - gesture.from.x : 0;
       const dy = 'from' in gesture ? point.y - gesture.from.y : 0;
@@ -553,6 +670,173 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
     void addPictures(files, toCanvas(event.clientX, event.clientY));
   };
 
+  // ---- Clipboard ----
+
+  /** Set by a copy shortcut, and written onto the clipboard by the copy event it triggers. */
+  const pendingCopy = useRef<CanvasClipboard | null>(null);
+  /** Whether the paste event for the latest paste shortcut has arrived. */
+  const pasteHandled = useRef(false);
+
+  /**
+   * Copies the selected item: onto the system clipboard under the canvas's own
+   * format, and into memory. A picture's data goes with it, so it can be pasted
+   * into a canvas that does not have it.
+   */
+  const copySelected = () => {
+    if (!selected) return;
+    const assets: Record<string, CanvasImageAsset> = {};
+    if (selected.kind === 'image' && imagesRef.current[selected.imageId]) {
+      assets[selected.imageId] = imagesRef.current[selected.imageId];
+    }
+    const data: CanvasClipboard = { items: [selected], assets };
+    lastCopied = { stamp: newItemId(), data };
+    pendingCopy.current = data;
+    // Fires the copy event even where nothing on the page is highlighted, which
+    // some browsers otherwise skip. The listener below fills it in.
+    document.execCommand('copy');
+    pendingCopy.current = null;
+  };
+
+  /**
+   * Puts copied items onto this canvas, on top, a step down and right of
+   * anything already in the same spot. A picture this canvas does not hold is
+   * uploaded into it first.
+   */
+  const pasteItems = async (data: CanvasClipboard) => {
+    setError(null);
+    for (const copied of data.items) {
+      let item: CanvasItem = { ...copied, id: newItemId() };
+      if (item.kind === 'image' && !imagesRef.current[item.imageId]) {
+        const asset = data.assets[item.imageId];
+        if (!asset) continue;
+        setUploading((count) => count + 1);
+        try {
+          const { imageId } = await onUpload(assetToFile(asset));
+          item = { ...item, imageId };
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Could not paste that picture');
+          continue;
+        } finally {
+          setUploading((count) => count - 1);
+        }
+      }
+      while (layoutRef.current.items.some((other) => other.x === item.x && other.y === item.y)) {
+        item = { ...item, x: item.x + 16, y: item.y + 16 };
+      }
+      addItem(item);
+    }
+  };
+
+  /**
+   * Handles a paste onto the canvas: copied canvas items first, then pictures
+   * from the computer's clipboard. Returns false if there was nothing to use.
+   */
+  const pasteFrom = (data: DataTransfer): boolean => {
+    const copied = parseClipboard(data.getData(CLIPBOARD_TYPE));
+    if (copied) {
+      void pasteItems(copied);
+      return true;
+    }
+    const files = clipboardImages(data);
+    if (files.length > 0) {
+      void addPictures(files);
+      return true;
+    }
+    // A browser that dropped the custom format still has the marker text.
+    const text = data.getData('text/plain');
+    if (lastCopied && text === `canvas-item:${lastCopied.stamp}`) {
+      void pasteItems(lastCopied.data);
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * The paste shortcut. Most browsers follow it with a paste event, handled
+   * above; where none comes — Safari, with nothing editable focused — the
+   * clipboard is read directly instead (which may ask for permission).
+   */
+  const onPasteShortcut = () => {
+    pasteHandled.current = false;
+    window.setTimeout(async () => {
+      if (pasteHandled.current) return;
+      try {
+        const files: File[] = [];
+        for (const entry of await navigator.clipboard.read()) {
+          const type = entry.types.find((t) => t.startsWith('image/'));
+          if (type) {
+            const blob = await entry.getType(type);
+            files.push(new File([blob], `pasted.${type.split('/')[1]}`, { type }));
+          }
+        }
+        if (files.length > 0) void addPictures(files);
+        else if (lastCopied) void pasteItems(lastCopied.data);
+      } catch {
+        if (lastCopied) void pasteItems(lastCopied.data);
+      }
+    }, 100);
+  };
+
+  // Clipboard events go to the document, not the canvas. They are only taken
+  // while the canvas has focus and nothing editable inside it does — copying or
+  // pasting text in a text box works as normal. Kept in a ref so the listeners,
+  // attached once, see the current selection.
+  const clipboardRef = useRef({ pasteFrom, copySelected });
+  clipboardRef.current = { pasteFrom, copySelected };
+  useEffect(() => {
+    /** True while the canvas, not a field inside it, has the keyboard. */
+    const canvasFocused = () => {
+      const active = document.activeElement as HTMLElement | null;
+      return (
+        !!active &&
+        !!rootRef.current?.contains(active) &&
+        !active.isContentEditable &&
+        !['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)
+      );
+    };
+    const onCopy = (event: ClipboardEvent) => {
+      const data = pendingCopy.current;
+      if (!data || !event.clipboardData) return;
+      event.preventDefault();
+      event.clipboardData.setData(CLIPBOARD_TYPE, JSON.stringify(data));
+      event.clipboardData.setData('text/plain', `canvas-item:${lastCopied?.stamp ?? ''}`);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (!canvasFocused() || !event.clipboardData) return;
+      pasteHandled.current = true;
+      if (clipboardRef.current.pasteFrom(event.clipboardData)) event.preventDefault();
+    };
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('paste', onPaste);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('paste', onPaste);
+    };
+  }, []);
+
+  // ---- Course defaults ----
+
+  const savedDefault = selected ? defaults?.find((item) => item.id === selected.id) : undefined;
+  const defaultState = !savedDefault
+    ? 'off'
+    : selected && matchesDefault(selected, savedDefault)
+      ? 'on'
+      : 'changed';
+
+  /** Adds the selected item to the course defaults, updates its copy there, or takes it out. */
+  const toggleDefault = async () => {
+    if (!selected || !onToggleDefault) return;
+    setSavingDefault(true);
+    setError(null);
+    try {
+      await onToggleDefault(selected, defaultState !== 'on');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the course defaults');
+    } finally {
+      setSavingDefault(false);
+    }
+  };
+
   // ---- Keyboard ----
 
   /** Removes the selected item. */
@@ -573,8 +857,8 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
   /**
    * Keyboard shortcuts: Escape backs out one level, Delete/Backspace removes, Enter starts typing
-   * in a text box, arrows nudge, and Ctrl/⌘ Z/Y/D undo, redo and duplicate. Ignored while typing in
-   * a field.
+   * in a text box, arrows nudge, and Ctrl/⌘ Z/Y/D/C/X/V undo, redo, duplicate, copy, cut and
+   * paste. Ignored while typing in a field.
    */
   const onKeyDown = (event: React.KeyboardEvent) => {
     const target = event.target as HTMLElement;
@@ -601,7 +885,19 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
       redo();
       return;
     }
+    if (command && event.key.toLowerCase() === 'v') {
+      // Left to the browser, which raises the paste event handled above.
+      onPasteShortcut();
+      return;
+    }
     if (!selected) return;
+
+    if (command && (event.key.toLowerCase() === 'c' || event.key.toLowerCase() === 'x')) {
+      event.preventDefault();
+      copySelected();
+      if (event.key.toLowerCase() === 'x') deleteSelected();
+      return;
+    }
 
     if (command && event.key.toLowerCase() === 'd') {
       event.preventDefault();
@@ -701,6 +997,33 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
             onDoubleClick={() => item.kind === 'text' && startEditing(item.id)}
           />
         )}
+
+        {/* While writing, clicks inside the box place the caret, so the box is
+            moved by a strip just outside its edge instead — as in a slide app. */}
+        {editing &&
+          (
+            [
+              { top: -EDIT_GRAB_PX * unit, left: 0, right: 0, height: EDIT_GRAB_PX * unit },
+              { bottom: -EDIT_GRAB_PX * unit, left: 0, right: 0, height: EDIT_GRAB_PX * unit },
+              { left: -EDIT_GRAB_PX * unit, top: 0, bottom: 0, width: EDIT_GRAB_PX * unit },
+              { right: -EDIT_GRAB_PX * unit, top: 0, bottom: 0, width: EDIT_GRAB_PX * unit },
+            ] as CSSProperties[]
+          ).map((edge, index) => (
+            <div
+              key={index}
+              data-testid="canvas-edit-grab"
+              title="Drag to move the text box"
+              style={{ position: 'absolute', ...edge, pointerEvents: 'auto', cursor: 'move' }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                beginGesture(event, {
+                  kind: 'move',
+                  start: item,
+                  from: toCanvas(event.clientX, event.clientY),
+                });
+              }}
+            />
+          ))}
 
         {HANDLES.map((handle) => (
           <div
@@ -980,7 +1303,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
   });
 
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={rootRef} className="flex flex-col gap-2">
       {/* Adding things, and the slide as a whole. */}
       <div className="flex flex-wrap items-center gap-1">
         <input
@@ -999,7 +1322,7 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
         <Button
           onClick={() => fileRef.current?.click()}
           className={btn}
-          title="Upload pictures from your computer — or drag them onto the slide"
+          title="Upload pictures from your computer — or drag or paste them onto the slide"
         >
           <ArrowUpTrayIcon className="h-4 w-4" /> Upload picture
         </Button>
@@ -1222,6 +1545,25 @@ const CanvasEditor = ({ layout, onChange, images, onUpload }: CanvasEditorProps)
 
           <span className="mx-1 h-6 w-px bg-gray-300" />
 
+          {onToggleDefault && (
+            <Button
+              onClick={() => void toggleDefault()}
+              disabled={savingDefault || defaults === null}
+              className={`${btn} ${defaultState === 'on' ? pressed : ''}`}
+              aria-pressed={defaultState === 'on'}
+              title={
+                defaultState === 'on'
+                  ? 'Every new canvas in this course starts with this. Click to stop that.'
+                  : defaultState === 'changed'
+                    ? 'This has changed since it was made a default. Click to update the default.'
+                    : 'Start every new canvas in this course with this' +
+                      (selected.kind === 'text' ? ' (as an empty box of the same size)' : '')
+              }
+            >
+              <StarIcon className="h-4 w-4" />
+              {defaultState === 'changed' ? 'Update default' : 'Default'}
+            </Button>
+          )}
           <Button
             onClick={duplicateSelected}
             className={btn}

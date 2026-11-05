@@ -5,7 +5,13 @@
  * Modified by: Jacob Matthews
  * Date: 2026-09-25
  */
-import { addCanvasImage, emptyCanvas, mergeCanvasLayout } from '@/config/canvas';
+import {
+  addCanvasImage,
+  canvasFromTemplate,
+  mergeCanvasLayout,
+  setTemplateItem,
+  templateItems,
+} from '@/config/canvas';
 import { logger } from '@/config/logger';
 import { normalizeUpload } from '@/config/media-upload';
 import { parseModuleColor } from '@/config/module-colors';
@@ -1348,6 +1354,9 @@ export default class CurriculumService {
     return CurriculumGateway.runTransaction(async (db) => {
       // Elements and quizzes share one sequence, so start after whichever is last.
       const last = await CurriculumGateway.getLastContentOrder(sectionId, db);
+      // A canvas starts with whatever the course's authors marked as defaults.
+      const template =
+        type === 'CANVAS' ? await CurriculumGateway.getCanvasTemplate(section.courseId, db) : null;
       return CurriculumGateway.createElement(
         sectionId,
         {
@@ -1355,9 +1364,9 @@ export default class CurriculumService {
           type,
           // Only meaningful for video, and drives the "hours of video" figure.
           durationMinutes: type === 'YOUTUBE' ? validateMinutes(durationMinutes) || null : null,
-          // A canvas starts blank; pictures, text and shapes are added in the editor.
+          // A canvas starts from the course's defaults — blank if it has none.
           ...(type === 'CANVAS'
-            ? { canvasData: emptyCanvas() as unknown as Prisma.InputJsonValue }
+            ? { canvasData: canvasFromTemplate(template) as unknown as Prisma.InputJsonValue }
             : {}),
         },
         last + 1,
@@ -1485,6 +1494,38 @@ export default class CurriculumService {
       canvasData: canvas as unknown as Prisma.InputJsonValue,
     });
     return { imageId, ...canvas.images[imageId] };
+  }
+
+  /** The default items of the course a canvas belongs to, without their picture data. */
+  static async getCanvasTemplate(courseId: string) {
+    return { items: templateItems(await CurriculumGateway.getCanvasTemplate(courseId)) };
+  }
+
+  /**
+   * Makes one item of a canvas a default for every new canvas in its course, or
+   * stops it being one. Pictures are copied from the canvas's stored pool.
+   */
+  static async setCanvasTemplateItem(
+    elementId: string,
+    courseId: string,
+    item: unknown,
+    include: boolean,
+  ) {
+    const element = await CurriculumGateway.getElementCanvas(elementId);
+    if (!element) throw new NotFoundError(`Element with ID ${elementId} not found`);
+    if (element.type !== 'CANVAS') throw new Error('Only a canvas item can be a default');
+
+    const template = setTemplateItem(
+      await CurriculumGateway.getCanvasTemplate(courseId),
+      item,
+      element.canvasData,
+      include,
+    );
+    await CurriculumGateway.saveCanvasTemplate(
+      courseId,
+      template as unknown as Prisma.InputJsonValue,
+    );
+    return { items: template.items };
   }
 
   /**

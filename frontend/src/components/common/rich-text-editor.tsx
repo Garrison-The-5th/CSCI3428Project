@@ -684,6 +684,44 @@ export function pastePlainText(event: React.ClipboardEvent<HTMLElement>, after: 
   after();
 }
 
+/** What Tab types outside a list. A real tab character collapses to one space in HTML. */
+const TAB_SPACES = '\u00a0\u00a0\u00a0\u00a0';
+
+/**
+ * Tab and Shift+Tab inside an editor, the way a word processor does it.
+ *
+ * In a bullet or numbered list, Tab nests the item one level deeper and
+ * Shift+Tab brings it back out. Anywhere else Tab indents the line with
+ * spaces and Shift+Tab takes back the spaces just before the caret. Without
+ * this, Tab moves focus out of the editor altogether.
+ *
+ * Through the browser's own commands, so each step lands on its undo stack.
+ */
+export function indentOnTab(event: React.KeyboardEvent<HTMLElement>, after: () => void) {
+  if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
+  event.preventDefault();
+
+  const selection = window.getSelection();
+  const anchor = selection?.anchorNode ?? null;
+  const at = anchor instanceof Element ? anchor : (anchor?.parentElement ?? null);
+  const item = at?.closest('li');
+  const inList = !!item && event.currentTarget.contains(item);
+
+  if (inList) {
+    // Alignment turns CSS mode on, and in CSS mode some browsers indent with a
+    // margin the server's allowlist strips. Nested lists survive the round trip.
+    document.execCommand('styleWithCSS', false, 'false');
+    document.execCommand(event.shiftKey ? 'outdent' : 'indent', false);
+  } else if (!event.shiftKey) {
+    document.execCommand('insertText', false, TAB_SPACES);
+  } else if (selection?.isCollapsed && anchor?.nodeType === Node.TEXT_NODE) {
+    const before = (anchor.textContent ?? '').slice(0, selection.anchorOffset);
+    const spaces = /[\u00a0 ]{1,4}$/.exec(before)?.[0].length ?? 0;
+    for (let i = 0; i < spaces; i += 1) document.execCommand('delete', false);
+  }
+  after();
+}
+
 /**
  * A contentEditable text editor with the toolbar above it. `value` is HTML; `onChange` receives the
  * new HTML on every edit.
@@ -716,6 +754,7 @@ const RichTextEditor = ({ value, onChange, placeholder }: RichTextEditorProps) =
         aria-label={placeholder ?? 'Lesson text'}
         onInput={emit}
         onBlur={emit}
+        onKeyDown={(e) => indentOnTab(e, emit)}
         onPaste={(e) => pastePlainText(e, emit)}
         className="rich-text min-h-40 p-3 text-dark-gray focus:outline-none"
         suppressContentEditableWarning

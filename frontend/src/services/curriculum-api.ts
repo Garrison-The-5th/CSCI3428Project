@@ -5,7 +5,12 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import type { CanvasData, CanvasImageAsset, CanvasLayout } from '@/components/canvas/canvas-model';
+import type {
+  CanvasData,
+  CanvasImageAsset,
+  CanvasItem,
+  CanvasLayout,
+} from '@/components/canvas/canvas-model';
 import type { Quiz } from '@/services/quiz-api';
 import HttpHelper from '@/utils/http-helper';
 
@@ -911,6 +916,28 @@ export const curriculumApi = {
       form,
     );
     return response.image;
+  },
+
+  /** The items every new canvas in this canvas's course starts with. */
+  getCanvasTemplate: async (elementId: string): Promise<CanvasItem[]> => {
+    const response = await HttpHelper.get(`curriculum/elements/${elementId}/canvas-template`);
+    return response.items ?? [];
+  },
+
+  /**
+   * Makes one of this canvas's items a default for new canvases in its course (or stops it being
+   * one). Resolves with the course's defaults as they now stand.
+   */
+  setCanvasTemplateItem: async (
+    elementId: string,
+    item: CanvasItem,
+    include: boolean,
+  ): Promise<CanvasItem[]> => {
+    const response = await HttpHelper.put(`curriculum/elements/${elementId}/canvas-template`, {
+      item,
+      include,
+    });
+    return response.items ?? [];
   },
 
   deleteElement: (elementId: string) => HttpHelper.delete(`curriculum/elements/${elementId}`),

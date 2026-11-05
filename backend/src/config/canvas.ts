@@ -370,3 +370,111 @@ export function addCanvasImage(
   images[imageId] = { ...upload, uploadedAt: now.toISOString() };
   return { canvas: { ...current, images }, imageId };
 }
+
+// ---- Course defaults ----
+
+/**
+ * The items an author marked as defaults for a course, and the pictures they
+ * draw from. Every new canvas in the course starts as a copy of this.
+ *
+ * Template items keep the id of the item they were copied from, so the editor
+ * can tell that a selected item is already a default (and whether it has
+ * changed since). A new canvas gives each copy a fresh id.
+ */
+export interface CanvasTemplate {
+  items: CanvasItem[];
+  images: Record<string, CanvasImageAsset>;
+}
+
+/** Whatever is stored as a course's template, well formed. Missing reads as empty. */
+export function storedTemplate(value: unknown): CanvasTemplate {
+  if (!isObject(value)) return { items: [], images: {} };
+  return {
+    items: Array.isArray(value.items) ? (value.items as CanvasItem[]) : [],
+    images: isObject(value.images) ? (value.images as Record<string, CanvasImageAsset>) : {},
+  };
+}
+
+/** The template's pictures, cut down to the ones its items still use. */
+function usedImages(items: CanvasItem[], images: Record<string, CanvasImageAsset>) {
+  const used = new Set(
+    items.filter((item): item is CanvasImageItem => item.kind === 'image').map((i) => i.imageId),
+  );
+  return Object.fromEntries(Object.entries(images).filter(([id]) => used.has(id)));
+}
+
+/**
+ * Adds an item to a course's defaults, or replaces the copy already there, or
+ * takes it out.
+ *
+ * The item comes from the editor, which may be ahead of what is stored, so it
+ * is cleaned exactly as a save would clean it. A picture must already be in the
+ * canvas's stored pool — it is copied from there, never from the request. Text
+ * is dropped: a default text box is an empty box of the same size and style.
+ */
+export function setTemplateItem(
+  template: unknown,
+  rawItem: unknown,
+  canvas: unknown,
+  include: boolean,
+): CanvasTemplate {
+  const current = storedTemplate(template);
+  const source = storedCanvas(canvas);
+
+  if (!isObject(rawItem) || typeof rawItem.id !== 'string' || !ID_PATTERN.test(rawItem.id)) {
+    throw new Error('item must be a canvas item');
+  }
+  const id = rawItem.id;
+
+  if (!include) {
+    const items = current.items.filter((item) => item.id !== id);
+    return { items, images: usedImages(items, current.images) };
+  }
+
+  const cleaned = cleanItem(rawItem, source.images);
+  if (!cleaned) {
+    throw new Error('That item cannot be a default — save the canvas and try again');
+  }
+  const item: CanvasItem = cleaned.kind === 'text' ? { ...cleaned, html: '' } : cleaned;
+
+  const index = current.items.findIndex((existing) => existing.id === id);
+  const items =
+    index === -1
+      ? [...current.items, item]
+      : current.items.map((existing, i) => (i === index ? item : existing));
+  if (items.length > MAX_CANVAS_ITEMS) {
+    throw new Error(`A course may have at most ${MAX_CANVAS_ITEMS} default items`);
+  }
+
+  const images = { ...current.images };
+  if (item.kind === 'image') images[item.imageId] = source.images[item.imageId];
+  const kept = usedImages(items, images);
+  if (Object.keys(kept).length > MAX_CANVAS_IMAGES) {
+    throw new Error(`A course may have at most ${MAX_CANVAS_IMAGES} default pictures`);
+  }
+  const bytes = Object.values(kept).reduce((sum, image) => sum + image.data.length, 0);
+  if (bytes > MAX_CANVAS_IMAGE_BYTES) {
+    throw new Error('The course defaults are full — remove a default picture first');
+  }
+  return { items, images: kept };
+}
+
+/** A new canvas built from a course's defaults: a fresh copy of every item, and its pictures. */
+export function canvasFromTemplate(template: unknown, now = new Date()): CanvasData {
+  const { items, images } = storedTemplate(template);
+  return {
+    ...emptyCanvas(),
+    items: items.map((item) => ({ ...item, id: randomUUID() })),
+    images: Object.fromEntries(
+      Object.entries(usedImages(items, images)).map(([id, image]) => [
+        id,
+        { ...image, uploadedAt: now.toISOString() },
+      ]),
+    ),
+  };
+}
+
+/** The template as the editor sees it: the items only, never the picture data. */
+export function templateItems(template: unknown): CanvasItem[] {
+  return storedTemplate(template).items;
+}

@@ -370,6 +370,26 @@ body {
 .rich-text li {
   margin: 0.15rem 0;
 }
+/* Lists nested with Tab: each level gets its own marker, as in a word processor. */
+.rich-text ul ul,
+.rich-text ol ul {
+  list-style: circle;
+  margin-bottom: 0;
+}
+.rich-text ul ul ul,
+.rich-text ol ul ul,
+.rich-text ol ol ul {
+  list-style: square;
+}
+.rich-text ol ol,
+.rich-text ul ol {
+  list-style: lower-alpha;
+  margin-bottom: 0;
+}
+.rich-text ol ol ol,
+.rich-text ul ol ol {
+  list-style: lower-roman;
+}
 .rich-text blockquote {
   border-left: 3px solid var(--color-navy);
   padding-left: 0.9rem;

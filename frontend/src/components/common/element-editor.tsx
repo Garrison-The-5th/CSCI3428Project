@@ -28,7 +28,7 @@ import { ArrowUpTrayIcon, CheckIcon, TrashIcon } from '@heroicons/react/24/outli
 import { useEffect, useRef, useState } from 'react';
 
 import CanvasEditor from '@/components/canvas/canvas-editor';
-import { CanvasImageAsset, layoutOf } from '@/components/canvas/canvas-model';
+import { CanvasImageAsset, CanvasItem, layoutOf } from '@/components/canvas/canvas-model';
 import EditedTag from '@/components/common/edited-tag';
 import ElementView, { plainPreview } from '@/components/common/element-view';
 import RichTextEditor from '@/components/common/rich-text-editor';
@@ -139,6 +139,24 @@ const ElementEditor = ({
    */
   const [uploaded, setUploaded] = useState<Record<string, CanvasImageAsset>>({});
   const canvasImages = { ...element.canvasData?.images, ...uploaded };
+
+  /**
+   * The items every new canvas in this course starts with — null while they
+   * load, and left empty if they cannot be loaded, so the canvas still works.
+   */
+  const [canvasDefaults, setCanvasDefaults] = useState<CanvasItem[] | null>(null);
+  useEffect(() => {
+    if (element.type !== 'CANVAS') return;
+    let live = true;
+    setCanvasDefaults(null);
+    curriculumApi
+      .getCanvasTemplate(element.id)
+      .then((items) => live && setCanvasDefaults(items))
+      .catch(() => live && setCanvasDefaults([]));
+    return () => {
+      live = false;
+    };
+  }, [element.id, element.type]);
 
   // Pull in changes that came from elsewhere (a reorder, another tab).
   useEffect(() => {
@@ -325,6 +343,17 @@ const ElementEditor = ({
               const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(element.id, file);
               setUploaded((prev) => ({ ...prev, [imageId]: asset }));
               return { imageId, asset };
+            }}
+            defaults={canvasDefaults}
+            onToggleDefault={async (item, include) => {
+              setCanvasDefaults(
+                await curriculumApi.setCanvasTemplateItem(element.id, item, include),
+              );
+              onNotify?.(
+                include
+                  ? 'New canvases in this course will start with this'
+                  : 'Removed from the course defaults',
+              );
             }}
           />
         )}
