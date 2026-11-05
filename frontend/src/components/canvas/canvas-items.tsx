@@ -223,8 +223,11 @@ export const CanvasSurface = ({
   className?: string;
   surfaceProps?: React.HTMLAttributes<HTMLDivElement> & { ref?: React.Ref<HTMLDivElement> };
 }) => (
+  // `overflow-clip`, not `overflow-hidden`: a hidden box can still be scrolled
+  // by the browser, and focusing a text box or moving its caret near an edge
+  // did exactly that — the whole slide slid about inside its frame.
   <div
-    className={`relative overflow-hidden ${className ?? ''}`}
+    className={`relative overflow-clip ${className ?? ''}`}
     style={{ width: CANVAS_WIDTH * scale, height: CANVAS_HEIGHT * scale }}
   >
     <div

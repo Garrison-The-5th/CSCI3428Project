@@ -7,6 +7,7 @@
  */
 import {
   addCanvasImage,
+  canvasFromTemplate,
   CanvasImageItem,
   CanvasShapeItem,
   CanvasTextItem,
@@ -14,6 +15,8 @@ import {
   MAX_CANVAS_IMAGES,
   MAX_CANVAS_ITEMS,
   mergeCanvasLayout,
+  setTemplateItem,
+  templateItems,
 } from '@/config/canvas';
 
 const NOW = new Date('2026-10-15T12:00:00Z');
@@ -209,5 +212,66 @@ describe('addCanvasImage', () => {
       stored = addCanvasImage(stored, upload, NOW).canvas;
     }
     expect(() => addCanvasImage(stored, upload, NOW)).toThrow(/at most/);
+  });
+});
+
+describe('course canvas defaults', () => {
+  const textBox = {
+    id: 't1',
+    kind: 'text',
+    html: '<p>Title here</p>',
+    x: 40,
+    y: 30,
+    width: 500,
+    height: 90,
+    padding: 12,
+    background: '#eeeeee',
+  };
+  const picture = { id: 'p1', kind: 'image', imageId: 'pic', x: 0, y: 0, width: 50, height: 50 };
+
+  it('keeps a text box at its size and style but empties it', () => {
+    const template = setTemplateItem(null, textBox, emptyCanvas(), true);
+    expect(template.items).toHaveLength(1);
+    const [item] = template.items as CanvasTextItem[];
+    expect(item).toMatchObject({ id: 't1', width: 500, height: 90, padding: 12, html: '' });
+    expect(item.background).toBe('#eeeeee');
+  });
+
+  it('replaces an item already in the defaults rather than adding it twice', () => {
+    const once = setTemplateItem(null, textBox, emptyCanvas(), true);
+    const twice = setTemplateItem(once, { ...textBox, width: 300 }, emptyCanvas(), true);
+    expect(twice.items).toHaveLength(1);
+    expect(twice.items[0].width).toBe(300);
+  });
+
+  it('copies a picture from the canvas pool, and drops it when the item goes', () => {
+    const added = setTemplateItem(null, picture, withPicture(), true);
+    expect(Object.keys(added.images)).toEqual(['pic']);
+    const removed = setTemplateItem(added, { id: 'p1' }, withPicture(), false);
+    expect(removed.items).toHaveLength(0);
+    expect(removed.images).toEqual({});
+  });
+
+  it('refuses a picture the canvas has not stored', () => {
+    expect(() => setTemplateItem(null, picture, emptyCanvas(), true)).toThrow();
+  });
+
+  it('builds a new canvas with fresh ids and the pictures it needs', () => {
+    const template = setTemplateItem(
+      setTemplateItem(null, picture, withPicture(), true),
+      textBox,
+      emptyCanvas(),
+      true,
+    );
+    const canvas = canvasFromTemplate(template, NOW);
+    expect(canvas.items.map((item) => item.kind)).toEqual(['image', 'text']);
+    expect(canvas.items.map((item) => item.id)).not.toContain('p1');
+    expect(canvas.images.pic.uploadedAt).toBe(NOW.toISOString());
+    // What the editor is sent carries no picture data.
+    expect(JSON.stringify(templateItems(template))).not.toContain('AAAA');
+  });
+
+  it('starts blank when the course has no defaults', () => {
+    expect(canvasFromTemplate(null)).toEqual(emptyCanvas());
   });
 });

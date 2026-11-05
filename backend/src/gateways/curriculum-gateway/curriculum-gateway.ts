@@ -1023,6 +1023,24 @@ export default class CurriculumGateway {
     });
   }
 
+  /** The items a course's new canvases start with, or null if it has none. */
+  static async getCanvasTemplate(courseId: string, db: Db = prisma) {
+    const row = await db.courseCanvasTemplate.findUnique({
+      where: { courseId },
+      select: { data: true },
+    });
+    return row?.data ?? null;
+  }
+
+  /** Replaces a course's canvas defaults. */
+  static saveCanvasTemplate(courseId: string, data: Prisma.InputJsonValue) {
+    return prisma.courseCanvasTemplate.upsert({
+      where: { courseId },
+      create: { courseId, data },
+      update: { data },
+    });
+  }
+
   /** An element's ids only — enough to locate it and check access to its course. */
   static getElementById(id: string) {
     return prisma.element.findUnique({

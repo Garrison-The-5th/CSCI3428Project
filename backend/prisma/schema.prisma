@@ -238,6 +238,8 @@ model Course {
   /// Other courses' maps linked into this one, and this map linked into others.
   mapSubgraphs    CourseMapSubgraph[] @relation("SubgraphOwner")
   mapLinkedInto   CourseMapSubgraph[] @relation("SubgraphSource")
+  /// The items every new canvas in this course starts with. See CourseCanvasTemplate.
+  canvasTemplate  CourseCanvasTemplate?
 
   @@index([kind])
   @@index([createdById])
@@ -256,6 +258,23 @@ model Course {
 /// The cost is that snapshots carry their elements' base64 media, so they are
 /// large. That is bounded by the retention sweep, which keeps only the live
 /// version and whatever was superseded inside the archive window.
+/// The items an author marked as defaults for new canvases in one course.
+///
+/// Its own table rather than a column on Course because it carries pictures as
+/// base64, and Course rows are read whole all over the app — a column would
+/// drag megabytes into every course listing. Only the canvas editor and the
+/// creation of a new canvas ever read it.
+///
+/// `data` is { items, images } in the same shape as a canvas's own JSON (see
+/// backend/src/config/canvas.ts). Items keep the id of the item they were copied
+/// from, which is how the editor knows a selected item is already a default.
+model CourseCanvasTemplate {
+  courseId  String   @id
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
 model CoursePublication {
   id            String    @id @default(uuid())
   courseId      String
