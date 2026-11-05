@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-11-05-pr42072850150-tour-controller-reeval-still-safe.sast.json",
+  "version": 1,
+  "timestamp": "2026-11-05T17:30:48.018Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "2.0.0",
+    "invocation_id": "42072850150"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:c17e3ec627f6",
+        "location": {
+          "file": "backend/src/controllers/tour-controller/tour-controller.ts",
+          "start_line": 53,
+          "end_line": 53,
+          "commit_sha": "68a75be1dd1d2079c1f50347a2925fee5e61ad89"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Not exposed: REEVALUATE (touched) — tour-controller.ts was edited by the prior security triage run (commit aa33aa8) which only added the inline `// nosemgrep:` marker on line 52 above the sink; the sink itself and its callee are unchanged. Re-verified against current code: at tour-controller.ts:53, `res.send(await TourService.save(req.user!.id, req.body))` sends the return of TourService.save (tour-service.ts:58-65), shaped `{ status: TourStatus, step: number, tutorialCourseId: string | null }`. TourService.parse (tour-service.ts:68-85) strict-validates `status` with `STATUSES.includes(status)` against the Prisma TourStatus enum and coerces `step` through `boundedInteger(step, { min: 0, max: TOUR_STEP_COUNT - 1 })`; `tutorialCourseId` is a server-computed id from `DefaultTutorialService.id()`. No `req.body` string reaches the response. Express `res.send` on an object serialises to JSON with Content-Type application/json, which browsers cannot render as HTML. Original disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-02-03",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
