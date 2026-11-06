@@ -1,0 +1,44 @@
+{
+  "@context": "https://github.com/TTGteams/Learning-App/.security/SCHEMA-sast.md",
+  "@id": "https://github.com/TTGteams/Learning-App/.security/sast/2026-11-05-pr42100037066-curriculum-controller-reeval-still-safe.sast.json",
+  "version": 1,
+  "timestamp": "2026-11-05T20:15:37.768Z",
+  "author": "claude-security-agent@ttgteams.com",
+  "agent": {
+    "name": "claude-security-agent",
+    "model": "claude-opus-4-7",
+    "version": "2.0.0",
+    "invocation_id": "42100037066"
+  },
+  "review": {
+    "reviewer": null,
+    "reviewed_at": null,
+    "decision": null,
+    "notes": null
+  },
+  "statements": [
+    {
+      "finding": {
+        "rule_id": "javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+        "tool": "semgrep",
+        "tool_version": "1.163.0",
+        "sarif_fingerprint": "local-v1:6794ce6a69ee",
+        "location": {
+          "file": "backend/src/controllers/curriculum-controller/curriculum-controller.ts",
+          "start_line": 539,
+          "end_line": 539,
+          "commit_sha": "7b75b750257909e126c317b78eb79fe8eafa1022"
+        }
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Not exposed: REEVALUATE (touched) — curriculum-controller.ts was edited by the merged canvas-template PR (two new routes appended near line 914+, unrelated to this sink), so the standing not_affected needs re-verification. Re-verified: the sink at line 539 is unchanged in shape — `res.send(result)` where `result` is either EditLeaseService.release (edit-lease-service.ts:84-87, returns `{ released: boolean }` from `count > 0`) or EditLeaseService.releaseAll (edit-lease-service.ts:90-93, returns `{ released: number }` from a Prisma `updateMany` count). Neither payload interpolates any user-supplied string — the shape is a single literal key and a server-computed primitive. Express `res.send` on an object serialises to JSON with Content-Type application/json, which browsers cannot render as HTML. The nosemgrep marker on line 538 is intact. Original disposition re-confirmed with a fresh 90-day window.",
+      "confidence": 90,
+      "owner": "rware@ttgteams.com",
+      "reevaluate_after": "2027-02-03",
+      "references": [
+        "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write"
+      ]
+    }
+  ]
+}
