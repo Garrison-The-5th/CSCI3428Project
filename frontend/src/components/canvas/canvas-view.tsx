@@ -118,7 +118,9 @@ const CanvasView = ({ data, fill = false, onTextClick }: CanvasViewProps) => {
         <CanvasSurface
           scale={scale}
           background={layout.background}
-          className="rounded-lg ring-1 ring-gray-300"
+          // On the player's stage the card is the slide's frame; a ring of its
+          // own would draw a second box inside it.
+          className={fill ? undefined : 'rounded-lg ring-1 ring-gray-300'}
         >
           {layout.items.map((item) => (
             <StaticCanvasItem
