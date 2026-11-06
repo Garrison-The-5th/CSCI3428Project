@@ -11,10 +11,10 @@
     "invocation_id": "42100037066"
   },
   "review": {
-    "reviewer": null,
-    "reviewed_at": null,
-    "decision": null,
-    "notes": null
+    "reviewer": "Jacob.Matthews@TTGTeams.com",
+    "reviewed_at": "2026-11-06T00:21:05Z",
+    "decision": "approved",
+    "notes": "<!--"
   },
   "statements": [
     {
