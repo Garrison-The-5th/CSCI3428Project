@@ -742,6 +742,12 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
       return next;
     });
 
+  /** A slide with something on it, which gets a stage of its own shape. See the player card. */
+  const slideStage =
+    selection?.kind === 'element' &&
+    selection.element.type === 'CANVAS' &&
+    !!selection.element.canvasData?.items?.length;
+
   return (
     <div className={preview ? 'flex flex-col' : 'page-container flex flex-col'}>
       {!preview && (
@@ -759,11 +765,17 @@ const CoursePlayer = ({ previewCourse, preview = false }: CoursePlayerProps) => 
         {/* min-w-0 lets this column shrink; without it wide content stretches the
             grid track and pushes the content rail off screen. */}
         <div className="flex min-w-0 flex-col gap-6">
-          <Card className="bg-light-gray shadow-sm">
+          {/* A slide is the one item that does not take the fixed stage: the card
+              takes the slide's own 16:9 shape instead, with no padding, so the
+              slide fills it edge to edge rather than sitting in a second box. */}
+          <Card className={`bg-light-gray shadow-sm ${slideStage ? 'overflow-hidden' : ''}`}>
             {/* min-h-0 on the children is what lets them scroll inside the stage
                 rather than stretching it — a flex item defaults to min-height:auto,
                 which refuses to shrink below its content. */}
-            <CardContent className={`flex flex-col p-4 ${STAGE_HEIGHT}`} data-tour="player-stage">
+            <CardContent
+              className={`flex flex-col ${slideStage ? 'aspect-video p-0' : `p-4 ${STAGE_HEIGHT}`}`}
+              data-tour="player-stage"
+            >
               {selection === null ? (
                 <p className="py-16 text-center text-dark-gray">This course has no content yet.</p>
               ) : selection.kind === 'quiz' ? (
