@@ -58,6 +58,7 @@ import {
   CanvasLayout,
   CanvasTextItem,
   cropBox,
+  growTextBox,
   Handle,
   HANDLES,
   newImage,
@@ -74,11 +75,7 @@ import {
 } from '@/components/canvas/canvas-model';
 import { useBoxSize, useImageSources } from '@/components/canvas/canvas-view';
 import ColorPicker from '@/components/common/color-picker';
-import {
-  indentOnTab,
-  pastePlainText,
-  RichTextToolbar,
-} from '@/components/common/rich-text-editor';
+import { indentOnTab, pastePlainText, RichTextToolbar } from '@/components/common/rich-text-editor';
 import { Button } from '@/components/ui/button';
 import { IMAGE_ONLY_ACCEPT, imageSrc } from '@/services/curriculum-api';
 
@@ -514,13 +511,16 @@ const CanvasEditor = ({
     selection?.addRange(range);
   }, [editingId]);
 
-  /** Typing grows the box to fit, so text never spills out under whatever is below it. */
+  /**
+   * Typing grows the box to fit, so text never spills out under whatever is below it — and pushes
+   * it up rather than off the bottom of the slide. See `growTextBox`.
+   */
   const onTextHtml = (id: string, html: string, contentHeight: number) => {
     const item = layoutRef.current.items.find((candidate) => candidate.id === id);
     if (!item || item.kind !== 'text') return;
-    const height = Math.max(item.height, Math.ceil(contentHeight));
-    if (html === item.html && height === item.height) return;
-    replaceItem(id, { html, height }, false);
+    const grown = growTextBox(item, contentHeight);
+    if (html === item.html && !grown) return;
+    replaceItem(id, { html, ...grown }, false);
   };
 
   // ---- Pointer gestures ----

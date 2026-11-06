@@ -6,9 +6,11 @@
  * Date: 2026-10-15
  */
 import {
+  CANVAS_HEIGHT,
   CanvasImageItem,
   CanvasItem,
   cropBox,
+  growTextBox,
   HANDLES,
   hexToRgb,
   layoutOf,
@@ -203,5 +205,46 @@ describe('new items and stored data', () => {
     expect(hexToRgb('#1f4e79')).toEqual({ r: 31, g: 78, b: 121 });
     expect(rgbToHex(31, 78, 121)).toBe('#1f4e79');
     expect(rgbToHex(300, -5, 12.6)).toBe('#ff000d');
+  });
+});
+
+describe('growTextBox', () => {
+  const box = { x: 100, y: 100, width: 320, height: 80, rotation: 0 };
+
+  it('does nothing when the text already fits', () => {
+    expect(growTextBox(box, 60)).toBeNull();
+    expect(growTextBox(box, 80)).toBeNull();
+  });
+
+  it('grows downward from the top edge while there is room', () => {
+    expect(growTextBox(box, 120)).toEqual({ x: 100, y: 100, width: 320, height: 120 });
+  });
+
+  it('is pushed up instead of growing off the bottom of the slide', () => {
+    const low = { ...box, y: CANVAS_HEIGHT - 80 };
+    const grown = growTextBox(low, 200)!;
+    expect(grown.height).toBe(200);
+    expect(grown.y + grown.height).toBe(CANVAS_HEIGHT);
+  });
+
+  it('stops at the top of the slide when the text is taller than it', () => {
+    const grown = growTextBox({ ...box, y: 300 }, CANVAS_HEIGHT + 100)!;
+    expect(grown.y).toBe(0);
+    expect(grown.height).toBe(CANVAS_HEIGHT + 100);
+  });
+
+  it('keeps the top edge of a rotated box in place as it grows', () => {
+    const turned = { ...box, rotation: 30 };
+    const grown = growTextBox(turned, 140)!;
+    // The top edge's midpoint, before and after, in slide coordinates.
+    const topMid = (b: { x: number; y: number; width: number; height: number }) => {
+      const r = (30 * Math.PI) / 180;
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      const h = b.height / 2;
+      return { x: cx + h * Math.sin(r), y: cy - h * Math.cos(r) };
+    };
+    expect(topMid(grown).x).toBeCloseTo(topMid(turned).x, 1);
+    expect(topMid(grown).y).toBeCloseTo(topMid(turned).y, 1);
   });
 });

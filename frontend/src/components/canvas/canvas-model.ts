@@ -483,6 +483,39 @@ function placeResized(
   return { x: r2(cx - width / 2), y: r2(cy - height / 2), width: r2(width), height: r2(height) };
 }
 
+/**
+ * Grows a text box to fit what has been typed into it, keeping it on the slide.
+ *
+ * The box only ever gets taller here — shrinking is left to the author's own
+ * resize, so deleting a line never undoes a size they chose. It grows from its
+ * top edge (for a rotated box too, which a plain height change would shift,
+ * since rotation turns about the centre). Once its bottom reaches the slide's
+ * edge it is pushed up instead, as far as the top of the slide; only text
+ * taller than the whole slide runs off it.
+ *
+ * Returns null when the box already fits.
+ */
+export function growTextBox(
+  box: Box,
+  contentHeight: number,
+): Pick<Box, 'x' | 'y' | 'width' | 'height'> | null {
+  const height = Math.max(box.height, Math.ceil(contentHeight));
+  if (height === box.height) return null;
+
+  const grown = placeResized(box, { hx: 0, hy: 1 }, box.width, height);
+
+  // How far the rotated box reaches above and below its centre.
+  const radians = (box.rotation * Math.PI) / 180;
+  const reach =
+    (Math.abs(box.width * Math.sin(radians)) + Math.abs(height * Math.cos(radians))) / 2;
+  const centre = grown.y + height / 2;
+  const below = centre + reach - CANVAS_HEIGHT;
+  const above = centre - reach;
+  const lift = below > 0 ? Math.max(0, Math.min(below, above)) : 0;
+
+  return { ...grown, y: r2(grown.y - lift) };
+}
+
 /** Never crop away more than this of the picture on either axis. */
 const MAX_CROP = 0.95;
 
