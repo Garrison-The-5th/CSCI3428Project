@@ -114,7 +114,7 @@ export function AdminPage() {
               data={table}
               highlightOnHover
               layout="fixed"
-              styles={{thead: {backgroundColor: 'var(--mantine-color-gray-1)'}}}
+              styles={{thead: {backgroundColor: 'light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-6))'}}}
             />
           </Table.ScrollContainer>
           {!_words.length && (

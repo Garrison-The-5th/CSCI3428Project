@@ -7,7 +7,7 @@ import {Box, Container, Text, Title} from '@mantine/core'
  */
 export function FAQ() {
   return (
-    <Box bg="gray.3" mih="100vh">
+    <Box bg="light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-8))" mih="100vh">
       <Container p={20} size="md">
         <Title order={1} c="blue.6">
           Frequently Asked Questions
