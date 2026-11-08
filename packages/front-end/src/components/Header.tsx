@@ -4,8 +4,18 @@
  * Author: Jack Greenlaw
  * Edits: Alison Cook
  */
-import {Burger, Container, Group, Stack, Text} from '@mantine/core'
+import {
+  ActionIcon,
+  Burger,
+  Container,
+  Group,
+  Stack,
+  Text,
+  useComputedColorScheme,
+  useMantineColorScheme
+} from '@mantine/core'
 import {useDisclosure} from '@mantine/hooks'
+import {MoonIcon, SunIcon} from '@phosphor-icons/react'
 import {Link, useLocation} from 'react-router'
 
 import classes from '@/styles/HeaderStyle.module.css'
@@ -14,7 +24,11 @@ import {Dictionary} from './Dictionary'
 const links = [
   {link: '/', mikmaq: "Apaja'si Nikantuk", english: 'Home'},
   {link: '/matching-game', mikmaq: 'Klusuwaqnminal', english: 'Word Match'},
-  {link: '/eskasoni-island-game', mikmaq: "Te'puljwe'kati Waisisk", english: 'Goat Island Animals'},
+  {
+    link: '/eskasoni-island-game',
+    mikmaq: "Te'puljwe'kati Waisisk",
+    english: 'Goat Island Animals'
+  },
   // No Mi'kmaq title yet for this game, so only the English name is shown
   {link: '/sentence-builder-game', mikmaq: '', english: 'Sentence Builder'},
   {link: '/admin', mikmaq: "Nikana'tu'tite'wk", english: 'Admin'}
@@ -29,6 +43,11 @@ const links = [
 export function Header() {
   const location = useLocation()
   const [opened, {toggle}] = useDisclosure(false)
+  const {setColorScheme} = useMantineColorScheme()
+  const computedColorScheme = useComputedColorScheme('light', {
+    getInitialValueInEffect: true
+  })
+  const isDark = computedColorScheme === 'dark'
 
   const items = links.map(link => (
     <Link
@@ -58,7 +77,17 @@ export function Header() {
           {items}
         </Group>
         <Burger opened={opened} onClick={toggle} hiddenFrom="xs" size="sm" />
-        <Dictionary />
+        <Group gap="xs">
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            onClick={() => setColorScheme(isDark ? 'light' : 'dark')}
+          >
+            {isDark ? <SunIcon size={20} /> : <MoonIcon size={20} />}
+          </ActionIcon>
+          <Dictionary />
+        </Group>
       </Container>
     </header>
   )
