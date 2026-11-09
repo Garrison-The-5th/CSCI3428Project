@@ -54,15 +54,18 @@ export function Dictionary() {
 
   return (
     <>
-      <Button variant="default" onClick={open} leftSection={<BooksIcon size={20} />} h="auto" p="4px 16px">
-        <Stack gap={0} align="center" p="4px">
-          <Text size="sm" fw={500}>
-            Kllusuwaqnn Kwilmumkl
-          </Text>
-          <Text size="12px" style={{opacity: 0.8}}>
-            Dictionary
-          </Text>
-        </Stack>
+      <Button variant="default" onClick={open} aria-label="Dictionary" h={48} px="sm">
+        <Group gap="xs" wrap="nowrap">
+          <BooksIcon size={20} />
+          <Stack gap={0} align="center" visibleFrom="md">
+            <Text size="sm" fw={500} style={{whiteSpace: 'nowrap'}}>
+              Kllusuwaqnn Kwilmumkl
+            </Text>
+            <Text size="12px" style={{opacity: 0.8}}>
+              Dictionary
+            </Text>
+          </Stack>
+        </Group>
       </Button>
       <Modal
         opened={opened}

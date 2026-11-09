@@ -77,10 +77,10 @@ export function Header() {
           {items}
         </Group>
         <Burger opened={opened} onClick={toggle} hiddenFrom="xs" size="sm" />
-        <Group gap="xs">
+        <Group gap="xs" wrap="nowrap" style={{flexShrink: 0}}>
           <ActionIcon
             variant="default"
-            size="lg"
+            size={48}
             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             onClick={() => setColorScheme(isDark ? 'light' : 'dark')}
           >
