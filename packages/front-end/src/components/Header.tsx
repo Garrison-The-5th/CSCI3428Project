@@ -5,20 +5,17 @@
  * Edits: Alison Cook
  */
 import {
-  ActionIcon,
   Burger,
   Container,
   Group,
   Stack,
-  Text,
-  useComputedColorScheme,
-  useMantineColorScheme
+  Text
 } from '@mantine/core'
 import {useDisclosure} from '@mantine/hooks'
-import {MoonIcon, SunIcon} from '@phosphor-icons/react'
 import {Link, useLocation} from 'react-router'
 
 import classes from '@/styles/HeaderStyle.module.css'
+import {ColorSchemeToggle} from './ColorSchemeToggle'
 import {Dictionary} from './Dictionary'
 
 const links = [
@@ -43,11 +40,6 @@ const links = [
 export function Header() {
   const location = useLocation()
   const [opened, {toggle}] = useDisclosure(false)
-  const {setColorScheme} = useMantineColorScheme()
-  const computedColorScheme = useComputedColorScheme('light', {
-    getInitialValueInEffect: true
-  })
-  const isDark = computedColorScheme === 'dark'
 
   const items = links.map(link => (
     <Link
@@ -78,14 +70,7 @@ export function Header() {
         </Group>
         <Burger opened={opened} onClick={toggle} hiddenFrom="xs" size="sm" />
         <Group gap="xs" wrap="nowrap" style={{flexShrink: 0}}>
-          <ActionIcon
-            variant="default"
-            size={48}
-            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            onClick={() => setColorScheme(isDark ? 'light' : 'dark')}
-          >
-            {isDark ? <SunIcon size={20} /> : <MoonIcon size={20} />}
-          </ActionIcon>
+          <ColorSchemeToggle />
           <Dictionary />
         </Group>
       </Container>
