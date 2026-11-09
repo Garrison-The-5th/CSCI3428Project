@@ -23,6 +23,7 @@ import {useLoaderData} from 'react-router'
 
 import {wordsLoader} from '@/router/words.loader'
 import {toStorageUrl} from '@/utils'
+import {ColorSchemeToggle} from './ColorSchemeToggle'
 import {Flashcards} from './Flashcards'
 
 export function Dictionary() {
@@ -72,6 +73,7 @@ export function Dictionary() {
         onClose={onClose}
         title={
           <Group gap="sm">
+            <ColorSchemeToggle />
             <Text fw="bold">Kllusuwaqnn Kwilmumkl - Dictionary</Text>
             <Badge variant="light">{words.length} words</Badge>
           </Group>
