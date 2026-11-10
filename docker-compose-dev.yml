@@ -76,6 +76,10 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-learningapp}
       KEYCLOAK_SERVICE_CLIENT_ID: ${KEYCLOAK_SERVICE_CLIENT_ID:-}
       KEYCLOAK_SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICE_CLIENT_SECRET:-}
+      CENTRAL_PROFILE_URL: ${CENTRAL_PROFILE_URL:-}
+      CENTRAL_PROFILE_TOKEN_URL: ${CENTRAL_PROFILE_TOKEN_URL:-}
+      CENTRAL_PROFILE_CLIENT_ID: ${CENTRAL_PROFILE_CLIENT_ID:-}
+      CENTRAL_PROFILE_CLIENT_SECRET: ${CENTRAL_PROFILE_CLIENT_SECRET:-}
       # Security switches — see docs/security-follow-ups.md.
       # Refuse a sign-in that would claim a never-used record with an unverified
       # email. Turn on once Keycloak verifies emails.
