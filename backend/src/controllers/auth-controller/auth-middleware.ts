@@ -137,6 +137,9 @@ export async function authenticateAndAttachUser(
     const emailVerified = decoded.email_verified === true;
     const subject = decoded.sub as string | undefined;
     const name = decoded.name as string | undefined;
+    // What the person entered into Keycloak, for their central profile.
+    const givenName = decoded.given_name as string | undefined;
+    const familyName = decoded.family_name as string | undefined;
     // Only roles on this app's own client count. Realm roles are deliberately
     // ignored: the realm is shared with other applications, and a realm-wide
     // `admin` granted for one of them must not make somebody an admin here.
@@ -176,7 +179,14 @@ export async function authenticateAndAttachUser(
     };
 
     try {
-      req.user = await AuthService.resolveSignedInUser({ subject, email, emailVerified, name });
+      req.user = await AuthService.resolveSignedInUser({
+        subject,
+        email,
+        emailVerified,
+        name,
+        givenName,
+        familyName,
+      });
     } catch (error) {
       if (error instanceof IdentityConflictError) {
         return res.status(403).send({ errorMessage: error.message });

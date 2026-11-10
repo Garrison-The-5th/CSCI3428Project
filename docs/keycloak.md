@@ -205,3 +205,27 @@ edit that course but not create their own, and is set on the course itself.
 Someone must have signed in to the app at least once before they can be made
 an admin — until then they have no Keycloak account to give the role to. An
 admin cannot remove their own access; another admin has to.
+
+## Central profile
+
+On someone's first sign-in (no row bound to their Keycloak account yet), the
+backend calls the central profile service's `POST /persons/resolve` with their
+Keycloak id, first and last name and email from the token, so everyone who
+uses the app has a central profile. A @ttgteams.com address is sent as
+`work_email`, anything else as `email`. Returning users are not sent again.
+
+If central cannot be reached the sign-in fails and the next request tries
+again. A 409 (the email already belongs to another person in central) is logged
+and the sign-in goes ahead.
+
+It needs a service-account client in the realm with central's `person.write`
+role, and these in Infisical:
+
+```
+CENTRAL_PROFILE_URL=http://central-profile-backend-service.central-profile.svc
+CENTRAL_PROFILE_TOKEN_URL=https://auth.ttgteams.com/realms/central/protocol/openid-connect/token   # central-staging in staging
+CENTRAL_PROFILE_CLIENT_ID=<the client>
+CENTRAL_PROFILE_CLIENT_SECRET=<its secret>
+```
+
+Without them the call is skipped, which is what local development wants.
