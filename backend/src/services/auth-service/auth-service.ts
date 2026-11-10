@@ -279,6 +279,15 @@ export default class AuthService {
       }
     }
 
+    /*
+      Already bound to this very account: another request from the same first
+      sign-in created the row after the subject lookup above missed it. Nothing
+      is being claimed, so the unverified-claim check below does not apply.
+      Falling through to it answered that person's own requests with a 403
+      whenever REQUIRE_VERIFIED_EMAIL was on, at random, depending on timing.
+    */
+    if (existing.keycloakSubject === claims.subject) return existing;
+
     if (existing.keycloakSubject && existing.keycloakSubject !== claims.subject) {
       logSecurityEvent('auth.failure', {
         userId: existing.id,

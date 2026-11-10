@@ -131,6 +131,23 @@ describe('resolveSignedInUser — several requests on one first sign-in', () => 
     expect(user).toMatchObject({ id: 42 });
   });
 
+  /**
+   * The other side of that race: the subject lookup misses, then the winner
+   * commits, then the email lookup finds the winner's row. That row is theirs,
+   * so refusing it as an unverified claim would lock them out of their own account.
+   */
+  it('hands over its own new row, unverified, with REQUIRE_VERIFIED_EMAIL on', async () => {
+    process.env.REQUIRE_VERIFIED_EMAIL = 'true';
+    gateway.getUserByEmail.mockResolvedValue(
+      row({ id: 42, keycloakSubject: 'sub-ada', lastSignInAt: null }),
+    );
+
+    const user = await AuthService.resolveSignedInUser(claims({ emailVerified: false }));
+
+    expect(user).toMatchObject({ id: 42 });
+    expect(gateway.bindSubject).not.toHaveBeenCalled();
+  });
+
   it('still fails on any other database error', async () => {
     gateway.createUser.mockRejectedValue(new Error('connection lost'));
 
