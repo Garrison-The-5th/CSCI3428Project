@@ -6,6 +6,7 @@
  */
 import {
   Burger,
+  Collapse,
   Container,
   Group,
   Stack,
@@ -39,12 +40,14 @@ const links = [
  */
 export function Header() {
   const location = useLocation()
-  const [opened, {toggle}] = useDisclosure(false)
+  const [opened, {toggle, close}] = useDisclosure(false)
 
-  const items = links.map(link => (
+  const renderLinks = (onClick?: () => void) =>
+    links.map(link => (
     <Link
       key={link.link}
       to={link.link}
+      onClick={onClick}
       className={classes.link}
       data-active={location.pathname === link.link || undefined}
     >
@@ -61,19 +64,24 @@ export function Header() {
         )}
       </Stack>
     </Link>
-  ))
+    ))
   return (
     <header className={classes.header}>
       <Container size="lg" className={classes.inner}>
-        <Group gap={8} visibleFrom="xs">
-          {items}
+        <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" aria-label="Toggle navigation" />
+        <Group gap={4} wrap="nowrap" visibleFrom="md">
+          {renderLinks()}
         </Group>
-        <Burger opened={opened} onClick={toggle} hiddenFrom="xs" size="sm" />
         <Group gap="xs" wrap="nowrap" style={{flexShrink: 0}}>
           <ColorSchemeToggle />
           <Dictionary />
         </Group>
       </Container>
+      <Collapse in={opened} hiddenFrom="md" className={classes.menu}>
+        <Stack gap={4} p="sm">
+          {renderLinks(close)}
+        </Stack>
+      </Collapse>
     </header>
   )
 }
