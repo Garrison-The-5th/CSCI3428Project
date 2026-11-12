@@ -9,6 +9,10 @@
 import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
 import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
+import CentralProfileGateway, {
+  CentralProfileError,
+  PersonResolve,
+} from '@/gateways/central-profile-gateway/central-profile-gateway';
 import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 
 import { Prisma, User } from '../../../generated/prisma';
@@ -22,6 +26,9 @@ interface SignInClaims {
   email: string;
   emailVerified: boolean;
   name?: string;
+  /** What the person entered into Keycloak, for their central profile. */
+  givenName?: string;
+  familyName?: string;
 }
 
 /**
@@ -301,6 +308,7 @@ export default class AuthService {
 
     const existing = await AuthGateway.getUserByEmail(email);
     if (!existing) {
+      await resolveCentralProfile({ ...claims, email });
       try {
         return await AuthGateway.createUser({ email, name, keycloakSubject: claims.subject });
       } catch (error) {
@@ -356,6 +364,7 @@ export default class AuthService {
       });
     }
 
+    await resolveCentralProfile({ ...claims, email });
     let user = await AuthGateway.bindSubject(existing.id, claims.subject);
     if (name && user.name !== name) user = await AuthGateway.updateUser(user.id, { name });
     return user;
@@ -390,4 +399,63 @@ export default class AuthService {
 /** Prisma's unique-constraint failure: another request inserted the same row first. */
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/** Central's placeholder for a person with no last name, the same as Connect's. */
+const NO_LAST_NAME = '-';
+
+/**
+ * A first sign-in here: make sure central has a profile for this Keycloak
+ * account, from what the person entered into Keycloak.
+ *
+ * Called before the local row is written, so if central cannot be reached the
+ * sign-in fails and the person's next request tries again; nobody ends up with
+ * a row here and no profile there. A 409 (their email already belongs to
+ * someone else in central) is not something a retry fixes, so it is logged for
+ * an admin and the sign-in goes ahead.
+ */
+async function resolveCentralProfile(claims: {
+  subject: string;
+  email: string;
+  name?: string;
+  givenName?: string;
+  familyName?: string;
+}): Promise<void> {
+  try {
+    await CentralProfileGateway.resolvePerson(centralPerson(claims));
+  } catch (error) {
+    if (error instanceof CentralProfileError && error.status === 409) {
+      logger.warn(
+        { email: safeForLog(claims.email, 120), subject: claims.subject },
+        'central profile refused a first sign-in: email already belongs to another person',
+      );
+      return;
+    }
+    logger.error({ err: error, subject: claims.subject }, 'could not resolve central profile');
+    throw error;
+  }
+}
+
+/** The token's details as central takes them. */
+function centralPerson(claims: {
+  subject: string;
+  email: string;
+  name?: string;
+  givenName?: string;
+  familyName?: string;
+}): PersonResolve {
+  // Not every realm sends given/family names; fall back to splitting `name`,
+  // then to the mailbox name, as a placeholder the person can fix.
+  const [first, ...rest] = (claims.name?.trim() ?? '').split(/\s+/);
+  const firstName = claims.givenName?.trim() || first || claims.email.split('@')[0];
+  const lastName =
+    claims.familyName?.trim() || (claims.givenName ? '' : rest.join(' ')) || NO_LAST_NAME;
+  // A Workspace address is the person's work email; anything else is personal.
+  const isWork = claims.email.endsWith('@ttgteams.com');
+  return {
+    keycloak_id: claims.subject,
+    first_name: firstName,
+    last_name: lastName,
+    ...(isWork ? { work_email: claims.email } : { email: claims.email }),
+  };
 }
