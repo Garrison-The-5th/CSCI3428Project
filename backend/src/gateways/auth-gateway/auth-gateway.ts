@@ -163,6 +163,11 @@ export default class AuthGateway {
     return prisma.user.update({ where: { id }, data: { keycloakSubject } });
   }
 
+  /** Releases a row from its Keycloak account, so a sign-in can no longer land on it. */
+  static unbindSubject(id: number): Promise<User> {
+    return prisma.user.update({ where: { id }, data: { keycloakSubject: null } });
+  }
+
   /** Changes a user's stored address (used when Keycloak reports a verified new email). */
   static setEmail(id: number, email: string): Promise<User> {
     return prisma.user.update({ where: { id }, data: { email } });

@@ -5,7 +5,7 @@
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { AssignmentType, CourseKind } from '../../../generated/prisma';
+import { AssignmentType, CourseKind, QuizType } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
 /** The assigner, joined onto every author-facing read so mail can come from them. */
@@ -72,6 +72,45 @@ export default class AssignmentGateway {
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
       },
       orderBy: { assignedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Moves an address's private links onto its account, now that it has one.
+   *
+   * A link is how work reaches somebody who cannot sign in. Once they can, the
+   * rule everywhere else is that the work belongs on their Learning and Quizzes
+   * tabs — a link to an account holder is a second, forwardable key to it — and
+   * the Learning tab lists PLATFORM assignments only, so a course they were
+   * sent before signing up simply vanished from view the moment they did.
+   *
+   * Left alone:
+   *   - revoked links: the author turned them off, and moving them would turn
+   *     them back on;
+   *   - a ONE_TIME quiz, and a quiz set holding one: those are only ever reached
+   *     through the link, for account holders too (see AssignmentService.create).
+   *
+   * The token hash is kept. A PLATFORM token is refused with "sign in to reach
+   * it", which is exactly what the old URL should now say. Safe to run more
+   * than once: a second run finds nothing left to move.
+   */
+  static moveLinksToPlatform(email: string) {
+    const oneTime = { type: QuizType.ONE_TIME, deletedAt: null };
+    return prisma.assignment.updateMany({
+      where: {
+        email,
+        type: 'LINK',
+        revokedAt: null,
+        NOT: [
+          { quiz: { is: oneTime } },
+          {
+            course: {
+              is: { sections: { some: { deletedAt: null, quizzes: { some: oneTime } } } },
+            },
+          },
+        ],
+      },
+      data: { type: 'PLATFORM' },
     });
   }
 

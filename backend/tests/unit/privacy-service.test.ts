@@ -234,6 +234,19 @@ describe('eraseUser', () => {
     expect(tombstone).not.toContain('ada@example.com');
   });
 
+  /**
+   * The login is shared with other apps and outlives the erasure, so the same
+   * person signs in again with the same Keycloak id. Left bound, that sign-in
+   * found the erased row and handed it back to them.
+   */
+  it('releases the row from their Keycloak account', async () => {
+    db.user.findUnique.mockResolvedValue(userFixture({ keycloakSubject: 'sub-ada' }));
+
+    await PrivacyService.eraseUser(7);
+
+    expect(db.user.update.mock.calls[0][0].data.keycloakSubject).toBeNull();
+  });
+
   /** The address lives on assignments too, so those are detached and closed. */
   it('detaches and revokes the assignments carrying that address', async () => {
     db.user.findUnique.mockResolvedValue(userFixture());

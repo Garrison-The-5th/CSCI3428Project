@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useGuest } from '@/contexts/guest-context';
 import HttpHelper from '@/utils/http-helper';
+import { getKeycloak } from '@/utils/keycloak';
 import { logger } from '@/utils/logger';
 import { API_BASE_URL } from '@/utils/utils';
 
@@ -84,12 +85,21 @@ const PrivacyNotice = ({ onNotify }: PrivacyNoticeProps) => {
     }
   };
 
-  /** Erases the signed-in person's personal data after they confirm. */
+  /**
+   * Erases the signed-in person's personal data after they confirm, then signs
+   * them out.
+   *
+   * The sign-out matters. Their login is shared with other apps and survives
+   * this, so staying signed in meant the very next request came straight back
+   * as them. Signed out, the next sign-in is a deliberate one, and it starts a
+   * fresh, empty account.
+   */
   const eraseData = async () => {
     try {
       setBusy(true);
       const response = await HttpHelper.delete('me/data');
       notify(response.message ?? 'Your personal data has been erased');
+      getKeycloak().logout({ redirectUri: window.location.origin });
     } catch (err) {
       logger.error('Failed to erase personal data', err);
       notify('Could not erase your data', 'error');

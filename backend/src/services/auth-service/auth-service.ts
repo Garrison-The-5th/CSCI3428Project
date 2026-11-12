@@ -7,6 +7,7 @@
  */
 // Service is useful for adding business logic/error handling
 import { logger, logSecurityEvent, safeForLog } from '@/config/logger';
+import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
 import AdminAccessService from '@/services/admin-access-service/admin-access-service';
 
@@ -14,6 +15,25 @@ import { Prisma, User } from '../../../generated/prisma';
 
 /** A sign-in that would land on somebody else's record. Answered with a 403. */
 export class IdentityConflictError extends Error {}
+
+/** What the auth middleware takes from a verified token. */
+interface SignInClaims {
+  subject: string;
+  email: string;
+  emailVerified: boolean;
+  name?: string;
+}
+
+/**
+ * Where an erased person's address is moved to. `.invalid` is reserved
+ * (RFC 2606), so nothing is ever delivered there and no real person has it.
+ */
+export const ERASED_EMAIL_DOMAIN = 'erased.invalid';
+
+/** Whether a stored address is the tombstone left by erasing somebody. */
+export function isErasedEmail(email: string): boolean {
+  return email.toLowerCase().endsWith(`@${ERASED_EMAIL_DOMAIN}`);
+}
 
 /**
  * User records, and the newsletter subscription that sits on the same row.
@@ -228,16 +248,39 @@ export default class AuthService {
    *   and logged, because realms without email verification would otherwise
    *   lock out every new starter who was assigned work first.
    */
-  static async resolveSignedInUser(claims: {
-    subject: string;
-    email: string;
-    emailVerified: boolean;
-    name?: string;
-  }): Promise<User> {
+  static async resolveSignedInUser(claims: SignInClaims): Promise<User> {
+    const user = await AuthService.findOrClaimRow(claims);
+
+    /*
+      First sign-in: anything they were sent as a private link before they had
+      an account moves onto it, or the Learning tab — which lists platform work
+      only — would show them nothing of what they came for. Every request of a
+      first sign-in may run this before `markSignedIn` lands; that is fine, as
+      the first one moves everything and the rest find nothing left.
+    */
+    if (user.lastSignInAt === null) {
+      await AssignmentGateway.moveLinksToPlatform(user.email);
+    }
+    return user;
+  }
+
+  /** The row a sign-in belongs to — see `resolveSignedInUser` for the rules. */
+  private static async findOrClaimRow(claims: SignInClaims): Promise<User> {
     const email = claims.email.toLowerCase();
     const name = claims.name?.trim() || null;
 
-    const bound = await AuthGateway.getUserBySubject(claims.subject);
+    let bound = await AuthGateway.getUserBySubject(claims.subject);
+    /*
+      An erased row is nobody's any more. Erasure now releases the binding
+      itself; this catches a row erased before it did, which would otherwise
+      hand the erased account back — its real email copied onto it, or, with an
+      unverified email, the person stuck signed in as the tombstone address with
+      none of their work. Released here, they carry on as somebody new.
+    */
+    if (bound && isErasedEmail(bound.email)) {
+      await AuthGateway.unbindSubject(bound.id);
+      bound = null;
+    }
     if (bound) {
       let user = bound;
       if (user.email !== email) {

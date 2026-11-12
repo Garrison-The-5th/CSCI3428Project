@@ -6,8 +6,10 @@
  * Date: 2026-10-23
  */
 import type Keycloak from 'keycloak-js';
+import type { KeycloakLoginOptions } from 'keycloak-js';
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 
+import { clearStoredGuestSession } from '@/contexts/guest-context';
 import { getKeycloak } from '@/utils/keycloak';
 import { logger } from '@/utils/logger';
 
@@ -23,7 +25,7 @@ interface AuthContextType {
   loading: boolean;
   user: KeycloakUser | null;
   token: string | null;
-  login: () => void;
+  login: (options?: KeycloakLoginOptions) => void;
   logout: () => void;
   hasRole: (role: string) => boolean;
   isAdmin: boolean;
@@ -114,9 +116,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   }, []);
 
-  /** Sends the browser to the Keycloak sign-in page. */
-  const login = () => {
-    keycloak.login();
+  /**
+   * Sends the browser to the Keycloak sign-in page, ending any guest session
+   * first so they come back as their account rather than as the link.
+   */
+  const login = (options?: KeycloakLoginOptions) => {
+    clearStoredGuestSession();
+    keycloak.login(options);
   };
 
   /** Signs out of Keycloak. */

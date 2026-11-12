@@ -7,6 +7,7 @@
  */
 import { logSecurityEvent } from '@/config/logger';
 import { NotFoundError } from '@/controllers/http-errors';
+import { ERASED_EMAIL_DOMAIN } from '@/services/auth-service/auth-service';
 
 import { prisma } from '../../../prisma/prisma-client';
 
@@ -150,12 +151,18 @@ export default class PrivacyService {
    * The email is replaced rather than nulled because it is unique and non-null,
    * and because a future assignment to the same real address must create a
    * fresh person rather than reviving this one.
+   *
+   * The Keycloak binding goes too. The login is shared with other apps and
+   * outlives this erasure, so the same person will sign in again with the same
+   * `sub` — and a row still bound to it would be found first, its real email
+   * copied back onto it, and the erased account handed straight back to them.
+   * Unbound, their next sign-in makes them a new, empty learner instead.
    */
   static async eraseUser(userId: number): Promise<{ anonymisedId: number; notesDeleted: number }> {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundError('No account found for that id');
 
-    const tombstone = `erased-${userId}-${Date.now()}@erased.invalid`;
+    const tombstone = `erased-${userId}-${Date.now()}@${ERASED_EMAIL_DOMAIN}`;
 
     const [notes] = await prisma.$transaction([
       // The learner's own writing goes entirely — it is personal, and no
@@ -174,6 +181,8 @@ export default class PrivacyService {
           subscribed: false,
           // Cleared so the row can never again be mistaken for a live account.
           lastSignInAt: null,
+          // Released, so their next sign-in starts a fresh account — see above.
+          keycloakSubject: null,
         },
       }),
     ]);

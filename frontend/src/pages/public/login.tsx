@@ -31,7 +31,8 @@ const Login = () => {
    * whose alias in the realm comes from KEYCLOAK_IDP_HINT, via /auth-config.
    */
   const handleGoogleLogin = () => {
-    keycloak.login({ idpHint: getAuthConfig().idpHint });
+    // Through the context, so this way in also ends a guest session first.
+    login({ idpHint: getAuthConfig().idpHint });
   };
 
   return (
@@ -48,7 +49,7 @@ const Login = () => {
           </p>
           <div className="flex flex-col items-center justify-center w-full">
             <Button
-              onClick={login}
+              onClick={() => login()}
               className="w-full border-2 border-purple bg-purple py-3 px-12 text-light-gray
                 hover:bg-navy hover:text-purple"
             >

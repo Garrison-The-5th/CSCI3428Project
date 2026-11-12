@@ -5,13 +5,19 @@
  * Modified by: Jacob Matthews
  * Date: 2026-10-16
  */
+import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway';
 import AuthGateway from '@/gateways/auth-gateway/auth-gateway';
-import AuthService, { IdentityConflictError } from '@/services/auth-service/auth-service';
+import AuthService, {
+  IdentityConflictError,
+  isErasedEmail,
+} from '@/services/auth-service/auth-service';
 
 import { Prisma } from '../../generated/prisma';
 
 jest.mock('@/gateways/auth-gateway/auth-gateway');
+jest.mock('@/gateways/assignment-gateway/assignment-gateway');
 const gateway = AuthGateway as jest.Mocked<typeof AuthGateway>;
+const assignments = AssignmentGateway as jest.Mocked<typeof AssignmentGateway>;
 
 const row = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -40,6 +46,85 @@ beforeEach(() => {
     row({ id, keycloakSubject }),
   );
   gateway.createUser.mockImplementation(async (data) => row({ id: 99, ...data }));
+  gateway.unbindSubject.mockImplementation(async (id) => row({ id, keycloakSubject: null }));
+  assignments.moveLinksToPlatform.mockResolvedValue({ count: 0 });
+});
+
+describe('resolveSignedInUser — an erased record still bound to the login', () => {
+  const erased = () =>
+    row({
+      id: 5,
+      email: 'erased-5-1700000000000@erased.invalid',
+      name: null,
+      keycloakSubject: 'sub-ada',
+      lastSignInAt: null,
+    });
+
+  /**
+   * Erased before erasure released the binding. With a verified email the old
+   * code copied the real address back onto it, handing the erased account back.
+   */
+  it('releases it and gives them a fresh account instead', async () => {
+    gateway.getUserBySubject.mockResolvedValueOnce(erased());
+
+    const user = await AuthService.resolveSignedInUser(claims());
+
+    expect(gateway.unbindSubject).toHaveBeenCalledWith(5);
+    expect(gateway.setEmail).not.toHaveBeenCalled();
+    expect(gateway.createUser).toHaveBeenCalledWith({
+      email: 'ada@example.com',
+      name: 'Ada',
+      keycloakSubject: 'sub-ada',
+    });
+    expect(user).toMatchObject({ id: 99, email: 'ada@example.com' });
+  });
+
+  /** Without a verified email the old code left them signed in as the tombstone. */
+  it('never leaves them signed in as the tombstone address', async () => {
+    gateway.getUserBySubject.mockResolvedValueOnce(erased());
+
+    const user = await AuthService.resolveSignedInUser(claims({ emailVerified: false }));
+
+    expect(user.email).toBe('ada@example.com');
+  });
+
+  it('recognises only the tombstone domain as erased', () => {
+    expect(isErasedEmail('erased-5-1@ERASED.invalid')).toBe(true);
+    expect(isErasedEmail('ada@example.com')).toBe(false);
+    expect(isErasedEmail('ada@erased.invalid.example.com')).toBe(false);
+  });
+});
+
+describe('resolveSignedInUser — work sent by link before they had an account', () => {
+  it('moves it onto the account on a first sign-in', async () => {
+    gateway.getUserByEmail.mockResolvedValue(row({ lastSignInAt: null }));
+    gateway.bindSubject.mockImplementation(async (id, keycloakSubject) =>
+      row({ id, keycloakSubject, lastSignInAt: null }),
+    );
+
+    await AuthService.resolveSignedInUser(claims());
+
+    expect(assignments.moveLinksToPlatform).toHaveBeenCalledWith('ada@example.com');
+  });
+
+  it('moves it for a brand-new account too', async () => {
+    gateway.createUser.mockImplementation(async (data) =>
+      row({ id: 99, ...data, lastSignInAt: null }),
+    );
+
+    await AuthService.resolveSignedInUser(claims());
+
+    expect(assignments.moveLinksToPlatform).toHaveBeenCalledWith('ada@example.com');
+  });
+
+  /** After the first sign-in every request would otherwise pay for a pointless write. */
+  it('leaves it alone for somebody who has signed in before', async () => {
+    gateway.getUserBySubject.mockResolvedValue(row({ keycloakSubject: 'sub-ada' }));
+
+    await AuthService.resolveSignedInUser(claims());
+
+    expect(assignments.moveLinksToPlatform).not.toHaveBeenCalled();
+  });
 });
 
 describe('resolveSignedInUser', () => {

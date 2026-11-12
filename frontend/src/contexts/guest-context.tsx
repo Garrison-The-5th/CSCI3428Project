@@ -37,6 +37,27 @@ import { assignmentApi } from '@/services/assignment-api';
 
 const STORAGE_KEY = 'assignmentToken';
 
+/**
+ * Forgets any guest session in this tab, without needing the context.
+ *
+ * Called the moment somebody starts signing in. The token outlives the trip to
+ * Keycloak and back, and while it is stored every learner request goes through
+ * the link rather than the account — so a guest who made an account in the
+ * same tab came back still a guest, or, with a one-time link already handed
+ * in, was sent straight to "Link no longer enabled".
+ *
+ * Cleared on starting a sign-in rather than on being signed in: somebody who is
+ * already signed in still opens links, because a one-time quiz is reachable no
+ * other way, and that session has to survive a reload.
+ */
+export function clearStoredGuestSession() {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage blocked: there is no stored session to clear.
+  }
+}
+
 /** The entry page does its own checking and reports the reason it failed. */
 const isEntryPath = () => window.location.pathname.startsWith('/a/');
 
