@@ -12,12 +12,12 @@ import {Group} from '@mantine/core'
 /** * CSS object to create a realistic "Wooden Bead" look. (It's kind of just a brown dot at the moment.)
  * - Uses 50% border-radius for a perfect circle.
  * - Uses inset box-shadow to create depth/curvature (3D effect).
- * - '#b5651d' is a Light Brown / Golden Rod color.
+ * - The 'bead' theme color (see main.tsx) is a Light Brown / Golden Rod color.
  */
 const beadStyle = {
   width: 28,
   height: 28,
-  backgroundColor: '#b5651d',
+  backgroundColor: 'var(--mantine-color-bead-6)',
   borderRadius: '50%',
   boxShadow: '0 0 4px rgba(0,0,0,0.3) inset, 0 0 6px rgba(0,0,0,0.15)',
   display: 'flex',
