@@ -16,16 +16,20 @@ import {
   Tooltip
 } from '@mantine/core'
 import {useDisclosure} from '@mantine/hooks'
-import {BooksIcon, MagnifyingGlassIcon, SpeakerHighIcon} from '@phosphor-icons/react'
+import {ArrowLeftIcon, BooksIcon, CardsIcon, MagnifyingGlassIcon, SpeakerHighIcon} from '@phosphor-icons/react'
 import Fuse from 'fuse.js'
 import {useRef, useState} from 'react'
 import {useLoaderData} from 'react-router'
 
 import {wordsLoader} from '@/router/words.loader'
 import {toStorageUrl} from '@/utils'
+import {ColorSchemeToggle} from './ColorSchemeToggle'
+import {Flashcards} from './Flashcards'
 
 /**
- * Purpose: Searchable grid of every word in the dictionary.
+ * Purpose: Searchable grid of every word in the dictionary, with a switch to
+ * practise them as flashcards. Used by the dictionary modal and the
+ * standalone dictionary page.
  */
 export function DictionaryBrowser() {
   const {words} = useLoaderData<typeof wordsLoader>()
@@ -43,19 +47,57 @@ export function DictionaryBrowser() {
   })
 
   const [query, setQuery] = useState('')
+  const [showFlashcards, setShowFlashcards] = useState(false)
 
   const _words = query.length ? fuse.search(query).map(result => result.item) : words
   const wordCards = _words.map(word => <DictionaryCard key={word.id} word={word} />)
 
+  if (showFlashcards) {
+    return (
+      <Stack>
+        <Group>
+          <Button
+            variant="default"
+            leftSection={<ArrowLeftIcon size={16} />}
+            onClick={() => setShowFlashcards(false)}
+          >
+            Back to dictionary
+          </Button>
+        </Group>
+        <Flashcards words={words} />
+      </Stack>
+    )
+  }
+
   return (
     <Stack>
-      <TextInput
-        placeholder="Search words..."
-        leftSection={<MagnifyingGlassIcon size={20} />}
-        value={query}
-        onChange={e => setQuery(e.currentTarget.value)}
-        aria-label="Search dictionary"
-      />
+      <Group wrap="nowrap">
+        <TextInput
+          placeholder="Search words..."
+          leftSection={<MagnifyingGlassIcon size={20} />}
+          value={query}
+          onChange={e => setQuery(e.currentTarget.value)}
+          aria-label="Search dictionary"
+          style={{flex: 1}}
+        />
+        <Button
+          variant="default"
+          leftSection={<CardsIcon size={20} />}
+          onClick={() => setShowFlashcards(true)}
+          h="auto"
+          p="4px 16px"
+        >
+          <Stack gap={0} align="center" p="2px">
+            {/* TODO: placeholder until an official Mi'kmaq translation is provided by a translator */}
+            <Text size="sm" fw={500}>
+              [Mi'kmaq translation needed]
+            </Text>
+            <Text size="12px" style={{opacity: 0.8}}>
+              Flashcards
+            </Text>
+          </Stack>
+        </Button>
+      </Group>
       <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
     </Stack>
   )
@@ -67,21 +109,27 @@ export function Dictionary() {
 
   return (
     <>
-      <Button variant="default" onClick={open} leftSection={<BooksIcon size={20} />} h="auto" p="4px 16px">
-        <Stack gap={0} align="center" p="4px">
-          <Text size="sm" fw={500}>
-            Kllusuwaqnn Kwilmumkl
-          </Text>
-          <Text size="12px" style={{opacity: 0.8}}>
-            Dictionary
-          </Text>
-        </Stack>
+      <Button variant="default" onClick={open} aria-label="Dictionary" h={48} px="sm">
+        <Group gap="xs" wrap="nowrap">
+          <BooksIcon size={20} />
+          <Stack gap={0} align="center" visibleFrom="md">
+            <Text size="sm" fw={500} style={{whiteSpace: 'nowrap'}}>
+              Kllusuwaqnn Kwilmumkl
+            </Text>
+            <Text size="12px" style={{opacity: 0.8}}>
+              Dictionary
+            </Text>
+          </Stack>
+        </Group>
       </Button>
+      {/* The modal unmounts its content when closed, so reopening it always
+          starts back on the dictionary rather than the flashcards. */}
       <Modal
         opened={opened}
         onClose={close}
         title={
           <Group gap="sm">
+            <ColorSchemeToggle />
             <Text fw="bold">Kllusuwaqnn Kwilmumkl - Dictionary</Text>
             <Badge variant="light">{words.length} words</Badge>
           </Group>

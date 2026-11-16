@@ -4,6 +4,8 @@
  * @author Sean MacDougall
  */
 
+import 'dotenv/config' // load env variables from a .env file
+
 import {createDefaultUser} from './create-default-user'
 import {importWords} from './words/import-words'
 

@@ -11,6 +11,7 @@ import {useDisclosure} from '@mantine/hooks'
 import {FeatherIcon} from '@phosphor-icons/react'
 import {createBrowserRouter, Outlet, RouterProvider} from 'react-router'
 
+import {ColorSchemeToggle} from '@/components/ColorSchemeToggle'
 import {Sidebar} from '@/components/Sidebar'
 import {
   AdminGameSettingsPage,
@@ -22,6 +23,7 @@ import {
   IslandGamePage,
   NikanatutitewkPage,
   PrivacyPolicy,
+  SentenceBuilderGame,
   SigninPage,
   WordMatchGame
 } from '@/pages'
@@ -47,6 +49,10 @@ const router = createBrowserRouter([
       {
         path: '/eskasoni-island-game',
         element: <IslandGamePage />
+      },
+      {
+        path: '/sentence-builder-game',
+        element: <SentenceBuilderGame />
       },
       {
         path: '/dictionary',
@@ -108,6 +114,9 @@ function Layout() {
           <Text fw="bold" fs="italic">
             Mikwite'tmk+t Angie
           </Text>
+          <Group ml="auto">
+            <ColorSchemeToggle />
+          </Group>
         </Group>
       </AppShell.Header>
       <AppShell.Navbar>

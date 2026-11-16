@@ -6,9 +6,13 @@
 
 import fs from 'fs'
 import path from 'path'
+import {fileURLToPath} from 'url'
 import {nanoid} from 'nanoid'
 
 import {Month, PrismaClient} from '@/prisma/client'
+
+// directory containing this file (`__dirname` is not available in ES modules)
+const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export const words: {mikmaq: string; english: string; startMonth: Month}[] = [
   {mikmaq: "Ni'n", english: 'I (personal pronoun)', startMonth: 'September'},
@@ -52,8 +56,8 @@ export async function importWords() {
   for (const word of words) {
     const {mikmaq, english, startMonth} = word
 
-    const image = `${__dirname}/images/${mikmaq.toLowerCase()}.png`
-    const audio = `${__dirname}/audio/${mikmaq.toLowerCase()}.mp3`
+    const image = `${dirname}/images/${mikmaq.toLowerCase()}.png`
+    const audio = `${dirname}/audio/${mikmaq.toLowerCase()}.mp3`
 
     const imagePath = `${nanoid()}${path.extname(image)}`
     const audioPath = `${nanoid()}${path.extname(audio)}`
@@ -68,5 +72,6 @@ export async function importWords() {
     })
   }
 
+  await prisma.$disconnect()
   console.log('Words imported')
 }

@@ -4,17 +4,31 @@
  * Author: Jack Greenlaw
  * Edits: Alison Cook
  */
-import {Burger, Container, Group, Stack, Text} from '@mantine/core'
+import {
+  Burger,
+  Collapse,
+  Container,
+  Group,
+  Stack,
+  Text
+} from '@mantine/core'
 import {useDisclosure} from '@mantine/hooks'
 import {Link, useLocation} from 'react-router'
 
 import classes from '@/styles/HeaderStyle.module.css'
+import {ColorSchemeToggle} from './ColorSchemeToggle'
 import {Dictionary} from './Dictionary'
 
 const links = [
   {link: '/', mikmaq: "Apaja'si Nikantuk", english: 'Home'},
   {link: '/matching-game', mikmaq: 'Klusuwaqnminal', english: 'Word Match'},
-  {link: '/eskasoni-island-game', mikmaq: "Te'puljwe'kati Waisisk", english: 'Goat Island Animals'},
+  {
+    link: '/eskasoni-island-game',
+    mikmaq: "Te'puljwe'kati Waisisk",
+    english: 'Goat Island Animals'
+  },
+  // No Mi'kmaq title yet for this game, so only the English name is shown
+  {link: '/sentence-builder-game', mikmaq: '', english: 'Sentence Builder'},
   {link: '/admin', mikmaq: "Nikana'tu'tite'wk", english: 'Admin'}
 ]
 
@@ -26,32 +40,48 @@ const links = [
  */
 export function Header() {
   const location = useLocation()
-  const [opened, {toggle}] = useDisclosure(false)
+  const [opened, {toggle, close}] = useDisclosure(false)
 
-  const items = links.map(link => (
+  const renderLinks = (onClick?: () => void) =>
+    links.map(link => (
     <Link
-      key={link.mikmaq}
+      key={link.link}
       to={link.link}
+      onClick={onClick}
       className={classes.link}
       data-active={location.pathname === link.link || undefined}
     >
       <Stack gap={0} align="center">
-        <Text span>{link.mikmaq}</Text>
-        <Text span size="12px" style={{opacity: 0.8}}>
-          {link.english}
-        </Text>
+        {link.mikmaq ? (
+          <>
+            <Text span>{link.mikmaq}</Text>
+            <Text span size="12px" style={{opacity: 0.8}}>
+              {link.english}
+            </Text>
+          </>
+        ) : (
+          <Text span>{link.english}</Text>
+        )}
       </Stack>
     </Link>
-  ))
+    ))
   return (
     <header className={classes.header}>
       <Container size="lg" className={classes.inner}>
-        <Group gap={8} visibleFrom="xs">
-          {items}
+        <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" aria-label="Toggle navigation" />
+        <Group gap={4} wrap="nowrap" visibleFrom="md">
+          {renderLinks()}
         </Group>
-        <Burger opened={opened} onClick={toggle} hiddenFrom="xs" size="sm" />
-        <Dictionary />
+        <Group gap="xs" wrap="nowrap" style={{flexShrink: 0}}>
+          <ColorSchemeToggle />
+          <Dictionary />
+        </Group>
       </Container>
+      <Collapse in={opened} hiddenFrom="md" className={classes.menu}>
+        <Stack gap={4} p="sm">
+          {renderLinks(close)}
+        </Stack>
+      </Collapse>
     </header>
   )
 }

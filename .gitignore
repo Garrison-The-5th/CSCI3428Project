@@ -1,2 +1,45 @@
+# dependencies
 node_modules
+
+# environment files (secrets), but keep the template
+.env
+.env.*
+!.env.example
+
+# local database
+*.db
+*.db-journal
+
+# generated Prisma client
+packages/api/src/prisma
+
+# uploaded / seeded files (recreated by `npm run setup`)
+packages/api/public
+
+# build output
+dist
+dist-ssr
+out
+*.tsbuildinfo
+
+# front-end local API override
+packages/front-end/public/env.js
+
+# Cypress output
+cypress/screenshots
+cypress/videos
+cypress/downloads
+
+# logs and caches
+logs
+*.log
+.eslintcache
+.cache
+coverage
+
+# editor / OS files
+.idea
 .DS_Store
+*.suo
+*.sw?
+

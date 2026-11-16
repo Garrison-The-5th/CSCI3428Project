@@ -20,10 +20,12 @@ import {
   QuestionIcon,
   ShieldCheckIcon,
   SignInIcon,
+  TextAaIcon,
   UsersThreeIcon
 } from '@phosphor-icons/react'
 import {Link, useLocation} from 'react-router'
 
+import {ColorSchemeToggle} from '@/components/ColorSchemeToggle'
 import classes from '@/styles/SidebarStyle.module.css'
 
 type SidebarLink = {
@@ -46,7 +48,9 @@ const links: SidebarLink[] = [
         description: "Te'puljwe'kati Waisisk",
         icon: PawPrintIcon,
         link: '/eskasoni-island-game'
-      }
+      },
+      // No Mi'kmaq title yet for this game, so only the English name is shown
+      {label: 'Sentence Builder', icon: TextAaIcon, link: '/sentence-builder-game'}
     ]
   },
   {label: 'Admin Login', icon: SignInIcon, link: '/admin/signin'},
@@ -116,6 +120,9 @@ export function Sidebar({onNavigate}: {onNavigate?: () => void}) {
         <Text fw="bold" size="lg" fs="italic">
           Mikwite'tmk+t Angie
         </Text>
+        <Group ml="auto">
+          <ColorSchemeToggle />
+        </Group>
       </Group>
       <ScrollArea className={classes.links}>{links.map(renderLink)}</ScrollArea>
     </>

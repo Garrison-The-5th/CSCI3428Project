@@ -5,6 +5,7 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
   server: {
+    host: true,
     proxy: {
       '/api': 'http://localhost:5050',
       '/public': 'http://localhost:5050'
