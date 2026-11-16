@@ -227,12 +227,6 @@ export const assignmentApi = {
       body: '{}',
     }),
 
-  recordElementView: (token: string, elementId: string) =>
-    publicRequest(`public/assignments/${encodeURIComponent(token)}/elements/${elementId}/view`, {
-      method: 'POST',
-      body: '{}',
-    }),
-
   /** The run already open on an assigned quiz. Starts nothing — see quizApi. */
   peekSession: (token: string, quizId: string) =>
     publicRequest<QuizSession>(

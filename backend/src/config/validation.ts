@@ -35,7 +35,7 @@ export const FIELD_LIMITS = {
   listLength: 50,
   /** A learner's own note. */
   noteBody: 10_000,
-  /** Rich text stored for one content element, after sanitisation. */
+  /** Rich text stored for one section, after sanitisation. */
   richText: 100_000,
   /** A quiz question prompt. */
   prompt: 1_000,

@@ -11,7 +11,7 @@
  * Shared by every place a question can be written — the standalone quiz page and
  * the quiz editor inside a section — so the two cannot drift apart.
  *
- * Declared at module scope on purpose: nesting it inside a page component would
+ * Declared at model scope on purpose: nesting it inside a page component would
  * remount it on every keystroke and drop the caret.
  */
 import { TrashIcon } from '@heroicons/react/24/outline';

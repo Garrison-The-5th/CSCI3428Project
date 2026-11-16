@@ -30,7 +30,7 @@ import QuizRunner from '@/components/common/quiz-runner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Course, moduleGroups, NewIds, Note } from '@/services/curriculum-api';
+import { Course, modelGroups, NewIds, Note } from '@/services/curriculum-api';
 import { useLearnerApi } from '@/services/learner-api';
 import { Quiz } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
@@ -38,9 +38,9 @@ import { logger } from '@/utils/logger';
 /** A quiz plus where it sits in the course, for grouping in the rail. */
 interface RailEntry {
   quiz: Quiz;
-  moduleId: string;
-  moduleNumber: number;
-  moduleTitle: string;
+  modelId: string;
+  modelNumber: number;
+  modelTitle: string;
   sectionId: string;
   sectionNumber: string;
   sectionTitle: string;
@@ -93,10 +93,10 @@ const QuizPlayer = () => {
     loadNotes();
   }, [load, loadNotes]);
 
-  /** Every quiz in the course, in module-then-section order. */
+  /** Every quiz in the course, in model-then-section order. */
   const entries = useMemo<RailEntry[]>(() => {
     if (!course) return [];
-    return moduleGroups(course).flatMap((group) =>
+    return modelGroups(course).flatMap((group) =>
       group.sections.flatMap((section) =>
         // Learning checks are taken inside the lesson they belong to and are
         // never listed here, so the count on this page matches what a learner
@@ -105,9 +105,9 @@ const QuizPlayer = () => {
           .filter((quiz) => quiz.type !== 'LEARNING_CHECK')
           .map((quiz) => ({
             quiz,
-            moduleId: group.module.id,
-            moduleNumber: group.module.number,
-            moduleTitle: group.module.title,
+            modelId: group.model.id,
+            modelNumber: group.model.number,
+            modelTitle: group.model.title,
             sectionId: section.id,
             sectionNumber: section.number,
             sectionTitle: section.title,
@@ -154,25 +154,25 @@ const QuizPlayer = () => {
     );
   }, [nextUnattempted, courseId, navigate]);
 
-  /** The rail's headings: modules that actually hold a quiz, in order. */
-  const railModules = useMemo(() => {
-    const byModule = new Map<
+  /** The rail's headings: models that actually hold a quiz, in order. */
+  const railModels = useMemo(() => {
+    const byModel = new Map<
       string,
       { id: string; number: number; title: string; entries: RailEntry[] }
     >();
 
     for (const entry of entries) {
-      const rail = byModule.get(entry.moduleId) ?? {
-        id: entry.moduleId,
-        number: entry.moduleNumber,
-        title: entry.moduleTitle,
+      const rail = byModel.get(entry.modelId) ?? {
+        id: entry.modelId,
+        number: entry.modelNumber,
+        title: entry.modelTitle,
         entries: [],
       };
       rail.entries.push(entry);
-      byModule.set(entry.moduleId, rail);
+      byModel.set(entry.modelId, rail);
     }
 
-    return [...byModule.values()];
+    return [...byModel.values()];
   }, [entries]);
 
   /** Saves a note on this quiz set. */
@@ -272,7 +272,7 @@ const QuizPlayer = () => {
               ) : (
                 <>
                   <p className="mb-3 text-sm text-dark-gray">
-                    {selected.moduleNumber}. {selected.moduleTitle} · {selected.sectionNumber}{' '}
+                    {selected.modelNumber}. {selected.modelTitle} · {selected.sectionNumber}{' '}
                     {selected.sectionTitle}
                   </p>
                   {/* Title included: the quiz is one element here, opening on
@@ -396,7 +396,7 @@ const QuizPlayer = () => {
               {entries.length === 0 ? (
                 <p className="px-3 py-2 text-sm text-dark-gray">No quizzes.</p>
               ) : (
-                railModules.map((rail) => (
+                railModels.map((rail) => (
                   <section key={rail.id} className="mb-2">
                     <h3 className="px-2 py-2 text-sm font-semibold text-dark-gray">
                       {rail.number}. {rail.title}
@@ -424,7 +424,7 @@ const QuizPlayer = () => {
                                 {entry.sectionNumber} {entry.sectionTitle}
                               </span>
                             </span>
-                            {isNew.item(entry.quiz.id, entry.sectionId, entry.moduleId) && (
+                            {isNew.item(entry.quiz.id, entry.sectionId, entry.modelId) && (
                               <NewBadge />
                             )}
                             <span className="flex shrink-0 items-center gap-1 text-xs">

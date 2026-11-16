@@ -22,6 +22,7 @@ import PublicationService from '@/services/publication-service/publication-servi
 import QuizService from '@/services/quiz-service/quiz-service';
 
 import { prisma } from '../prisma/prisma-client';
+import { createQuizSection } from './quiz-section';
 
 let failures = 0;
 
@@ -60,13 +61,11 @@ async function main() {
 
   const created = await CurriculumService.createCourse('PUBLISH TEST — safe to delete');
   const courseId = created!.id;
-  const [module] = await CurriculumGateway.getModules(courseId);
+  const [model] = await CurriculumGateway.getModels(courseId);
 
   const sectionA = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Alpha',
-  });
-  const element = await CurriculumService.createElement(sectionA!.id, {
     type: 'TEXT',
     textContent: 'original text',
   });
@@ -103,16 +102,17 @@ async function main() {
   const live1 = await CurriculumService.getCourseForLearner(email, courseId);
   check('the learner can read it', live1?.title, 'PUBLISH TEST — safe to delete');
   check('one section', live1?.sections.length, 1);
-  check('the original text', live1?.sections[0]?.elements[0]?.textContent, 'original text');
+  check('the original text', live1?.sections[0]?.textContent, 'original text');
+  check('as a typed section', live1?.sections[0]?.type, 'TEXT');
 
   console.log('\nnothing to publish immediately after publishing');
   check('clean', await PublicationService.hasUnpublishedChanges(courseId), false);
 
   // ---- The load-bearing case: edits held back, not just additions ----
   console.log('\nediting existing content does not reach the learner');
-  await CurriculumService.updateElement(element.id, { textContent: 'REWRITTEN' });
+  await CurriculumService.updateSection(sectionA!.id, { textContent: 'REWRITTEN' });
   const afterEdit = await CurriculumService.getCourseForLearner(email, courseId);
-  check('still the old text', afterEdit?.sections[0]?.elements[0]?.textContent, 'original text');
+  check('still the old text', afterEdit?.sections[0]?.textContent, 'original text');
 
   console.log('\nnor does renaming a section');
   await CurriculumService.updateSection(sectionA!.id, { title: 'Alpha RENAMED' });
@@ -124,8 +124,9 @@ async function main() {
 
   console.log('\nnor does adding a whole section');
   const sectionB = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Bravo',
+    type: 'TEXT',
   });
   check(
     'still one section',
@@ -147,7 +148,7 @@ async function main() {
   check('names the new section', second.added.newSectionIds, [sectionB!.id]);
 
   const live2 = await CurriculumService.getCourseForLearner(email, courseId);
-  check('the edit is now live', live2?.sections[0]?.elements[0]?.textContent, 'REWRITTEN');
+  check('the edit is now live', live2?.sections[0]?.textContent, 'REWRITTEN');
   check('and the rename', live2?.sections[0]?.title, 'Alpha RENAMED');
   check('and the new section', live2?.sections.length, 2);
   check('clean again', await PublicationService.hasUnpublishedChanges(courseId), false);
@@ -218,42 +219,42 @@ async function main() {
   );
 
   // ---- The three shapes the pill has to distinguish ----
-  console.log('\nthe three cases the New pill must tell apart');
-  const freshModule = (await CurriculumService.createModule(courseId, {
-    title: 'Brand new module',
+  console.log('\nthe two cases the New pill must tell apart');
+  const freshModel = (await CurriculumService.createModel(courseId, {
+    title: 'Brand new model',
   }))!;
-  const sectionInFreshModule = await CurriculumService.createSection(courseId, {
-    moduleId: freshModule.id,
-    title: 'Inside the new module',
-  });
-  const sectionInOldModule = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
-    title: 'New section, old module',
-  });
-  const elementInOldSection = await CurriculumService.createElement(sectionA!.id, {
+  const sectionInFreshModel = await CurriculumService.createSection(courseId, {
+    modelId: freshModel.id,
+    title: 'Inside the new model',
     type: 'TEXT',
-    textContent: 'new paragraph in an existing section',
+  });
+  const sectionInOldModel = await CurriculumService.createSection(courseId, {
+    modelId: model.id,
+    title: 'New section, old model',
+    type: 'TEXT',
+    textContent: 'new paragraph in an existing model',
   });
 
   const shapes = await PublicationService.publish(courseId, user.id);
-  check('the new module is reported', shapes.added.newModuleIds, [freshModule.id]);
+  check('the new model is reported', shapes.added.newModelIds, [freshModel.id]);
   check(
     'both new sections are reported',
     new Set(shapes.added.newSectionIds),
-    new Set([sectionInFreshModule!.id, sectionInOldModule!.id]) as unknown,
+    new Set([sectionInFreshModel!.id, sectionInOldModel!.id]) as unknown,
   );
-  check(
-    'the new element is reported',
-    shapes.added.newElementIds.includes(elementInOldSection.id),
-    true,
-  );
+  // New content is a new section; there is nothing finer to report.
+  check('what a version adds is models, sections and quizzes', Object.keys(shapes.added).sort(), [
+    'newModelIds',
+    'newQuizIds',
+    'newSectionIds',
+  ]);
 
   // The roll-up rule lives in the frontend, but it can only be right if the
-  // server hands it the raw sets — the section inside a brand new module is
+  // server hands it the raw sets — the section inside a brand new model is
   // reported here and suppressed there, rather than being left out.
   check(
-    'the section inside the new module is reported, not omitted',
-    shapes.added.newSectionIds.includes(sectionInFreshModule!.id),
+    'the section inside the new model is reported, not omitted',
+    shapes.added.newSectionIds.includes(sectionInFreshModel!.id),
     true,
   );
   check(
@@ -293,7 +294,7 @@ async function main() {
 
   // ---- Quizzes are graded against what was shown ----
   console.log('\na quiz is graded against the published version, not the draft');
-  const quiz = await QuizService.createQuiz({ title: 'Marking', sectionId: sectionA!.id });
+  const { quiz } = await createQuizSection(courseId, { modelId: model.id, title: 'Marking' });
   // Retakes allowed, because this scenario sits the same quiz three times to
   // watch what it is marked against. An exam is one sitting unless its author
   // says otherwise — see Quiz.allowMultipleAttempts — so without this the second

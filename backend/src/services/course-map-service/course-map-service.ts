@@ -20,12 +20,12 @@ import {
   SnapshotMapNode,
 } from '@/services/course-map-service/directed-path';
 
-import { CourseKind, QuizType } from '../../../generated/prisma';
+import { CourseKind, QuizType, SectionType } from '../../../generated/prisma';
 
 /**
  * A course whose path is built from a map.
  *
- * The author writes ordinary sections in the Modules tab, stages them, and then
+ * The author writes ordinary sections in the Models tab, stages them, and then
  * arranges them into nodes on a 2D map. Each node is a question the course asks
  * without asking it out loud — "does this apply to you?" — and the generated
  * layer quizzes are where it finally does. What a learner reads is whichever
@@ -87,7 +87,7 @@ export interface StagingGroup {
 
 /** What the author is told when they try to map content that has not been staged. */
 const STAGE_FIRST =
-  'New sections or modules have been added since this course was last staged. ' +
+  'New sections or models have been added since this course was last staged. ' +
   'Stage the course before mapping it.';
 
 /** What the author is told when they try to change part of a linked map. */
@@ -225,13 +225,13 @@ export default class CourseMapService {
   }
 
   /**
-   * The modules the map generated for its layer quizzes. Those hold their own
+   * The models the map generated for its layer quizzes. Those hold their own
    * quiz and nothing else, so the structure editor's paths ask here before
    * putting a section in one.
    */
-  static async layerModuleIds(courseId: string): Promise<Set<string>> {
+  static async layerModelIds(courseId: string): Promise<Set<string>> {
     const layers = await CourseMapGateway.getLayers(courseId);
-    return new Set((layers ?? []).map((layer) => layer.moduleId));
+    return new Set((layers ?? []).map((layer) => layer.modelId));
   }
 
   /** Layer sections are named by the generator and recognised by that name. */
@@ -286,7 +286,7 @@ export default class CourseMapService {
 
     if (directedLearning && course.kind !== CourseKind.LESSON) {
       throw new Error(
-        'only a lesson can be directed — a quiz set is one module of quizzes, with no path to direct',
+        'only a lesson can be directed — a quiz set is one model of quizzes, with no path to direct',
       );
     }
 
@@ -331,7 +331,7 @@ export default class CourseMapService {
     await CourseMapService.ensureRoot(courseId);
     await CourseMapService.syncQuizzes(courseId);
 
-    // Read after the sync, which may have minted or removed a layer module.
+    // Read after the sync, which may have minted or removed a layer model.
     const layers = await CourseMapGateway.getLayers(courseId);
     await CurriculumGateway.updateCourse(courseId, {
       stagedAt: new Date(),
@@ -342,19 +342,19 @@ export default class CourseMapService {
   }
 
   /**
-   * The modules and sections the author wrote, by id.
+   * The models and sections the author wrote, by id.
    *
-   * The map's own layer modules and sections are left out: they come and go as
+   * The map's own layer models and sections are left out: they come and go as
    * the map changes, and counting them would have every connection drawn demand
    * a fresh stage.
    */
   static contentIds(
-    course: { modules: Array<{ id: string }>; sections: Array<{ id: string; title: string }> },
-    layers: Array<{ moduleId: string }>,
+    course: { models: Array<{ id: string }>; sections: Array<{ id: string; title: string }> },
+    layers: Array<{ modelId: string }>,
   ): string[] {
-    const layerModules = new Set(layers.map((layer) => layer.moduleId));
+    const layerModels = new Set(layers.map((layer) => layer.modelId));
     return [
-      ...course.modules.filter((module) => !layerModules.has(module.id)).map((m) => m.id),
+      ...course.models.filter((model) => !layerModels.has(model.id)).map((m) => m.id),
       ...course.sections
         .filter((section) => !CourseMapService.isLayerSection(section.title))
         .map((section) => section.id),
@@ -372,10 +372,10 @@ export default class CourseMapService {
     course: {
       stagedAt: Date | null;
       stagedContentIds: string[];
-      modules: Array<{ id: string }>;
+      models: Array<{ id: string }>;
       sections: Array<{ id: string; title: string }>;
     },
-    layers: Array<{ moduleId: string }>,
+    layers: Array<{ modelId: string }>,
   ): boolean {
     if (!course.stagedAt) return true;
     const staged = new Set(course.stagedContentIds);
@@ -842,18 +842,18 @@ export default class CourseMapService {
   }
 
   /**
-   * Names a still-unnamed node after the module its first section came from.
+   * Names a still-unnamed node after the model its first section came from.
    *
    * A node's name is not a label on a box: it becomes the text of the option the
    * layer quiz offers, so "New node" is a question put to the learner in the
    * author's own placeholder. The author has just said what belongs here by
-   * dragging it in, and the module that content sits under is the best name
+   * dragging it in, and the model that content sits under is the best name
    * anybody has for the group at that moment — drag two sections of "Bee
    * keeping" onto a node and the node is what the course calls bee keeping.
    *
    * Only ever while the node is still called `DEFAULT_NODE_TITLE`. A name the
    * author typed is a decision, and adding a third section to a node must not
-   * quietly rename it back to whatever module that section happened to be in.
+   * quietly rename it back to whatever model that section happened to be in.
    * The root is exempt for the same reason it cannot be renamed at all: it is
    * where every learner starts, and it offers no option to label.
    */
@@ -868,11 +868,11 @@ export default class CourseMapService {
     const section = source?.sections.find((current) => current.id === first.sectionId);
     if (!section) return;
 
-    // The module the section sits under, or the section's own name when it sits
-    // under none — a section with no module is loose content, and its own title
+    // The model the section sits under, or the section's own name when it sits
+    // under none — a section with no model is loose content, and its own title
     // is then the only description of it there is.
-    const module = source?.modules.find((current) => current.id === section.moduleId);
-    const name = (module?.title ?? section.title).trim();
+    const model = source?.models.find((current) => current.id === section.modelId);
+    const name = (model?.title ?? section.title).trim();
     if (!name || name === node.title) return;
 
     await CourseMapGateway.updateNode(node.id, { title: name });
@@ -1401,13 +1401,13 @@ export default class CourseMapService {
       );
     }
 
-    // Layers the map no longer has. Their module and section go with the quiz,
+    // Layers the map no longer has. Their model and section go with the quiz,
     // so a depth that has been flattened away leaves nothing behind in the
-    // Modules tab.
+    // Models tab.
     for (const layer of layers.filter((current) => !live.has(current.depth))) {
       await CourseMapGateway.deleteLayer(layer.id);
       await QuizGateway.hardDeleteQuiz(layer.quizId);
-      await CurriculumGateway.hardDeleteModule(layer.moduleId);
+      await CurriculumGateway.hardDeleteModel(layer.modelId);
     }
 
     await CurriculumGateway.touchDraft(courseId);
@@ -1418,14 +1418,14 @@ export default class CourseMapService {
    * Writes one layer's quiz, reusing whatever is already there.
    *
    * Reuse matters more than it looks. The quiz id is what a learner's attempt is
-   * recorded against and what the module is known by, so recreating it on every
+   * recorded against and what the model is known by, so recreating it on every
    * rename would throw away everyone's history to change a word.
    */
   static async writeLayer(
     courseId: string,
     depth: number,
     options: Array<{ edgeId: string; text: string }>,
-    layers: Array<{ id: string; depth: number; quizId: string; moduleId: string }>,
+    layers: Array<{ id: string; depth: number; quizId: string; modelId: string }>,
     /** What each connection currently points at, so an unchanged layer is left alone. */
     edgeOptionIds: Map<string, string | null>,
   ) {
@@ -1504,10 +1504,10 @@ export default class CourseMapService {
   }
 
   /**
-   * Mints the module, section and quiz for a layer that does not have one yet.
+   * Mints the model, section and quiz for a layer that does not have one yet.
    *
-   * The module is a real module in the course, appended at the end, so the quiz
-   * shows up in the Modules tab exactly where the author would look for it. It
+   * The model is a real model in the course, appended at the end, so the quiz
+   * shows up in the Models tab exactly where the author would look for it. It
    * is written by the map, though, so the structure editor renders it read-only
    * — see `isLayerSection`.
    */
@@ -1516,19 +1516,21 @@ export default class CourseMapService {
     // while a course's numbering is dense and part company the moment it is not,
     // and the unique index on (courseId, number) turns that disagreement into a
     // refused insert rather than a wrong number.
-    const number = (await CurriculumGateway.getHighestModuleNumber(courseId)) + 1;
+    const number = (await CurriculumGateway.getHighestModelNumber(courseId)) + 1;
 
-    const module = await CurriculumGateway.createModule({ courseId, number, title });
+    const model = await CurriculumGateway.createModel({ courseId, number, title });
 
     const section = await CurriculumGateway.createSection({
       courseId,
-      moduleId: module.id,
+      modelId: model.id,
       position: 1,
-      // Safe by construction: the module is brand new, so nothing else in this
+      // Safe by construction: the model is brand new, so nothing else in this
       // course can already be numbered inside it.
       number: `${number}.1`,
       sortKey: `${String(number).padStart(6, '0')}.000001`,
       title,
+      // A layer quiz's section is a QUIZ section like any other quiz's.
+      type: SectionType.QUIZ,
       estimatedMinutes: 0,
     });
 
@@ -1537,7 +1539,6 @@ export default class CourseMapService {
       description: 'Pick the training that applies to you. You can change this at any time.',
       type: QuizType.DIRECTED,
       sectionId: section.id,
-      order: 1,
       published: true,
       // Never timed: this is not a test, and putting a clock on "what do you do
       // here" would be a strange kind of pressure.
@@ -1548,7 +1549,7 @@ export default class CourseMapService {
       courseId,
       depth,
       quizId: quiz.id,
-      moduleId: module.id,
+      modelId: model.id,
     });
 
     return layer.quizId;
@@ -1561,7 +1562,7 @@ export default class CourseMapService {
     for (const layer of layers) {
       await CourseMapGateway.deleteLayer(layer.id);
       await QuizGateway.hardDeleteQuiz(layer.quizId);
-      await CurriculumGateway.hardDeleteModule(layer.moduleId);
+      await CurriculumGateway.hardDeleteModel(layer.modelId);
     }
   }
 
@@ -1604,7 +1605,7 @@ export default class CourseMapService {
       when it was ticked at its own depth *and* one of its parents is already
       visible. With no depth-1 quiz to answer, no depth-1 node is ever visible; no
       depth-1 node visible means depth 2 has no visible parent to hang off, and so
-      on down. The learner's projection comes back as a course with no modules and
+      on down. The learner's projection comes back as a course with no models and
       no sections at all.
 
       It is refused here rather than rendered, because the failure is silent: the
@@ -1613,7 +1614,7 @@ export default class CourseMapService {
     */
     const rootNode = nodes.find((node) => node.isRoot);
     if (rootNode && rootNode.items.length === 0) {
-      throw new Error(`${ROOT_TITLE} needs an element to publish`);
+      throw new Error(`${ROOT_TITLE} needs a section to publish`);
     }
 
     const placed = await CourseMapGateway.placedSectionIds(courseId);
@@ -1700,7 +1701,7 @@ export default class CourseMapService {
         .map(({ layer, quiz }): SnapshotMapLayer => ({
           depth: layer.depth,
           quizId: layer.quizId,
-          moduleId: layer.moduleId,
+          modelId: layer.modelId,
           sectionId: quiz!.sectionId!,
         })),
     };
@@ -1791,7 +1792,7 @@ export default class CourseMapService {
   /**
    * The sections this map places that belong to somebody else's course.
    *
-   * Returned whole — elements, quizzes and all — because they are going into
+   * Returned whole — content, quizzes and all — because they are going into
    * this course's published snapshot, and a learner handed this course has to be
    * able to read them there. Before this they were placed on the map, drawn in
    * the editor, and then silently dropped at publication: `buildSnapshot` copies

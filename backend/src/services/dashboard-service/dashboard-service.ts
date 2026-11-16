@@ -218,10 +218,7 @@ export default class DashboardService {
           const ids = await PublicationService.getNewIdsForLearner(snapshot.id, userId, snapshot);
           return [
             snapshot.id,
-            ids.newModuleIds.length +
-              ids.newSectionIds.length +
-              ids.newElementIds.length +
-              ids.newQuizIds.length,
+            ids.newModelIds.length + ids.newSectionIds.length + ids.newQuizIds.length,
           ];
         }),
       ),

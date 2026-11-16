@@ -16,7 +16,7 @@ type Db = Prisma.TransactionClient;
  *
  * The sections come back as headings — id, number, title — rather than as the
  * full tree. The map cares where a section sits, not what is inside it, and
- * elements carry base64 media that nothing on this page would draw.
+ * sections carry base64 media that nothing on this page would draw.
  */
 const nodeInclude = {
   items: {
@@ -313,16 +313,16 @@ export default class CourseMapGateway {
     return db.directedLayerQuiz.findMany({ where: { courseId }, orderBy: { depth: 'asc' } });
   }
 
-  /** Records the generated quiz and module for one depth of the map. */
+  /** Records the generated quiz and model for one depth of the map. */
   static createLayer(
-    data: { courseId: string; depth: number; quizId: string; moduleId: string },
+    data: { courseId: string; depth: number; quizId: string; modelId: string },
     db: Db = prisma,
   ) {
     return db.directedLayerQuiz.create({ data });
   }
 
   /**
-   * Drops a layer record only. The caller deletes the layer's quiz and module
+   * Drops a layer record only. The caller deletes the layer's quiz and model
    * separately.
    */
   static deleteLayer(id: string, db: Db = prisma) {

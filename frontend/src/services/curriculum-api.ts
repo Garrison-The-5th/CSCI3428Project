@@ -1,6 +1,6 @@
 /**
  * File: curriculum-api.ts
- * Description: Client for the course, section, element and note endpoints.
+ * Description: Client for the course, model, section and note endpoints.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -16,7 +16,25 @@ import HttpHelper from '@/utils/http-helper';
 
 export type { Quiz };
 
-export type ElementType = 'YOUTUBE' | 'IMAGE' | 'TEXT' | 'PDF' | 'CANVAS';
+/**
+ * What one section holds. A course is two layers — models, and the sections
+ * inside them — and a section is a single piece of content of one of these
+ * kinds, chosen when it is created.
+ */
+export type SectionType = 'YOUTUBE' | 'IMAGE' | 'TEXT' | 'PDF' | 'CANVAS' | 'QUIZ';
+
+/** The section types an author can add, in the order the picker offers them. */
+export const SECTION_TYPES: SectionType[] = ['TEXT', 'YOUTUBE', 'IMAGE', 'PDF', 'CANVAS', 'QUIZ'];
+
+/** What each type is called on a button, a badge or a rail. */
+export const SECTION_TYPE_LABELS: Record<SectionType, string> = {
+  TEXT: 'Text',
+  YOUTUBE: 'YouTube',
+  IMAGE: 'Image',
+  PDF: 'PDF',
+  CANVAS: 'Canvas',
+  QUIZ: 'Quiz',
+};
 
 /**
  * What the upload endpoints accept. HEIC is converted to JPEG server-side so it
@@ -30,10 +48,16 @@ export const UPLOAD_ACCEPT =
 export const IMAGE_ONLY_ACCEPT =
   'image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/bmp,image/heic,image/heif,.heic,.heif';
 
-export interface SectionElement {
+/**
+ * The content of a section: what `ElementView` draws and `ElementEditor` edits.
+ *
+ * Its own type, narrower than `CourseSection`, because those two components
+ * need nothing else about a section — not its number, not its model — and a
+ * preview or a test can then hand them just this.
+ */
+export interface SectionContent {
   id: string;
-  order: number;
-  type: ElementType;
+  type: SectionType;
   videoUrl: string | null;
   imageUrl: string | null;
   /** base64 of an uploaded image or PDF, when uploaded rather than linked. */
@@ -42,20 +66,20 @@ export interface SectionElement {
   /** Original filename, shown on PDF downloads. */
   fileName: string | null;
   textContent: string | null;
-  /** Runtime of a video element, used for the "hours of video" figure. */
+  /** Runtime of a video section, used for the "hours of video" figure. */
   durationMinutes: number | null;
   /** A canvas's layout and the pictures it draws from. Absent on rows from before canvases. */
   canvasData?: CanvasData | null;
 }
 
 /**
- * The tints an author may put on a module.
+ * The tints an author may put on a model.
  *
  * Deliberately pale, because the tint sits behind section titles rather than
- * beside them. Kept in step with backend/src/config/moduleColors.ts, which
+ * beside them. Kept in step with backend/src/config/modelColors.ts, which
  * refuses anything outside this list.
  */
-export const MODULE_COLORS = [
+export const MODEL_COLORS = [
   '#cfe0f5',
   '#d3ecd4',
   '#fbe3c8',
@@ -67,45 +91,52 @@ export const MODULE_COLORS = [
 ] as const;
 
 /**
- * A named group of sections and the first digit of their numbers. Module 2 holds
+ * A named group of sections and the first digit of their numbers. Model 2 holds
  * sections 2.1, 2.2, 2.3 — `number` is its 1-based place in the course.
  */
-export interface CourseModule {
+export interface CourseModel {
   id: string;
   courseId: string;
   number: number;
   title: string;
-  /** Hex tint from MODULE_COLORS, or null for no tint. */
+  /** Hex tint from MODEL_COLORS, or null for no tint. */
   color?: string | null;
 }
 
 /**
- * A part of a course, inside a module. `number` is "module.position" — "2.3" is
- * the third section of module 2 — and is derived by the server from where the
- * section sits, never typed in.
- */
-/**
  * Lesson or quiz set.
  *
- * The same shape underneath — modules holding sections — so everything about
+ * The same shape underneath — models holding sections — so everything about
  * publishing, access and the learner path is shared. The kind decides which tab
  * lists it and what the editor offers.
  */
 export type CourseKind = 'LESSON' | 'QUIZ_SET';
 
-export interface CourseSection {
-  id: string;
+/**
+ * One piece of a course, inside a model: a text, a video, a picture, a PDF, a
+ * canvas or a quiz. `type` says which, and the content travels on the section
+ * itself — there is no list of elements underneath.
+ *
+ * `number` is "model.position" — "2.3" is the third section of model 2 — and is
+ * derived by the server from where the section sits, never typed in.
+ */
+export interface CourseSection extends SectionContent {
   courseId: string;
-  moduleId: string | null;
-  /** 1-based place within the module: the digit after the dot. */
+  modelId: string | null;
+  /** 1-based place within the model: the digit after the dot. */
   position: number;
   number: string;
   title: string;
   estimatedMinutes: number;
-  /** Hex tint from MODULE_COLORS, or null for none. */
+  /** Hex tint from MODEL_COLORS, or null for none. */
   color?: string | null;
-  elements: SectionElement[];
+  /** The one quiz of a QUIZ section; empty on every other type. */
   quizzes: Quiz[];
+}
+
+/** The quiz a section holds, when it is a quiz section that has one. */
+export function quizOf(section: Pick<CourseSection, 'quizzes'>): Quiz | null {
+  return section.quizzes?.[0] ?? null;
 }
 
 export interface Instructor {
@@ -220,42 +251,42 @@ export interface Course {
   imageType: string | null;
   createdAt: string;
   updatedAt: string;
-  /** Module headings in order. The sections stay flat and point back by id. */
-  modules: CourseModule[];
+  /** Model headings in order. The sections stay flat and point back by id. */
+  models: CourseModel[];
   sections: CourseSection[];
   instructors: Instructor[];
 }
 
-/** One module with the sections that belong to it, in order. */
-export interface ModuleGroup {
-  module: CourseModule;
+/** One model with the sections that belong to it, in order. */
+export interface ModelGroup {
+  model: CourseModel;
   sections: CourseSection[];
 }
 
 /**
- * The course as the two-dimensional grid it really is: modules in order, each
+ * The course as the two-dimensional grid it really is: models in order, each
  * holding its sections in order. `course.sections` arrives flat and already sorted
- * by module-then-position, so this only has to bucket it.
+ * by model-then-position, so this only has to bucket it.
  *
- * Anything left without a live module — which only happens mid-edit, or on data
- * predating modules — is gathered at the end rather than dropped, so a section
+ * Anything left without a live model — which only happens mid-edit, or on data
+ * predating models — is gathered at the end rather than dropped, so a section
  * can never quietly vanish from the page.
  */
-export function moduleGroups(course: Course): ModuleGroup[] {
-  const groups = course.modules.map((module) => ({ module, sections: [] as CourseSection[] }));
-  const byId = new Map(groups.map((group) => [group.module.id, group]));
+export function modelGroups(course: Course): ModelGroup[] {
+  const groups = course.models.map((model) => ({ model, sections: [] as CourseSection[] }));
+  const byId = new Map(groups.map((group) => [group.model.id, group]));
 
   const orphans: CourseSection[] = [];
   for (const section of course.sections) {
-    const group = section.moduleId ? byId.get(section.moduleId) : undefined;
+    const group = section.modelId ? byId.get(section.modelId) : undefined;
     if (group) group.sections.push(section);
     else orphans.push(section);
   }
 
   if (orphans.length > 0) {
     groups.push({
-      module: {
-        id: 'unmoduleed',
+      model: {
+        id: 'ungrouped',
         courseId: course.id,
         number: groups.length + 1,
         title: 'Ungrouped',
@@ -268,65 +299,38 @@ export function moduleGroups(course: Course): ModuleGroup[] {
   return groups;
 }
 
-/** An element or a quiz, as one entry in a section's ordered content list. */
-export type SectionContentItem =
-  | { kind: 'element'; id: string; order: number; element: SectionElement }
-  | { kind: 'quiz'; id: string; order: number; quiz: Quiz };
-
-/**
- * A section's elements and quizzes merged into the single sequence they share,
- * so a quiz can sit between two pieces of content.
- */
-export function sectionContent(section: CourseSection): SectionContentItem[] {
-  return [
-    ...section.elements.map((element): SectionContentItem => ({
-      kind: 'element',
-      id: element.id,
-      order: element.order,
-      element,
-    })),
-    ...section.quizzes.map((quiz): SectionContentItem => ({
-      kind: 'quiz',
-      id: quiz.id,
-      order: quiz.order,
-      quiz,
-    })),
-  ].sort((a, b) => a.order - b.order);
-}
-
 /** Totals shown on the course page sidebar. */
 export function courseStats(course: Course) {
-  const elements = course.sections.flatMap((section) => section.elements);
+  const { sections } = course;
   return {
-    videoMinutes: elements
-      .filter((element) => element.type === 'YOUTUBE')
-      .reduce((sum, element) => sum + (element.durationMinutes ?? 0), 0),
-    articles: elements.filter((element) => element.type === 'TEXT').length,
-    resources: elements.filter((element) => element.type === 'PDF' || element.type === 'IMAGE')
+    videoMinutes: sections
+      .filter((section) => section.type === 'YOUTUBE')
+      .reduce((sum, section) => sum + (section.durationMinutes ?? 0), 0),
+    articles: sections.filter((section) => section.type === 'TEXT').length,
+    resources: sections.filter((section) => section.type === 'PDF' || section.type === 'IMAGE')
       .length,
-    quizzes: course.sections.reduce((sum, section) => sum + section.quizzes.length, 0),
+    quizzes: sections.reduce((sum, section) => sum + section.quizzes.length, 0),
     totalMinutes: course.sections.reduce((sum, section) => sum + section.estimatedMinutes, 0),
   };
 }
 
 /**
- * Turns a module tint into the pair of inline styles the rails use: a wash
+ * Turns a model tint into the pair of inline styles the rails use: a wash
  * behind the group and a solid rule down its left edge.
  *
  * Inline rather than a Tailwind class because the colour is data — the palette
  * lives in one array and the classes would have to be enumerated to match, which
  * is exactly the kind of duplication that goes stale.
  */
-export function moduleTint(color?: string | null) {
+export function modelTint(color?: string | null) {
   if (!color) return {};
   return { backgroundColor: `${color}59`, borderColor: color };
 }
 
 /** What one published version added over the one before it. */
 export interface NewIds {
-  newModuleIds: string[];
+  newModelIds: string[];
   newSectionIds: string[];
-  newElementIds: string[];
   newQuizIds: string[];
 }
 
@@ -353,9 +357,8 @@ export interface CourseVersion {
    * sweep, and shown in its own section above the rest.
    */
   archivedAt: string | null;
-  newModuleIds: string[];
+  newModelIds: string[];
   newSectionIds: string[];
-  newElementIds: string[];
   newQuizIds: string[];
   publishedBy: EditorRef | null;
   archivedBy: EditorRef | null;
@@ -375,9 +378,8 @@ export type DiffStatus = 'added' | 'removed' | 'same';
 export interface VersionDiff {
   course: Course;
   status: {
-    modules: Record<string, DiffStatus>;
+    models: Record<string, DiffStatus>;
     sections: Record<string, DiffStatus>;
-    elements: Record<string, DiffStatus>;
     quizzes: Record<string, DiffStatus>;
     questions: Record<string, DiffStatus>;
   };
@@ -403,15 +405,14 @@ export interface EditMark {
 
 /** Unpublished changes across a course, keyed by id within each kind. */
 export interface EditMarks {
-  modules: Record<string, EditMark>;
+  models: Record<string, EditMark>;
   sections: Record<string, EditMark>;
-  elements: Record<string, EditMark>;
   quizzes: Record<string, EditMark>;
   questions: Record<string, EditMark>;
 }
 
 /** What one editing claim covers. */
-export type EditScope = 'MODULE' | 'QUESTION';
+export type EditScope = 'MODEL' | 'QUESTION';
 
 /** One thing somebody currently has open. */
 export interface EditLease {
@@ -439,21 +440,45 @@ export interface DeletedCourse {
 }
 
 /**
- * No number on either of these. A recycled item's old number now belongs to
- * whatever closed the gap behind it, so showing it would name the wrong thing.
+ * What one course's Archive tab lists as deleted.
+ *
+ * No number on any of it: a recycled item's old number now belongs to whatever
+ * closed the gap behind it, so showing it would name the wrong thing.
  */
 export interface DeletedSection {
   id: string;
   title: string;
+  type: SectionType;
   deletedAt: string;
-  course: { id: string; title: string } | null;
 }
 
-export interface DeletedModule {
+/** A deleted model, with the deleted sections that come back when it is restored. */
+export interface DeletedModel {
   id: string;
   title: string;
   deletedAt: string;
-  course: { id: string; title: string } | null;
+  sections: Array<{ id: string; title: string; type: SectionType }>;
+}
+
+/**
+ * A deleted quiz that belongs to this course, listed under its section's title.
+ * Restoring or purging it goes through its section (`sectionId`), because a
+ * course quiz and its section are deleted and restored as one.
+ */
+export interface DeletedCourseQuiz {
+  id: string;
+  title: string;
+  sectionId: string;
+  sectionTitle: string;
+  deletedAt: string;
+}
+
+export interface DeletedStructure {
+  models: DeletedModel[];
+  sections: DeletedSection[];
+  quizzes: DeletedCourseQuiz[];
+  /** How long deleted items are kept before they are cleared. */
+  retentionDays: number;
 }
 
 /** Builds a data URI for an uploaded image so it can go straight into <img src>. */
@@ -528,10 +553,8 @@ export interface Deadline {
 /** What a learner has already done — drives ticks and sequential unlocking. */
 export interface LearnerProgress {
   viewedSectionIds: string[];
-  /** Individual items opened. A sequential course unlocks off these, not sections. */
-  viewedElementIds: string[];
   /** The same views with their timestamps, newest first. Drives Continue. */
-  elementViews?: Array<{ elementId: string; viewedAt: string }>;
+  sectionViews?: Array<{ sectionId: string; viewedAt: string }>;
   attemptedQuizIds: string[];
 }
 
@@ -559,7 +582,7 @@ export const curriculumApi = {
 
   /**
    * One course. Worth the separate call rather than filtering getCourses: a
-   * course carries its elements' base64 media, so fetching the whole catalogue
+   * course carries its sections' base64 media, so fetching the whole catalogue
    * to render one of them moves megabytes for nothing.
    */
   getCourse: async (courseId: string): Promise<Course | null> => {
@@ -591,13 +614,19 @@ export const curriculumApi = {
     return response.courses ?? [];
   },
 
+  /**
+   * The admin recycle bin's courses (quiz sets among them). Models and sections
+   * deleted inside a live course are not here — see `getDeletedStructure`.
+   */
   getDeleted: (): Promise<{
     courses: DeletedCourse[];
-    modules: DeletedModule[];
-    sections: DeletedSection[];
     /** How long the bin keeps things before clearing them itself. */
     retentionDays: number;
   }> => HttpHelper.get('curriculum/deleted'),
+
+  /** What one course's Archive tab lists as deleted: models, sections and quizzes. */
+  getDeletedStructure: (courseId: string): Promise<DeletedStructure> =>
+    HttpHelper.get(`curriculum/courses/${courseId}/deleted`),
 
   restoreCourse: (courseId: string) =>
     HttpHelper.post(`curriculum/courses/${courseId}/restore`, {}),
@@ -605,10 +634,10 @@ export const curriculumApi = {
   restoreSection: (sectionId: string) =>
     HttpHelper.post(`curriculum/sections/${sectionId}/restore`, {}),
 
-  /** Restores every deleted course and section. */
+  /** Restores every deleted course. Models and sections are restored from a course's Archive. */
   restoreAllDeleted: () => HttpHelper.post('curriculum/deleted/restore-all', {}),
 
-  /** Permanent — empties the curriculum side of the recycle bin. */
+  /** Permanent — empties the recycle bin of courses. A course's Archive is not touched. */
   purgeAllDeleted: () => HttpHelper.delete('curriculum/deleted'),
 
   purgeCourse: (courseId: string) => HttpHelper.delete(`curriculum/deleted/courses/${courseId}`),
@@ -626,15 +655,9 @@ export const curriculumApi = {
   removeCourseImage: (courseId: string) =>
     HttpHelper.delete(`curriculum/courses/${courseId}/image`),
 
-  uploadSectionImage: (sectionId: string, file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    return HttpHelper.postFormData(`curriculum/sections/${sectionId}/image`, form);
-  },
-
   createCourse: (title: string) => HttpHelper.post('curriculum/courses', { title }),
 
-  /** A course that holds one quiz per section and no elements. */
+  /** A course that holds one quiz section per quiz and nothing else. */
   createQuizSet: (title: string) => HttpHelper.post('curriculum/quiz-sets', { title }),
 
   updateCourse: (
@@ -724,7 +747,7 @@ export const curriculumApi = {
   },
 
   /**
-   * Takes or renews a claim on one module or question.
+   * Takes or renews a claim on one model or question.
    *
    * The same call for both, so the editor sends one thing on opening something
    * and every few seconds after. `granted` is false when somebody else got there
@@ -824,70 +847,63 @@ export const curriculumApi = {
 
   deleteCourse: (courseId: string) => HttpHelper.delete(`curriculum/courses/${courseId}`),
 
-  // ---- Modules ----
+  // ---- Models ----
 
-  /** A module is a title and the place in the course it should sit at. */
-  createModule: (
+  /** A model is a title and the place in the course it should sit at. */
+  createModel: (
     courseId: string,
     data: { title: string; number?: number; color?: string | null },
-  ) => HttpHelper.post(`curriculum/courses/${courseId}/modules`, data),
+  ) => HttpHelper.post(`curriculum/courses/${courseId}/models`, data),
 
-  updateModule: (
-    moduleId: string,
+  updateModel: (
+    modelId: string,
     data: { title?: string; number?: number; color?: string | null },
-  ) => HttpHelper.put(`curriculum/modules/${moduleId}`, data),
+  ) => HttpHelper.put(`curriculum/models/${modelId}`, data),
 
-  /** Soft delete — the module's sections go to the recycle bin with it. */
-  deleteModule: (moduleId: string) => HttpHelper.delete(`curriculum/modules/${moduleId}`),
+  /** Soft delete — the model's sections go to the course's Archive with it. */
+  deleteModel: (modelId: string) => HttpHelper.delete(`curriculum/models/${modelId}`),
 
-  restoreModule: (moduleId: string) =>
-    HttpHelper.post(`curriculum/modules/${moduleId}/restore`, {}),
+  restoreModel: (modelId: string) => HttpHelper.post(`curriculum/models/${modelId}/restore`, {}),
 
-  purgeModule: (moduleId: string) => HttpHelper.delete(`curriculum/deleted/modules/${moduleId}`),
+  purgeModel: (modelId: string) => HttpHelper.delete(`curriculum/deleted/models/${modelId}`),
 
   // ---- Sections ----
 
-  /** Lands at the end of `moduleId`, or at `position` within it when given. */
+  /**
+   * Adds a section. `type` is required — a section is one piece of content, and
+   * what kind is chosen when it is made. Lands at the end of `modelId`, or at
+   * `position` within it when given. A QUIZ section is created with its quiz
+   * inside (`quizType`, an exam unless said otherwise).
+   */
   createSection: (
     courseId: string,
     data: {
-      moduleId?: string;
+      type: SectionType;
+      modelId?: string;
       position?: number;
       title: string;
-      estimatedMinutes: number;
+      estimatedMinutes?: number;
       color?: string | null;
-    },
-  ) => HttpHelper.post(`curriculum/courses/${courseId}/sections`, data),
-
-  /** Numbers come from position in the grid, so they are not editable here. */
-  updateSection: (
-    sectionId: string,
-    data: { title?: string; estimatedMinutes?: number; color?: string | null },
-  ) => HttpHelper.put(`curriculum/sections/${sectionId}`, data),
-
-  /**
-   * Sends the whole grid: modules in their new order, each with its section ids
-   * in theirs. The server derives every number from these positions.
-   */
-  reorderStructure: (courseId: string, modules: Array<{ id: string; sectionIds: string[] }>) =>
-    HttpHelper.put(`curriculum/courses/${courseId}/structure`, { modules }),
-
-  deleteSection: (sectionId: string) => HttpHelper.delete(`curriculum/sections/${sectionId}`),
-
-  createElement: (
-    sectionId: string,
-    element: {
-      type: ElementType;
+      quizType?: string;
       videoUrl?: string;
       imageUrl?: string;
       textContent?: string;
       durationMinutes?: number;
     },
-  ) => HttpHelper.post(`curriculum/sections/${sectionId}/elements`, element),
+  ): Promise<{ message: string; section: CourseSection }> =>
+    HttpHelper.post(`curriculum/courses/${courseId}/sections`, data),
 
-  updateElement: (
-    elementId: string,
+  /**
+   * Edits a section's heading or its content; also the canvas auto-save.
+   * Numbers come from position in the grid, and the type from creation, so
+   * neither is editable here.
+   */
+  updateSection: (
+    sectionId: string,
     data: {
+      title?: string;
+      estimatedMinutes?: number;
+      color?: string | null;
       textContent?: string | null;
       videoUrl?: string | null;
       imageUrl?: string | null;
@@ -895,32 +911,41 @@ export const curriculumApi = {
       /** The layout only — pictures are uploaded on their own and kept by the server. */
       canvas?: CanvasLayout;
     },
-  ) => HttpHelper.put(`curriculum/elements/${elementId}`, data),
+  ) => HttpHelper.put(`curriculum/sections/${sectionId}`, data),
 
-  /** Uploads an image or PDF into an existing image block. */
-  uploadElementFile: (elementId: string, file: File) => {
+  /**
+   * Sends the whole grid: models in their new order, each with its section ids
+   * in theirs. The server derives every number from these positions.
+   */
+  reorderStructure: (courseId: string, models: Array<{ id: string; sectionIds: string[] }>) =>
+    HttpHelper.put(`curriculum/courses/${courseId}/structure`, { models }),
+
+  deleteSection: (sectionId: string) => HttpHelper.delete(`curriculum/sections/${sectionId}`),
+
+  /** Uploads an image or PDF into an IMAGE or PDF section, replacing what it held. */
+  uploadSectionFile: (sectionId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
-    return HttpHelper.postFormData(`curriculum/elements/${elementId}/file`, form);
+    return HttpHelper.postFormData(`curriculum/sections/${sectionId}/file`, form);
   },
 
   /** Stores a picture on a canvas. Same rules as a cover photo; placing it is up to the editor. */
   uploadCanvasImage: async (
-    elementId: string,
+    sectionId: string,
     file: File,
   ): Promise<CanvasImageAsset & { imageId: string }> => {
     const form = new FormData();
     form.append('file', file);
     const response = await HttpHelper.postFormData(
-      `curriculum/elements/${elementId}/canvas-images`,
+      `curriculum/sections/${sectionId}/canvas-images`,
       form,
     );
     return response.image;
   },
 
   /** The items every new canvas in this canvas's course starts with. */
-  getCanvasTemplate: async (elementId: string): Promise<CanvasItem[]> => {
-    const response = await HttpHelper.get(`curriculum/elements/${elementId}/canvas-template`);
+  getCanvasTemplate: async (sectionId: string): Promise<CanvasItem[]> => {
+    const response = await HttpHelper.get(`curriculum/sections/${sectionId}/canvas-template`);
     return response.items ?? [];
   },
 
@@ -929,32 +954,20 @@ export const curriculumApi = {
    * one). Resolves with the course's defaults as they now stand.
    */
   setCanvasTemplateItem: async (
-    elementId: string,
+    sectionId: string,
     item: CanvasItem,
     include: boolean,
   ): Promise<CanvasItem[]> => {
-    const response = await HttpHelper.put(`curriculum/elements/${elementId}/canvas-template`, {
+    const response = await HttpHelper.put(`curriculum/sections/${sectionId}/canvas-template`, {
       item,
       include,
     });
     return response.items ?? [];
   },
 
-  deleteElement: (elementId: string) => HttpHelper.delete(`curriculum/elements/${elementId}`),
-
-  /** Sends a section's elements and quizzes in their new combined order. */
-  reorderSectionContent: (
-    sectionId: string,
-    items: Array<{ kind: 'element' | 'quiz'; id: string }>,
-  ) => HttpHelper.put(`curriculum/sections/${sectionId}/content-order`, { items }),
-
-  /** Sections auto-complete on view. */
+  /** Sections auto-complete on view — which is also what unlocks the next one on a sequential course. */
   recordSectionView: (sectionId: string) =>
     HttpHelper.post(`curriculum/sections/${sectionId}/view`, {}),
-
-  /** One item seen — what unlocks the next on a sequential course. */
-  recordElementView: (elementId: string) =>
-    HttpHelper.post(`curriculum/elements/${elementId}/view`, {}),
 
   getDashboard: (): Promise<Dashboard> => HttpHelper.get('curriculum/dashboard'),
 

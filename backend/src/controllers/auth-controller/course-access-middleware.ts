@@ -31,7 +31,7 @@ import EditAttributionService, {
  * may open somebody else's. What it still buys is the courses that predate
  * ownership being recorded; see `CurriculumGateway.accessibleCourses`.
  *
- * Every mutation names something inside a course — a section, an element, a quiz —
+ * Every mutation names something inside a course — a model, a section, a quiz —
  * so the caller supplies a resolver that maps the request back to a course id.
  */
 export type CourseResolver = (req: AuthenticatedRequest) => Promise<string | null>;
@@ -44,20 +44,15 @@ export const fromCourseParam =
   async (req) =>
     param(req, name);
 
-export const fromModuleParam =
+export const fromModelParam =
   (name = 'id'): CourseResolver =>
   (req) =>
-    CurriculumGateway.courseIdFromModule(param(req, name));
+    CurriculumGateway.courseIdFromModel(param(req, name));
 
 export const fromSectionParam =
   (name = 'id'): CourseResolver =>
   (req) =>
     CurriculumGateway.courseIdFromSection(param(req, name));
-
-export const fromElementParam =
-  (name = 'id'): CourseResolver =>
-  (req) =>
-    CurriculumGateway.courseIdFromElement(param(req, name));
 
 /** A map node back to the course whose map it is on. */
 export const fromNodeParam =
@@ -133,7 +128,7 @@ export const fromAssignmentParam =
  * request has actually succeeded.
  *
  * Hung off the response rather than called by each handler on purpose. Learners
- * read a published snapshot, so *every* edit — a renamed module as much as a
+ * read a published snapshot, so *every* edit — a renamed model as much as a
  * new section — has to register as an unpublished change, and a rule that has to
  * be remembered at thirty call sites is a rule that will be missed at one.
  *

@@ -20,6 +20,7 @@ import PublicationService from '@/services/publication-service/publication-servi
 import QuizService from '@/services/quiz-service/quiz-service';
 
 import { prisma } from '../prisma/prisma-client';
+import { createQuizSection } from './quiz-section';
 
 let failures = 0;
 
@@ -37,19 +38,19 @@ function check(label: string, actual: unknown, expected: unknown) {
 async function main() {
   const course = await CurriculumService.createCourse('TIMER TEST — safe to delete');
   const courseId = course!.id;
-  const [module] = await CurriculumGateway.getModules(courseId);
-  const section = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
-    title: 'Holder',
-  });
+  const [model] = await CurriculumGateway.getModels(courseId);
   const user = await AuthService.getOrCreateUser('timercheck@example.test');
 
-  const timed = await QuizService.createQuiz({
+  // Each quiz is a section of its own: that is the only place a course quiz lives.
+  const { quiz: timed } = await createQuizSection(courseId, {
+    modelId: model.id,
     title: 'Timed',
-    sectionId: section!.id,
     timeLimitMinutes: 30,
   });
-  const untimed = await QuizService.createQuiz({ title: 'Untimed', sectionId: section!.id });
+  const { quiz: untimed } = await createQuizSection(courseId, {
+    modelId: model.id,
+    title: 'Untimed',
+  });
 
   // Retakes allowed on the timed one, because the last scenario here is about a
   // closed run handing out a fresh clock — which is a second sitting, and an
@@ -85,12 +86,11 @@ async function main() {
     the course has never been published, so that is what this is.
   */
   const hidden = await CurriculumService.createCourse('TIMER TEST unpublished — safe to delete');
-  const [hiddenModule] = await CurriculumGateway.getModules(hidden!.id);
-  const hiddenSection = await CurriculumService.createSection(hidden!.id, {
-    moduleId: hiddenModule.id,
-    title: 'Holder',
+  const [hiddenModel] = await CurriculumGateway.getModels(hidden!.id);
+  const { quiz: draft } = await createQuizSection(hidden!.id, {
+    modelId: hiddenModel.id,
+    title: 'Draft',
   });
-  const draft = await QuizService.createQuiz({ title: 'Draft', sectionId: hiddenSection!.id });
 
   // Neither door opens: `quizForRun` cannot find it in any snapshot, and both
   // starting and submitting go through that one lookup.

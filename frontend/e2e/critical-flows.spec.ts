@@ -198,6 +198,70 @@ test.describe('critical workflows (signed in)', () => {
     await expect(page.getByRole('heading', { name: /learning/i })).toBeVisible();
   });
 
+  /**
+   * The two-layer course structure, end to end: a section is created with its
+   * type, deleted, and found in the lesson's own Archive tab rather than in the
+   * admin recycle bin.
+   *
+   * Needs the test account to be an author (admin or contributor). An account
+   * without that never reaches the Create a Lesson page, and the flow is
+   * skipped rather than failed — it is a statement about the account, not the
+   * app.
+   */
+  test('an author adds a typed section, deletes it, and finds it in Archive', async ({ page }) => {
+    await page.goto('/admin/learning');
+    const canAuthor = await page
+      .getByRole('heading', { name: 'Create a Lesson' })
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    test.skip(!canAuthor, 'The E2E test account is not an author.');
+
+    const lessonName = `E2E two-layer ${Date.now()}`;
+    await page.getByPlaceholder('Lesson name').fill(lessonName);
+    await page.getByRole('button', { name: /Create and edit/ }).click();
+    await expect(page).toHaveURL(/\/admin\/learning\/[0-9a-f-]+$/);
+
+    // Opening the Modules tab tucks the editor's own menu away.
+    await page.getByRole('button', { name: 'Modules', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible();
+
+    // The type is chosen first; there is no blank option to leave it on.
+    const type = page.getByLabel('Section type');
+    await expect(type.locator('option')).toHaveText([
+      'Text',
+      'YouTube',
+      'Image',
+      'PDF',
+      'Canvas',
+      'Quiz',
+    ]);
+    await type.selectOption('YOUTUBE');
+    await page.getByPlaceholder('New section title').fill('Watch this first');
+    await page.getByRole('button', { name: /Add section/ }).click();
+
+    // One row in the outline, badged with its type, and its own editor open.
+    const row = page.getByRole('button', { name: /1\.1 Watch this first/ });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('YouTube');
+    await expect(page.getByPlaceholder('YouTube video URL')).toBeVisible();
+
+    // Delete it…
+    await page.getByTitle('Delete section').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(row).toBeHidden();
+
+    // …and it is in this lesson's Archive, with Restore beside it.
+    await page.getByRole('button', { name: 'Archive', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /Deleted items \(1\)/ })).toBeVisible();
+    await expect(page.getByText('Watch this first')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Restore Watch this first' })).toBeVisible();
+
+    // Tidy up: the lesson itself goes to the recycle bin.
+    await page.getByTitle('Delete lesson').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  });
+
   test('a learner can download their own data (§3.5.3)', async ({ page }) => {
     // On Profile, not Contact us: the privacy notice sits with the rest of what
     // the platform holds about this person.

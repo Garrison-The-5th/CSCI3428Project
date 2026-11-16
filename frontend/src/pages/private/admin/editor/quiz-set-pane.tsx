@@ -14,7 +14,7 @@
  * empty state that came before the author had used it: the set is created with
  * its quiz already in it, so there is nothing here but the quiz itself.
  *
- * Underneath, a set is still a course with one module and one section, and the
+ * Underneath, a set is still a course with one model and one section, and the
  * section is still what carries the name, the estimated time and the place in
  * the order. The author never meets any of that — they see a title, a time, and
  * the questions — and the two names are kept in step by `saveTitleTo`, because

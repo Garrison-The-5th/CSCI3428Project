@@ -43,7 +43,6 @@ model User {
   /// where it was left. Bounded by TOUR_STEP_COUNT in `config/validation.ts`.
   tourStep          Int                 @default(0)
   sectionViews      SectionProgress[]
-  elementViews      ElementProgress[]
   quizAttempts      QuizAttempt[]
   quizSessions      QuizSession[]
   notes             Note[]
@@ -65,9 +64,8 @@ model User {
   editLeases        EditLease[]
   /// Draft edits credited to this person. Cleared when the course is published,
   /// because at that point there is no unpublished change left to attribute.
-  editedModules     Module[]            @relation("ModuleEditor")
+  editedModels      Model[]             @relation("ModelEditor")
   editedSections    Section[]           @relation("SectionEditor")
-  editedElements    Element[]           @relation("ElementEditor")
   editedQuizzes     Quiz[]              @relation("QuizEditor")
   editedQuestions   Question[]          @relation("QuestionEditor")
   /// Which branches of a directed course this person picked, per layer.
@@ -89,14 +87,16 @@ enum TourStatus {
 
 /// What kind of thing a Course is.
 ///
-/// Both are the same shape — modules holding sections holding content — and
+/// Both are the same shape — models holding sections, each section one piece
+/// of content — and
 /// share publishing, versioning, access and the whole learner path. They differ
 /// only in what an author is offered while editing one, and in which tab it
 /// appears under.
 enum CourseKind {
-  /// A lesson: sections of elements, with quizzes dropped in among them.
+  /// A lesson: sections of text, video, pictures and files, with quiz sections
+  /// dropped in among them.
   LESSON
-  /// A quiz set: one module, and a section per quiz. No elements.
+  /// A quiz set: one model, and a QUIZ section per quiz. Nothing else.
   QUIZ_SET
 }
 
@@ -150,11 +150,11 @@ model Course {
   /// Off is the ordinary course, and off is what every course that existed
   /// before this column is: the mapping tab is hidden, the staging step does not
   /// apply, and publishing asks nothing new. On, and the sections authored in
-  /// the Modules tab are delivered through `mapNodes` instead — each learner
+  /// the Models tab are delivered through `mapNodes` instead — each learner
   /// gets the branches they picked at the generated quizzes, so two people on
   /// the same course can read entirely different content.
   ///
-  /// Only meaningful on a LESSON. A quiz set has one module and a section per
+  /// Only meaningful on a LESSON. A quiz set has one model and a section per
   /// quiz; there is no path through it to direct.
   directedLearning  Boolean    @default(false)
   /// The one course every account and every link holder has without being
@@ -174,7 +174,7 @@ model Course {
   /// doing the mapping. Nothing about it reaches a learner — that is still
   /// `publish`.
   stagedAt          DateTime?
-  /// The modules and sections that existed when the course was last staged.
+  /// The models and sections that existed when the course was last staged.
   ///
   /// Mapping is refused while anything has been added since: the staging pool
   /// and the map would otherwise disagree about what there is to place. Ids
@@ -215,29 +215,29 @@ model Course {
   createdById       Int?
   createdBy         User?      @relation("CourseAuthor", fields: [createdById], references: [id], onDelete: SetNull)
 
-  modules         Module[]
+  models          Model[]
   sections        Section[]
   completions     CourseCompletion[]
   /// People allowed to edit this one course without being global authors.
-  contributors    User[]              @relation("CourseContributors")
+  contributors    User[]                @relation("CourseContributors")
   instructors     Instructor[]
   notes           Note[]
   assignments     Assignment[]
   publications    CoursePublication[]
-  /// Who currently has a module or a question in this course open.
+  /// Who currently has a model or a question in this course open.
   editLeases      EditLease[]
   /// The directed-learning map: its nodes, the connections between them, and the
   /// quiz generated for each layer. Empty on every course that is not directed.
   mapNodes        CourseMapNode[]
   mapEdges        CourseMapEdge[]
-  mapImports      CourseMapImport[]   @relation("MapImportOwner")
+  mapImports      CourseMapImport[]     @relation("MapImportOwner")
   /// Maps that offer this course's sections as importable content.
-  mapImportedBy   CourseMapImport[]   @relation("MapImportSource")
+  mapImportedBy   CourseMapImport[]     @relation("MapImportSource")
   layerQuizzes    DirectedLayerQuiz[]
   directedChoices DirectedChoice[]
   /// Other courses' maps linked into this one, and this map linked into others.
-  mapSubgraphs    CourseMapSubgraph[] @relation("SubgraphOwner")
-  mapLinkedInto   CourseMapSubgraph[] @relation("SubgraphSource")
+  mapSubgraphs    CourseMapSubgraph[]   @relation("SubgraphOwner")
+  mapLinkedInto   CourseMapSubgraph[]   @relation("SubgraphSource")
   /// The items every new canvas in this course starts with. See CourseCanvasTemplate.
   canvasTemplate  CourseCanvasTemplate?
 
@@ -248,14 +248,14 @@ model Course {
 /// One published version of a course, frozen at the moment it went live.
 ///
 /// The whole course tree is stored as JSON rather than as a second set of rows.
-/// Two reasons. Progress is keyed on element, section and quiz ids, and those
+/// Two reasons. Progress is keyed on section and quiz ids, and those
 /// have to stay stable across a publish or every learner's history would break —
 /// copying rows would mint new ids. And authors get to keep editing the live
 /// tables exactly as before, with no draft/live pair on every column: the
 /// snapshot is what a learner reads, so an unpublished edit is invisible for
 /// free.
 ///
-/// The cost is that snapshots carry their elements' base64 media, so they are
+/// The cost is that snapshots carry their sections' base64 media, so they are
 /// large. That is bounded by the retention sweep, which keeps only the live
 /// version and whatever was superseded inside the archive window.
 /// The items an author marked as defaults for new canvases in one course.
@@ -308,9 +308,8 @@ model CoursePublication {
   /// What this version added compared with the one before it, so a learner who
   /// had already finished can be shown exactly what is new. Worked out once at
   /// publish time rather than by diffing two snapshots on every page load.
-  newModuleIds  String[] @default([])
+  newModelIds   String[] @default([])
   newSectionIds String[] @default([])
-  newElementIds String[] @default([])
   newQuizIds    String[] @default([])
 
   @@unique([courseId, version])
@@ -439,17 +438,17 @@ model Note {
 
 /// A named group of sections, and the first digit of every section number inside it.
 ///
-/// Course structure is a two-dimensional grid: the module is the outer index and
-/// the section its inner one, so module 2's third section is "2.3". `number` is the
-/// module's 1-based place in the course, which the author sets directly.
-model Module {
+/// Course structure is a two-dimensional grid: the model is the outer index and
+/// the section its inner one, so model 2's third section is "2.3". `number` is the
+/// model's 1-based place in the course, which the author sets directly.
+model Model {
   id             String             @id @default(uuid())
   courseId       String
   course         Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
   number         Int
   title          String
   /// Hex tint the author picked, e.g. "#c7d9f0". Used at low opacity behind the
-  /// module's sections so a long course reads as groups at a glance. Null means
+  /// model's sections so a long course reads as groups at a glance. Null means
   /// no tint, which is the default.
   color          String?
   deletedAt      DateTime? // soft delete: recoverable from the admin dashboard
@@ -461,10 +460,10 @@ model Module {
   /// the marks up would tag every course forever.
   lastEditedById Int?
   lastEditedAt   DateTime?
-  lastEditedBy   User?              @relation("ModuleEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  lastEditedBy   User?              @relation("ModelEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   sections       Section[]
-  /// Set when this module is the auto-managed home of a layer quiz. Such a
-  /// module is written by the map and is read-only in the structure editor.
+  /// Set when this model is the auto-managed home of a layer quiz. Such a
+  /// model is written by the map and is read-only in the structure editor.
   layer          DirectedLayerQuiz?
 
   @@unique([courseId, number])
@@ -472,39 +471,62 @@ model Module {
   @@index([lastEditedById])
 }
 
-/// A part of a course, living inside a module.
+/// One piece of a course, living inside a model.
 ///
-/// `position` is the section's 1-based place within its module — the digit after
+/// A course has two layers: models, and the sections inside them. A section is
+/// the content itself — one text, one video, one picture, one PDF, one canvas or
+/// one quiz — and `type` says which. There is no layer underneath it: what used
+/// to be a list of elements inside a section is now a run of sections.
+///
+/// `position` is the section's 1-based place within its model — the digit after
 /// the dot. `number` ("2.3") and `sortKey` (zero-padded, so "1.10" sorts after
-/// "1.2") are derived from module.number and position and stored so ordering and
+/// "1.2") are derived from model.number and position and stored so ordering and
 /// display cost nothing to read. Never set them by hand: they are rewritten
 /// wholesale by the renumbering pass in CurriculumService.
 model Section {
   id               String            @id @default(uuid())
   courseId         String
   course           Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  moduleId         String?
-  module           Module?           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  modelId          String?
+  model            Model?            @relation(fields: [modelId], references: [id], onDelete: Cascade)
   position         Int               @default(1)
   number           String
   sortKey          String
   title            String
+  /// What this section is. Chosen when it is created and required there: it has
+  /// no default on purpose, so a section cannot exist without saying what it
+  /// holds.
+  type             SectionType
   estimatedMinutes Int               @default(0) // admin's estimate; summed for the course total
-  /// Hex tint the author picked, from the same closed palette a module uses.
+  /// Hex tint the author picked, from the same closed palette a model uses.
   ///
-  /// Modules already carried one, which was enough while a section was only ever
-  /// read inside its module's group. A quiz set has one module and a long flat
+  /// Models already carried one, which was enough while a section was only ever
+  /// read inside its model's group. A quiz set has one model and a long flat
   /// list of sections, so the colour has to live at this level to be any use.
   color            String?
+  videoUrl         String? // for YOUTUBE type (the private/unlisted link)
+  imageUrl         String? // for IMAGE type, when linked rather than uploaded
+  imageData        String?           @db.Text // base64 of an uploaded image or PDF
+  imageType        String? // MIME type of the uploaded file
+  fileName         String? // original filename, shown for PDF downloads
+  textContent      String? // for TEXT type
+  /// For CANVAS type: the layout (pictures, text boxes, shapes) and the pool of
+  /// uploaded pictures it draws from. Shape in src/config/canvas.ts.
+  canvasData       Json?
+  /// Runtime of a YOUTUBE section, entered by the author. Summed for the
+  /// "hours of video" figure on the course page.
+  durationMinutes  Int?
   /// When the section was added. Compared against a learner's completion date to
   /// name exactly what is new to them, rather than only that something is.
   createdAt        DateTime          @default(now())
-  deletedAt        DateTime? // soft delete: recoverable from the admin dashboard
-  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  deletedAt        DateTime? // soft delete: recoverable from the course's Archive tab
+  /// Who last changed this as a draft, and when. See Model.lastEditedById.
   lastEditedById   Int?
   lastEditedAt     DateTime?
   lastEditedBy     User?             @relation("SectionEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
-  elements         Element[]
+  /// The quiz of a QUIZ section. A list because the column lives on Quiz, but a
+  /// QUIZ section holds exactly one and every other type holds none —
+  /// CurriculumService and QuizService keep that true.
   quizzes          Quiz[]
   views            SectionProgress[]
   /// Where this section sits on a course map — its own course's, or another
@@ -513,47 +535,28 @@ model Section {
 
   @@unique([courseId, number])
   @@index([courseId, sortKey])
-  @@index([moduleId, position])
+  @@index([modelId, position])
   @@index([lastEditedById])
 }
 
-model Element {
-  id              String            @id @default(uuid())
-  sectionId       String
-  section         Section           @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  order           Int // position within the section
-  type            ElementType
-  videoUrl        String? // for YOUTUBE type (the private/unlisted link)
-  imageUrl        String? // for IMAGE type, when linked rather than uploaded
-  imageData       String?           @db.Text // base64 of an uploaded image or PDF
-  imageType       String? // MIME type of the uploaded file
-  fileName        String? // original filename, shown for PDF downloads
-  textContent     String? // for TEXT type
-  /// For CANVAS type: the layout (pictures, text boxes, shapes) and the pool of
-  /// uploaded pictures it draws from. Shape in src/config/canvas.ts.
-  canvasData      Json?
-  /// Runtime of a YOUTUBE element, entered by the author. Summed for the
-  /// "hours of video" figure on the course page.
-  durationMinutes Int?
-  /// Who last changed this as a draft, and when. See Module.lastEditedById.
-  lastEditedById  Int?
-  lastEditedAt    DateTime?
-  lastEditedBy    User?             @relation("ElementEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
-  views           ElementProgress[]
-
-  @@index([sectionId])
-  @@index([lastEditedById])
-}
-
-enum ElementType {
+/// What one section holds.
+enum SectionType {
   YOUTUBE
   IMAGE
   TEXT
   PDF
   CANVAS
+  /// A quiz. The Quiz row hangs off the section through `Quiz.sectionId`.
+  QUIZ
 }
 
-/// Sections auto-complete on view, so one row per user per section is all progress needs.
+/// One row per user per section they have opened.
+///
+/// This is the whole of content progress now that a section is a single piece
+/// of content: a sequential course unlocks section by section, and "have they
+/// seen the thing before this one" is answered here. Keyed on the section id
+/// rather than a position so reordering or inserting content cannot silently
+/// re-lock what someone read.
 model SectionProgress {
   id        String   @id @default(uuid())
   userId    Int
@@ -564,24 +567,6 @@ model SectionProgress {
 
   @@unique([userId, sectionId])
   @@index([sectionId])
-}
-
-/// One piece of content a learner has opened.
-///
-/// Finer grained than SectionProgress on purpose: a sequential course unlocks item
-/// by item, so "have they seen the thing before this one" has to be answerable
-/// per element, not per section. Keyed on the element id rather than a position so
-/// reordering or inserting content cannot silently re-lock what someone read.
-model ElementProgress {
-  id        String   @id @default(uuid())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  elementId String
-  element   Element  @relation(fields: [elementId], references: [id], onDelete: Cascade)
-  viewedAt  DateTime @default(now())
-
-  @@unique([userId, elementId])
-  @@index([elementId])
 }
 
 model QuizAttempt {
@@ -628,9 +613,9 @@ model QuizAnswer {
 /// Which of the three kinds of quiz this is. The kind decides where it may live,
 /// whether it can be timed, whether the mark is kept, and who may see it.
 enum QuizType {
-  /// A formative check inside a section. Never timed, mark never stored, never
+  /// A formative check inside a lesson. Never timed, mark never stored, never
   /// listed on the Quizzes tab — but it must be attempted before the learner may
-  /// move on to the next element.
+  /// move on to the next section.
   LEARNING_CHECK
   /// The ordinary graded quiz. Stands alone or sits in a section, may be timed,
   /// scores go to the dashboard, appears on the Quizzes tab.
@@ -663,8 +648,8 @@ model Quiz {
   type                  QuizType           @default(EXAM)
   sectionId             String?
   section               Section?           @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  /// Position within the section, sharing one sequence with Element.order so a
-  /// quiz can sit between two pieces of content.
+  /// Unused for a quiz in a course: its place is its section's `position`. Kept
+  /// for the older quizzes that stand alone.
   order                 Int                @default(0)
   published             Boolean            @default(false) // hidden from learners until published
   /// Show the score screen — the ring and the percentage — after submitting.
@@ -701,7 +686,7 @@ model Quiz {
   /// When the quiz was added, for the same reason as Section.createdAt.
   createdAt             DateTime           @default(now())
   deletedAt             DateTime? // soft delete: recoverable from the admin dashboard
-  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  /// Who last changed this as a draft, and when. See Model.lastEditedById.
   lastEditedById        Int?
   lastEditedAt          DateTime?
   lastEditedBy          User?              @relation("QuizEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
@@ -746,7 +731,7 @@ model Question {
   prompt            String
   hint              String? // shown in a popup when the learner asks for a hint
   hintSectionNumber String? // optional section number the hint points back to, e.g. "1.2"
-  /// Who last changed this as a draft, and when. See Module.lastEditedById.
+  /// Who last changed this as a draft, and when. See Model.lastEditedById.
   lastEditedById    Int?
   lastEditedAt      DateTime?
   lastEditedBy      User?     @relation("QuestionEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
@@ -772,10 +757,10 @@ model Option {
 
 /// What one editing claim covers.
 enum EditScope {
-  /// A whole module, and everything inside it. Claimed while an author has that
-  /// module open in the structure editor.
-  MODULE
-  /// One question in a quiz. Finer than a module on purpose — two people writing
+  /// A whole model, and everything inside it. Claimed while an author has that
+  /// model open in the structure editor.
+  MODEL
+  /// One question in a quiz. Finer than a model on purpose — two people writing
   /// different questions in the same quiz is ordinary and should not block.
   QUESTION
 }
@@ -798,7 +783,7 @@ model EditLease {
   courseId  String
   course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   scope     EditScope
-  /// The module or question this covers.
+  /// The model or question this covers.
   targetId  String
   userId    Int
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -965,7 +950,7 @@ model CourseMapSubgraph {
   @@index([anchorNodeId])
 }
 
-/// The generated quiz for one layer of a map, and the module it lives in.
+/// The generated quiz for one layer of a map, and the model it lives in.
 ///
 /// One per depth rather than one per parent: everything the same number of jumps
 /// from the root is asked about together, in a single question, so a learner
@@ -976,14 +961,14 @@ model DirectedLayerQuiz {
   courseId String
   course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
   /// The depth this quiz asks about — the depth of the nodes it offers, so the
-  /// module reads "Directed learning quiz 1" for the root's children.
+  /// model reads "Directed learning quiz 1" for the root's children.
   depth    Int
   quizId   String @unique
   quiz     Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  /// The auto-managed module the quiz sits in. Written by the map generator and
+  /// The auto-managed model the quiz sits in. Written by the map generator and
   /// read-only in the structure editor.
-  moduleId String @unique
-  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  modelId  String @unique
+  model    Model  @relation(fields: [modelId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, depth])
 }

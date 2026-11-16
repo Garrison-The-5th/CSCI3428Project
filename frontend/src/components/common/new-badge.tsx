@@ -8,12 +8,12 @@
 /**
  * The "New" marker, and the rule for where it is allowed to appear.
  *
- * The rule matters more than the pill. A newly published module arrives with
+ * The rule matters more than the pill. A newly published model arrives with
  * every section and every element inside it also new, so tagging each one would
  * put New on twenty lines to say one thing. Instead the tag goes at the highest
  * level that is new and stops there:
  *
- *   whole module new  -> tag the module heading only
+ *   whole model new  -> tag the model heading only
  *   section new         -> tag the section only
  *   only content new   -> tag those elements and quizzes
  *
@@ -42,33 +42,34 @@ export const NewBadge = ({ label = 'New' }: { label?: string }) => (
  * suppression logic cannot drift between the three places that ask.
  */
 export interface NewMarkers {
-  module: (moduleId: string) => boolean;
-  section: (sectionId: string, moduleId: string | null) => boolean;
-  item: (itemId: string, sectionId: string, moduleId: string | null) => boolean;
+  model: (modelId: string) => boolean;
+  section: (sectionId: string, modelId: string | null) => boolean;
+  item: (itemId: string, sectionId: string, modelId: string | null) => boolean;
   /** True when anything at all is new, for a page-level notice. */
   any: boolean;
 }
 
 /**
  * Turns the server's "new since you started" ids into lookups for the rail. An item or section
- * inside a wholly new module is not marked again — the module heading already says so.
+ * inside a wholly new model is not marked again — the model heading already says so.
  */
 export function newMarkers(ids: NewIds | null | undefined): NewMarkers {
-  const modules = new Set(ids?.newModuleIds ?? []);
+  const models = new Set(ids?.newModelIds ?? []);
   const sections = new Set(ids?.newSectionIds ?? []);
-  const items = new Set([...(ids?.newElementIds ?? []), ...(ids?.newQuizIds ?? [])]);
+  // The only thing inside a section that can be new on its own is its quiz.
+  const items = new Set(ids?.newQuizIds ?? []);
 
-  /** Whether the given module is itself new. */
-  const moduleIsNew = (moduleId: string | null) => moduleId !== null && modules.has(moduleId);
+  /** Whether the given model is itself new. */
+  const modelIsNew = (modelId: string | null) => modelId !== null && models.has(modelId);
 
   return {
-    module: (moduleId) => modules.has(moduleId),
-    // Suppressed when the whole module is new — the heading already says so.
-    section: (sectionId, moduleId) => !moduleIsNew(moduleId) && sections.has(sectionId),
-    // Suppressed when the section or module above it is new, for the same reason.
-    item: (itemId, sectionId, moduleId) =>
-      !moduleIsNew(moduleId) && !sections.has(sectionId) && items.has(itemId),
-    any: modules.size + sections.size + items.size > 0,
+    model: (modelId) => models.has(modelId),
+    // Suppressed when the whole model is new — the heading already says so.
+    section: (sectionId, modelId) => !modelIsNew(modelId) && sections.has(sectionId),
+    // Suppressed when the section or model above it is new, for the same reason.
+    item: (itemId, sectionId, modelId) =>
+      !modelIsNew(modelId) && !sections.has(sectionId) && items.has(itemId),
+    any: models.size + sections.size + items.size > 0,
   };
 }
 

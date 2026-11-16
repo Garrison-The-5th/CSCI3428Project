@@ -19,7 +19,7 @@
  *
  * SELECT MODE
  *
- * Placing a module's worth of sections one at a time is the same drag eight
+ * Placing a model's worth of sections one at a time is the same drag eight
  * times over, and each one is a round trip that redraws the map. So there is a
  * Select button: turn it on, tick as many sections as belong together, and drag
  * any one of them to move the lot. It is a mode rather than a modifier key

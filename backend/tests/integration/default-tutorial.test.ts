@@ -124,7 +124,7 @@ describeWithDatabase('the default tutorial over HTTP', () => {
         data: {
           courseId: other.id,
           version: 1,
-          snapshot: { id: other.id, title: 'Fire safety', modules: [], sections: [] },
+          snapshot: { id: other.id, title: 'Fire safety', models: [], sections: [] },
         },
       });
       const token = randomBytes(24).toString('base64url');
@@ -162,8 +162,13 @@ describeWithDatabase('the default tutorial over HTTP', () => {
     it.each([
       ['update the course', 'put', () => `/curriculum/courses/${tutorialId}`, { title: 'x' }],
       ['publish it', 'post', () => `/curriculum/courses/${tutorialId}/publish`, {}],
-      ['add a module', 'post', () => `/curriculum/courses/${tutorialId}/modules`, { title: 'x' }],
-      ['add a section', 'post', () => `/curriculum/courses/${tutorialId}/sections`, { title: 'x' }],
+      ['add a model', 'post', () => `/curriculum/courses/${tutorialId}/models`, { title: 'x' }],
+      [
+        'add a section',
+        'post',
+        () => `/curriculum/courses/${tutorialId}/sections`,
+        { title: 'x', type: 'TEXT' },
+      ],
       [
         'name contributors',
         'put',
@@ -181,9 +186,9 @@ describeWithDatabase('the default tutorial over HTTP', () => {
       expect(response.body.errorMessage).toBe('Only admins can edit the default tutorial');
     });
 
-    it('refuses a contributor on its sections, elements and quizzes', async () => {
+    it('refuses a contributor on its models, sections and quizzes', async () => {
       const section = await prisma.section.findFirstOrThrow({ where: { courseId: tutorialId } });
-      const element = await prisma.element.findFirstOrThrow({ where: { sectionId: section.id } });
+      const model = await prisma.model.findFirstOrThrow({ where: { courseId: tutorialId } });
       const token = contributor();
 
       // One at a time: the first request signs this person in and creates their
@@ -196,14 +201,22 @@ describeWithDatabase('the default tutorial over HTTP', () => {
             .send({ title: 'x' }),
         () =>
           request(app)
-            .post(`/curriculum/sections/${section.id}/elements`)
-            .set('Authorization', `Bearer ${token}`)
-            .send({ type: 'TEXT', textContent: 'x' }),
-        () =>
-          request(app)
-            .put(`/curriculum/elements/${element.id}`)
+            .put(`/curriculum/sections/${section.id}`)
             .set('Authorization', `Bearer ${token}`)
             .send({ textContent: 'x' }),
+        () =>
+          request(app)
+            .put(`/curriculum/models/${model.id}`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ title: 'x' }),
+        () =>
+          request(app)
+            .delete(`/curriculum/sections/${section.id}`)
+            .set('Authorization', `Bearer ${token}`),
+        () =>
+          request(app)
+            .get(`/curriculum/courses/${tutorialId}/deleted`)
+            .set('Authorization', `Bearer ${token}`),
         () =>
           request(app)
             .post('/quizzes')
@@ -253,6 +266,72 @@ describeWithDatabase('the default tutorial over HTTP', () => {
         .get(`/curriculum/courses/${tutorialId}`)
         .set('Authorization', `Bearer ${learner()}`);
       expect(after.body.course.title).toBe('Start here');
+    });
+  });
+
+  /**
+   * The tutorial on the two-layer structure: one model, "Welcome", holding one
+   * TEXT section, "Welcome to the platform", with its text on the section.
+   */
+  describe('its structure', () => {
+    it('is one Welcome model holding one TEXT section with the welcome text', async () => {
+      const models = await prisma.model.findMany({ where: { courseId: tutorialId } });
+      const sections = await prisma.section.findMany({ where: { courseId: tutorialId } });
+
+      expect(models.map((model) => [model.number, model.title])).toEqual([[1, 'Welcome']]);
+      expect(sections).toEqual([
+        expect.objectContaining({
+          modelId: models[0].id,
+          number: '1.1',
+          title: 'Welcome to the platform',
+          type: 'TEXT',
+          textContent: '<p>Tutorial content coming soon.</p>',
+        }),
+      ]);
+    });
+
+    it('reaches a learner as models and typed sections, with the text showing', async () => {
+      const response = await request(app)
+        .get(`/curriculum/courses/${tutorialId}`)
+        .set('Authorization', `Bearer ${learner()}`);
+
+      const course = response.body.course;
+      expect(course.models.map((model: { title: string }) => model.title)).toEqual(['Welcome']);
+      expect(course.sections).toEqual([
+        expect.objectContaining({
+          title: 'Welcome to the platform',
+          type: 'TEXT',
+          textContent: '<p>Tutorial content coming soon.</p>',
+          quizzes: [],
+        }),
+      ]);
+      expect(course).not.toHaveProperty('modules');
+      expect(course.sections[0]).not.toHaveProperty('elements');
+    });
+
+    /** A start-up against the migrated tutorial has nothing left to do. */
+    it('still satisfies ensureDefaultTutorial once it exists', async () => {
+      const before = await prisma.section.count({ where: { courseId: tutorialId } });
+      const versions = await prisma.coursePublication.count({ where: { courseId: tutorialId } });
+
+      expect(await ensureDefaultTutorial()).toBe(tutorialId);
+
+      expect(await prisma.section.count({ where: { courseId: tutorialId } })).toBe(before);
+      expect(await prisma.coursePublication.count({ where: { courseId: tutorialId } })).toBe(
+        versions,
+      );
+    });
+
+    /** `type` is required on creation — the API refuses a section with none. */
+    it('refuses to add a section with no type', async () => {
+      const response = await request(app)
+        .post(`/curriculum/courses/${tutorialId}/sections`)
+        .set('Authorization', `Bearer ${admin()}`)
+        .send({ title: 'Blank' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.errorMessage).toMatch(/type is required/);
+      expect(await prisma.section.count({ where: { courseId: tutorialId } })).toBe(1);
     });
   });
 

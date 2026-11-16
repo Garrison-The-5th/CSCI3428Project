@@ -1,12 +1,12 @@
 /**
  * File: gridcheck.ts
- * Description: Exercises the module/section numbering grid against the real database.
+ * Description: Exercises the model/section numbering grid against the real database.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * Exercises the module/section numbering grid against the real database.
+ * Exercises the model/section numbering grid against the real database.
  * Creates a throwaway course, puts it through every mutation that can disturb
  * the numbering, and asserts the grid stays contiguous and correctly labelled.
  */
@@ -30,14 +30,14 @@ function check(label: string, actual: unknown, expected: unknown) {
   }
 }
 
-/** The whole grid as "1.1 Title" strings, module by module. */
+/** The whole grid as "1.1 Title" strings, model by model. */
 async function grid(courseId: string) {
   const course = await CurriculumGateway.getCourseById(courseId);
   if (!course) throw new Error('course vanished');
-  return course.modules.map((module) => ({
-    module: `${module.number}. ${module.title}`,
+  return course.models.map((model) => ({
+    model: `${model.number}. ${model.title}`,
     sections: course.sections
-      .filter((m) => m.moduleId === module.id)
+      .filter((m) => m.modelId === model.id)
       .sort((a, b) => a.position - b.position)
       .map((m) => `${m.number} ${m.title}`),
   }));
@@ -48,115 +48,120 @@ async function main() {
   const courseId = course!.id;
   console.log(`course ${courseId}\n`);
 
-  console.log('a new course starts with one module');
+  console.log('a new course starts with one model');
   check(
-    'modules',
-    (await grid(courseId)).map((g) => g.module),
-    ['1. Module 1'],
+    'models',
+    (await grid(courseId)).map((g) => g.model),
+    ['1. Model 1'],
   );
 
-  const [s1] = await CurriculumGateway.getModules(courseId);
+  const [s1] = await CurriculumGateway.getModels(courseId);
   for (const title of ['Alpha', 'Bravo', 'Charlie']) {
-    await CurriculumService.createSection(courseId, { moduleId: s1.id, title });
+    await CurriculumService.createSection(courseId, { modelId: s1.id, title, type: 'TEXT' });
   }
 
-  console.log('\nsections take the next number in their module');
+  console.log('\nsections take the next number in their model');
   check('grid', await grid(courseId), [
-    { module: '1. Module 1', sections: ['1.1 Alpha', '1.2 Bravo', '1.3 Charlie'] },
+    { model: '1. Model 1', sections: ['1.1 Alpha', '1.2 Bravo', '1.3 Charlie'] },
   ]);
 
-  console.log('\nadding a module at 1 pushes the existing one down');
-  await CurriculumService.createModule(courseId, { title: 'Intro', number: 1 });
+  console.log('\nadding a model at 1 pushes the existing one down');
+  await CurriculumService.createModel(courseId, { title: 'Intro', number: 1 });
   check('grid', await grid(courseId), [
-    { module: '1. Intro', sections: [] },
-    { module: '2. Module 1', sections: ['2.1 Alpha', '2.2 Bravo', '2.3 Charlie'] },
+    { model: '1. Intro', sections: [] },
+    { model: '2. Model 1', sections: ['2.1 Alpha', '2.2 Bravo', '2.3 Charlie'] },
   ]);
 
-  console.log('\na module number past the end lands at the end');
-  await CurriculumService.createModule(courseId, { title: 'Wrap up', number: 99 });
+  console.log('\na model number past the end lands at the end');
+  await CurriculumService.createModel(courseId, { title: 'Wrap up', number: 99 });
   check(
-    'modules',
-    (await grid(courseId)).map((g) => g.module),
-    ['1. Intro', '2. Module 1', '3. Wrap up'],
+    'models',
+    (await grid(courseId)).map((g) => g.model),
+    ['1. Intro', '2. Model 1', '3. Wrap up'],
   );
 
-  console.log('\ninserting a section mid-module renumbers the rest');
-  const module2 = (await CurriculumGateway.getModules(courseId))[1];
+  console.log('\ninserting a section mid-model renumbers the rest');
+  const model2 = (await CurriculumGateway.getModels(courseId))[1];
   await CurriculumService.createSection(courseId, {
-    moduleId: module2.id,
+    modelId: model2.id,
     title: 'Inserted',
+    type: 'TEXT',
     position: 2,
   });
   check('grid', (await grid(courseId))[1], {
-    module: '2. Module 1',
+    model: '2. Model 1',
     sections: ['2.1 Alpha', '2.2 Inserted', '2.3 Bravo', '2.4 Charlie'],
   });
 
-  console.log('\ndragging a section to another module renumbers both');
-  let modules = await CurriculumGateway.getModules(courseId);
+  console.log('\ndragging a section to another model renumbers both');
+  let models = await CurriculumGateway.getModels(courseId);
   let sections = await CurriculumGateway.getSectionsForRenumber(courseId);
   const bravo = sections.find((m) => m.number === '2.3')!;
   await CurriculumService.reorderStructure(courseId, [
-    { id: modules[0].id, sectionIds: [bravo.id] },
+    { id: models[0].id, sectionIds: [bravo.id] },
     {
-      id: modules[1].id,
+      id: models[1].id,
       sectionIds: sections
-        .filter((m) => m.moduleId === modules[1].id && m.id !== bravo.id)
+        .filter((m) => m.modelId === models[1].id && m.id !== bravo.id)
         .map((m) => m.id),
     },
-    { id: modules[2].id, sectionIds: [] },
+    { id: models[2].id, sectionIds: [] },
   ]);
   check('grid', await grid(courseId), [
-    { module: '1. Intro', sections: ['1.1 Bravo'] },
-    { module: '2. Module 1', sections: ['2.1 Alpha', '2.2 Inserted', '2.3 Charlie'] },
-    { module: '3. Wrap up', sections: [] },
+    { model: '1. Intro', sections: ['1.1 Bravo'] },
+    { model: '2. Model 1', sections: ['2.1 Alpha', '2.2 Inserted', '2.3 Charlie'] },
+    { model: '3. Wrap up', sections: [] },
   ]);
 
-  console.log('\ndragging a module carries its sections and renumbers them');
-  modules = await CurriculumGateway.getModules(courseId);
+  console.log('\ndragging a model carries its sections and renumbers them');
+  models = await CurriculumGateway.getModels(courseId);
   sections = await CurriculumGateway.getSectionsForRenumber(courseId);
-  const idsIn = (moduleId: string) =>
+  const idsIn = (modelId: string) =>
     sections
-      .filter((m) => m.moduleId === moduleId)
+      .filter((m) => m.modelId === modelId)
       .sort((a, b) => a.position - b.position)
       .map((m) => m.id);
   await CurriculumService.reorderStructure(courseId, [
-    { id: modules[1].id, sectionIds: idsIn(modules[1].id) },
-    { id: modules[0].id, sectionIds: idsIn(modules[0].id) },
-    { id: modules[2].id, sectionIds: idsIn(modules[2].id) },
+    { id: models[1].id, sectionIds: idsIn(models[1].id) },
+    { id: models[0].id, sectionIds: idsIn(models[0].id) },
+    { id: models[2].id, sectionIds: idsIn(models[2].id) },
   ]);
   check('grid', await grid(courseId), [
-    { module: '1. Module 1', sections: ['1.1 Alpha', '1.2 Inserted', '1.3 Charlie'] },
-    { module: '2. Intro', sections: ['2.1 Bravo'] },
-    { module: '3. Wrap up', sections: [] },
+    { model: '1. Model 1', sections: ['1.1 Alpha', '1.2 Inserted', '1.3 Charlie'] },
+    { model: '2. Intro', sections: ['2.1 Bravo'] },
+    { model: '3. Wrap up', sections: [] },
   ]);
 
   console.log('\ndeleting a section closes the gap it leaves');
   sections = await CurriculumGateway.getSectionsForRenumber(courseId);
   await CurriculumService.deleteSection(sections.find((m) => m.number === '1.2')!.id);
   check('grid', (await grid(courseId))[0], {
-    module: '1. Module 1',
+    model: '1. Model 1',
     sections: ['1.1 Alpha', '1.2 Charlie'],
   });
 
-  console.log('\ndeleting a module takes its sections and closes the gap');
-  modules = await CurriculumGateway.getModules(courseId);
-  await CurriculumService.deleteModule(modules[0].id);
+  console.log('\ndeleting a model takes its sections and closes the gap');
+  models = await CurriculumGateway.getModels(courseId);
+  await CurriculumService.deleteModel(models[0].id);
   check('grid', await grid(courseId), [
-    { module: '1. Intro', sections: ['1.1 Bravo'] },
-    { module: '2. Wrap up', sections: [] },
+    { model: '1. Intro', sections: ['1.1 Bravo'] },
+    { model: '2. Wrap up', sections: [] },
   ]);
 
   console.log('\na deleted section does not block the number it used to hold');
-  modules = await CurriculumGateway.getModules(courseId);
-  await CurriculumService.createSection(courseId, { moduleId: modules[0].id, title: 'Delta' });
+  models = await CurriculumGateway.getModels(courseId);
+  await CurriculumService.createSection(courseId, {
+    modelId: models[0].id,
+    title: 'Delta',
+    type: 'TEXT',
+  });
   check('grid', (await grid(courseId))[0], {
-    module: '1. Intro',
+    model: '1. Intro',
     sections: ['1.1 Bravo', '1.2 Delta'],
   });
 
-  console.log('\na section cannot be restored while its module is still binned');
-  const charlie = (await CurriculumGateway.getDeletedSections([courseId])).find(
+  console.log('\na section cannot be restored while its model is still binned');
+  const charlie = (await CurriculumGateway.getDeletedStructure(courseId)).sections.find(
     (m) => m.title === 'Charlie',
   )!;
   try {
@@ -166,51 +171,86 @@ async function main() {
     check(
       'refused',
       (error as Error).message,
-      "restore this section's module first — a section lives inside one",
+      "restore this section's model first — a section lives inside one",
     );
   }
 
-  console.log('\nrestoring a module brings it back at the end, renumbered');
-  const gone = (await CurriculumGateway.getDeletedModules([courseId])).find(
-    (s) => s.title === 'Module 1',
-  )!;
-  await CurriculumService.restoreModule(gone.id);
+  console.log('\nthe course Archive lists the model with the section that comes back with it');
+  const archive = await CurriculumService.getDeletedStructure(courseId);
   check(
-    'modules',
-    (await grid(courseId)).map((g) => g.module),
-    ['1. Intro', '2. Wrap up', '3. Module 1'],
+    'archive',
+    archive.models.map((m) => ({ title: m.title, sections: m.sections.map((s) => s.title) })),
+    [{ title: 'Model 1', sections: ['Charlie', 'Alpha', 'Inserted'] }],
   );
-  check('module came back empty', (await grid(courseId))[2].sections, []);
+  check('nothing loose', archive.sections, []);
 
-  console.log('\nwith the module back, the section restores onto the end of it');
-  await CurriculumService.restoreSection(charlie.id);
+  console.log('\nrestoring a model brings it back at the end, renumbered, with its sections');
+  const gone = archive.models.find((s) => s.title === 'Model 1')!;
+  await CurriculumService.restoreModel(gone.id);
+  check(
+    'models',
+    (await grid(courseId)).map((g) => g.model),
+    ['1. Intro', '2. Wrap up', '3. Model 1'],
+  );
   check('grid', await grid(courseId), [
-    { module: '1. Intro', sections: ['1.1 Bravo', '1.2 Delta'] },
-    { module: '2. Wrap up', sections: [] },
-    { module: '3. Module 1', sections: ['3.1 Charlie'] },
+    { model: '1. Intro', sections: ['1.1 Bravo', '1.2 Delta'] },
+    { model: '2. Wrap up', sections: [] },
+    { model: '3. Model 1', sections: ['3.1 Alpha', '3.2 Inserted', '3.3 Charlie'] },
   ]);
 
   console.log('\nreordering rejects a partial grid');
-  modules = await CurriculumGateway.getModules(courseId);
+  models = await CurriculumGateway.getModels(courseId);
   try {
-    await CurriculumService.reorderStructure(courseId, [{ id: modules[0].id, sectionIds: [] }]);
+    await CurriculumService.reorderStructure(courseId, [{ id: models[0].id, sectionIds: [] }]);
     check('rejected', 'no error', 'an error');
   } catch (error) {
-    check('rejected', (error as Error).message, 'reorder must list every module in the course');
+    check('rejected', (error as Error).message, 'reorder must list every model in the course');
   }
 
-  console.log('\na section cannot be added without a module');
+  console.log('\na section cannot be added without a model');
   const bare = await prisma.course.create({ data: { title: 'GRID TEST bare' } });
   try {
-    await CurriculumService.createSection(bare.id, { title: 'Orphan' });
+    await CurriculumService.createSection(bare.id, { title: 'Orphan', type: 'TEXT' });
     check('refused', 'no error', 'an error');
   } catch (error) {
     check(
       'refused',
       (error as Error).message,
-      'add a module before adding sections — a section lives inside one',
+      'add a model before adding sections — a section lives inside one',
     );
   }
+
+  console.log('\na section cannot be added without a type');
+  try {
+    await CurriculumService.createSection(courseId, { title: 'Blank' });
+    check('refused', 'no error', 'an error');
+  } catch (error) {
+    check(
+      'refused',
+      (error as Error).message,
+      'a section needs a type — one of YOUTUBE, IMAGE, TEXT, PDF, CANVAS, QUIZ',
+    );
+  }
+
+  console.log('\na quiz is a section of its own, in the same sequence as the content');
+  models = await CurriculumGateway.getModels(courseId);
+  await CurriculumService.createSection(courseId, {
+    modelId: models[0].id,
+    title: 'Check',
+    type: 'QUIZ',
+    quizType: 'LEARNING_CHECK',
+    position: 2,
+  });
+  check('grid', (await grid(courseId))[0], {
+    model: '1. Intro',
+    sections: ['1.1 Bravo', '1.2 Check', '1.3 Delta'],
+  });
+  const withQuiz = await CurriculumGateway.getCourseById(courseId);
+  check(
+    'only the quiz section holds a quiz',
+    withQuiz!.sections.map((m) => `${m.type}:${m.quizzes.length}`),
+    ['TEXT:0', 'QUIZ:1', 'TEXT:0', 'TEXT:0', 'TEXT:0', 'TEXT:0'],
+  );
 
   await prisma.course.delete({ where: { id: bare.id } });
   await prisma.course.delete({ where: { id: courseId } });

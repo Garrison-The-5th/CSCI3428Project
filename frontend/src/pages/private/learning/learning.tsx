@@ -62,7 +62,7 @@ const Learning = () => {
   /**
    * Lessons only.
    *
-   * A quiz set is a course underneath — one module nobody sees and a section per
+   * A quiz set is a course underneath — one model nobody sees and a section per
    * quiz — which is what put it on this page alongside real lessons. It belongs
    * on the Quizzes tab, where it was created and where it reads as what it is,
    * so which tab a course appears on follows from what it was made as.

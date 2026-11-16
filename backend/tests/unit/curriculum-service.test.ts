@@ -1,7 +1,7 @@
 /**
  * File: curriculum-service.test.ts
- * Description: Unit tests for the course numbering grid, content ordering and
- *   the recycle bin rules.
+ * Description: Unit tests for the course numbering grid, typed sections and
+ *   the recycle bin and Archive rules.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -16,7 +16,7 @@ import CurriculumService, {
 } from '@/services/curriculum-service/curriculum-service';
 
 jest.mock('@/gateways/curriculum-gateway/curriculum-gateway');
-// Answers "no layer modules" unless a test says otherwise.
+// Answers "no layer models" unless a test says otherwise.
 jest.mock('@/gateways/course-map-gateway/course-map-gateway');
 jest.mock('@/gateways/quiz-gateway/quiz-gateway');
 jest.mock('@/services/auth-service/auth-service');
@@ -36,20 +36,19 @@ function passThroughTransaction() {
 /**
  * Enough of the gateway for a quiz set to be built end to end.
  *
- * A set is now three writes rather than one — the course, the row that carries
- * the quiz's name, and the quiz — so the two tests that exercise it need the
+ * A set is three writes rather than one — the course, the QUIZ section that
+ * carries the quiz's name, and the quiz — so the two tests that exercise it need the
  * same scaffolding and share it rather than each half-building one.
  */
 function stubQuizSetCreation() {
   passThroughTransaction();
   gateway.createCourse.mockResolvedValue({ id: 'q1', title: 'Fire safety' } as never);
-  gateway.createModule.mockResolvedValue({} as never);
+  gateway.createModel.mockResolvedValue({} as never);
   gateway.getCourseById.mockResolvedValue({ id: 'q1', title: 'Fire safety' } as never);
-  gateway.getModules.mockResolvedValue([{ id: 'm1', number: 1 }] as never);
+  gateway.getModels.mockResolvedValue([{ id: 'm1', number: 1 }] as never);
   gateway.getSectionsForRenumber.mockResolvedValue([] as never);
   gateway.createSection.mockResolvedValue({ id: 's1' } as never);
-  gateway.getSectionById.mockResolvedValue({ id: 's1', courseId: 'q1' } as never);
-  gateway.getLastContentOrder.mockResolvedValue(0 as never);
+  gateway.getSectionById.mockResolvedValue({ id: 's1', courseId: 'q1', type: 'QUIZ' } as never);
   quizGateway.findOneTimeQuiz.mockResolvedValue(null as never);
   quizGateway.createQuiz.mockResolvedValue({ id: 'quiz-1' } as never);
 }
@@ -63,7 +62,7 @@ describe('toNumber and toSortKey', () => {
   /**
    * Zero padding is the whole point: under plain string comparison "1.10"
    * sorts before "1.2", which would silently reorder any course with ten or
-   * more sections in a module.
+   * more sections in a model.
    */
   it('produces a sort key that orders numerically', () => {
     expect(toSortKey(2, 3)).toBe('000002.000003');
@@ -72,7 +71,7 @@ describe('toNumber and toSortKey', () => {
     expect([...keys].sort()).toEqual([toSortKey(1, 1), toSortKey(1, 2), toSortKey(1, 10)]);
   });
 
-  it('orders across modules before sections', () => {
+  it('orders across models before sections', () => {
     const keys = [toSortKey(2, 1), toSortKey(1, 9), toSortKey(10, 1)];
     expect([...keys].sort()).toEqual([toSortKey(1, 9), toSortKey(2, 1), toSortKey(10, 1)]);
   });
@@ -84,16 +83,16 @@ describe('createCourse', () => {
     await expect(CurriculumService.createCourse(undefined)).rejects.toThrow(/required/);
   });
 
-  /** A section lives inside a module, so a course with none has nowhere to put them. */
-  it('creates a first module so a section can be added immediately', async () => {
+  /** A section lives inside a model, so a course with none has nowhere to put them. */
+  it('creates a first model so a section can be added immediately', async () => {
     gateway.createCourse.mockResolvedValue({ id: 'c1', title: 'New' } as never);
-    gateway.createModule.mockResolvedValue({} as never);
+    gateway.createModel.mockResolvedValue({} as never);
     gateway.getCourseById.mockResolvedValue({ id: 'c1' } as never);
 
     await CurriculumService.createCourse('  New  ');
 
     expect(gateway.createCourse).toHaveBeenCalledWith('New', 'LESSON', null);
-    expect(gateway.createModule).toHaveBeenCalledWith(
+    expect(gateway.createModel).toHaveBeenCalledWith(
       expect.objectContaining({ courseId: 'c1', number: 1 }),
     );
   });
@@ -104,7 +103,7 @@ describe('createCourse', () => {
    */
   it('records who created it', async () => {
     gateway.createCourse.mockResolvedValue({ id: 'c1', title: 'New' } as never);
-    gateway.createModule.mockResolvedValue({} as never);
+    gateway.createModel.mockResolvedValue({} as never);
     gateway.getCourseById.mockResolvedValue({ id: 'c1' } as never);
 
     await CurriculumService.createCourse('New', undefined, 7);
@@ -115,8 +114,8 @@ describe('createCourse', () => {
   /**
    * A quiz set is the same Course underneath, which is what buys it publishing,
    * versioning and access for nothing. The kind is the only difference, and its
-   * single module is named after the set rather than "Module 1" — an author never
-   * sees that module, but the content previews do.
+   * single model is named after the set rather than "Model 1" — an author never
+   * sees that model, but the content previews do.
    */
   it('creates a quiz set as a course of its own kind', async () => {
     stubQuizSetCreation();
@@ -124,7 +123,7 @@ describe('createCourse', () => {
     await CurriculumService.createQuizSet('  Fire safety  ');
 
     expect(gateway.createCourse).toHaveBeenCalledWith('Fire safety', 'QUIZ_SET', null);
-    expect(gateway.createModule).toHaveBeenCalledWith(
+    expect(gateway.createModel).toHaveBeenCalledWith(
       expect.objectContaining({ courseId: 'q1', number: 1, title: 'Fire safety' }),
     );
   });
@@ -141,7 +140,7 @@ describe('createCourse', () => {
     await CurriculumService.createQuizSet('  Fire safety  ');
 
     expect(gateway.createSection).toHaveBeenCalledWith(
-      expect.objectContaining({ courseId: 'q1', title: 'Fire safety' }),
+      expect.objectContaining({ courseId: 'q1', title: 'Fire safety', type: 'QUIZ' }),
       expect.anything(),
     );
     expect(quizGateway.createQuiz).toHaveBeenCalledWith(
@@ -243,73 +242,112 @@ describe('createSection', () => {
     gateway.getSectionById.mockResolvedValue({ id: 'm-new' } as never);
     gateway.createSection.mockResolvedValue({ id: 'm-new' } as never);
     gateway.updateSection.mockResolvedValue({} as never);
-    gateway.updateModule.mockResolvedValue({} as never);
-    gateway.getLowestModuleNumber.mockResolvedValue(1 as never);
+    gateway.updateModel.mockResolvedValue({} as never);
+    gateway.getLowestModelNumber.mockResolvedValue(1 as never);
     gateway.getSectionsForRenumber.mockResolvedValue([] as never);
   });
 
-  it('refuses a course with no modules', async () => {
-    gateway.getModules.mockResolvedValue([] as never);
+  /**
+   * A section is one piece of content, so there is no such thing as a blank
+   * one: the type is chosen at creation and a request without it is refused
+   * before anything is written.
+   */
+  it('requires a type', async () => {
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+
     await expect(CurriculumService.createSection('c1', { title: 'M' })).rejects.toThrow(
-      /add a module before adding sections/,
+      /needs a type/,
+    );
+    await expect(
+      CurriculumService.createSection('c1', { title: 'M', type: 'AUDIO' }),
+    ).rejects.toThrow(/needs a type/);
+    expect(gateway.createSection).not.toHaveBeenCalled();
+  });
+
+  it('stores the type and the content together', async () => {
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+
+    await CurriculumService.createSection('c1', {
+      title: 'Intro',
+      type: 'YOUTUBE',
+      videoUrl: 'https://youtu.be/abc',
+      durationMinutes: 12,
+    });
+
+    expect(gateway.createSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'YOUTUBE',
+        videoUrl: 'https://youtu.be/abc',
+        durationMinutes: 12,
+      }),
+      expect.anything(),
     );
   });
 
-  it('requires a title', async () => {
-    gateway.getModules.mockResolvedValue([{ id: 's1', number: 1 }] as never);
-    await expect(CurriculumService.createSection('c1', { title: '' })).rejects.toThrow(/required/);
+  it('refuses a course with no models', async () => {
+    gateway.getModels.mockResolvedValue([] as never);
+    await expect(
+      CurriculumService.createSection('c1', { title: 'M', type: 'TEXT' }),
+    ).rejects.toThrow(/add a model before adding sections/);
   });
 
-  /** No module named means the last one — where an author adding in order expects it. */
-  it('defaults to the last module', async () => {
-    gateway.getModules.mockResolvedValue([
+  it('requires a title', async () => {
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+    await expect(
+      CurriculumService.createSection('c1', { title: '', type: 'TEXT' }),
+    ).rejects.toThrow(/required/);
+  });
+
+  /** No model named means the last one — where an author adding in order expects it. */
+  it('defaults to the last model', async () => {
+    gateway.getModels.mockResolvedValue([
       { id: 's1', number: 1 },
       { id: 's2', number: 2 },
     ] as never);
 
-    await CurriculumService.createSection('c1', { title: 'M' });
+    await CurriculumService.createSection('c1', { title: 'M', type: 'TEXT' });
 
     expect(gateway.createSection).toHaveBeenCalledWith(
-      expect.objectContaining({ moduleId: 's2' }),
+      expect.objectContaining({ modelId: 's2' }),
       expect.anything(),
     );
   });
 
   /*
-    A course map appends its generated quiz modules at the end, so "the last
-    module" used to mean one of those — and new sections landed inside a
-    directed learning quiz module.
+    A course map appends its generated quiz models at the end, so "the last
+    model" used to mean one of those — and new sections landed inside a
+    directed learning quiz model.
   */
-  it('skips the map’s quiz modules when defaulting, and refuses one named outright', async () => {
-    gateway.getModules.mockResolvedValue([
+  it('skips the map’s quiz models when defaulting, and refuses one named outright', async () => {
+    gateway.getModels.mockResolvedValue([
       { id: 's1', number: 1 },
       { id: 'layer', number: 2 },
     ] as never);
-    (CourseMapGateway.getLayers as jest.Mock).mockResolvedValue([{ moduleId: 'layer' }]);
+    (CourseMapGateway.getLayers as jest.Mock).mockResolvedValue([{ modelId: 'layer' }]);
 
-    await CurriculumService.createSection('c1', { title: 'M' });
+    await CurriculumService.createSection('c1', { title: 'M', type: 'TEXT' });
     expect(gateway.createSection).toHaveBeenCalledWith(
-      expect.objectContaining({ moduleId: 's1' }),
+      expect.objectContaining({ modelId: 's1' }),
       expect.anything(),
     );
 
     await expect(
-      CurriculumService.createSection('c1', { title: 'M', moduleId: 'layer' }),
-    ).rejects.toThrow(/directed learning quiz modules/i);
+      CurriculumService.createSection('c1', { title: 'M', type: 'TEXT', modelId: 'layer' }),
+    ).rejects.toThrow(/directed learning quiz models/i);
 
     (CourseMapGateway.getLayers as jest.Mock).mockResolvedValue(undefined);
   });
 
-  it('refuses a module that is not in this course', async () => {
-    gateway.getModules.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+  it('refuses a model that is not in this course', async () => {
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
     await expect(
-      CurriculumService.createSection('c1', { title: 'M', moduleId: 'elsewhere' }),
+      CurriculumService.createSection('c1', { title: 'M', type: 'TEXT', modelId: 'elsewhere' }),
     ).rejects.toThrow(/not found in this course/);
   });
 
   it('renumbers the course after inserting', async () => {
-    gateway.getModules.mockResolvedValue([{ id: 's1', number: 1 }] as never);
-    await CurriculumService.createSection('c1', { title: 'M' });
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+    await CurriculumService.createSection('c1', { title: 'M', type: 'TEXT' });
     // The renumber pass reads the grid back before rewriting it.
     expect(gateway.getSectionsForRenumber).toHaveBeenCalled();
   });
@@ -320,16 +358,16 @@ describe('createSection', () => {
    * The quiz side of the same rule lives in QuizService.
    */
   it('refuses a second section in a set built around a one-time link', async () => {
-    gateway.getModules.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
     quizGateway.findOneTimeQuiz.mockResolvedValue({
       id: 'quiz-1',
       title: 'Assessment',
       published: true,
     } as never);
 
-    await expect(CurriculumService.createSection('c1', { title: 'M' })).rejects.toThrow(
-      /only quiz in it/,
-    );
+    await expect(
+      CurriculumService.createSection('c1', { title: 'M', type: 'TEXT' }),
+    ).rejects.toThrow(/only quiz in it/);
     expect(gateway.createSection).not.toHaveBeenCalled();
   });
 });
@@ -337,7 +375,7 @@ describe('createSection', () => {
 describe('reorderStructure — validation', () => {
   const course = {
     id: 'c1',
-    modules: [{ id: 's1' }, { id: 's2' }],
+    models: [{ id: 's1' }, { id: 's2' }],
     sections: [{ id: 'm1' }, { id: 'm2' }],
   };
 
@@ -346,29 +384,29 @@ describe('reorderStructure — validation', () => {
     gateway.getCourseById.mockResolvedValue(course as never);
   });
 
-  it('refuses a module that is not in the course', async () => {
+  it('refuses a model that is not in the course', async () => {
     await expect(
       CurriculumService.reorderStructure('c1', [{ id: 'ghost', sectionIds: [] }]),
     ).rejects.toThrow(/not in this course/);
   });
 
-  it('refuses the same module listed twice', async () => {
+  it('refuses the same model listed twice', async () => {
     await expect(
       CurriculumService.reorderStructure('c1', [
         { id: 's1', sectionIds: [] },
         { id: 's1', sectionIds: [] },
       ]),
-    ).rejects.toThrow(/same module twice/);
+    ).rejects.toThrow(/same model twice/);
   });
 
   /**
    * A partial reorder would leave the omitted rows on stale numbers, so the
    * whole grid has to be restated.
    */
-  it('refuses a partial list of modules', async () => {
+  it('refuses a partial list of models', async () => {
     await expect(
       CurriculumService.reorderStructure('c1', [{ id: 's1', sectionIds: ['m1', 'm2'] }]),
-    ).rejects.toThrow(/every module/);
+    ).rejects.toThrow(/every model/);
   });
 
   it('refuses a section that is not in the course', async () => {
@@ -400,12 +438,12 @@ describe('reorderStructure — validation', () => {
 
   it('accepts a complete restatement of the grid', async () => {
     gateway.updateSection.mockResolvedValue({} as never);
-    gateway.updateModule.mockResolvedValue({} as never);
-    gateway.getLowestModuleNumber.mockResolvedValue(1 as never);
-    gateway.getModules.mockResolvedValue([{ id: 's1' }, { id: 's2' }] as never);
+    gateway.updateModel.mockResolvedValue({} as never);
+    gateway.getLowestModelNumber.mockResolvedValue(1 as never);
+    gateway.getModels.mockResolvedValue([{ id: 's1' }, { id: 's2' }] as never);
     gateway.getSectionsForRenumber.mockResolvedValue([
-      { id: 'm1', moduleId: 's1', position: 1 },
-      { id: 'm2', moduleId: 's2', position: 1 },
+      { id: 'm1', modelId: 's1', position: 1 },
+      { id: 'm2', modelId: 's2', position: 1 },
     ] as never);
 
     await expect(
@@ -417,96 +455,133 @@ describe('reorderStructure — validation', () => {
   });
 });
 
-describe('reorderSectionContent', () => {
+describe('section content', () => {
   beforeEach(() => {
     passThroughTransaction();
-    gateway.getSectionById.mockResolvedValue({ id: 'm1' } as never);
-    gateway.getSectionContentIds.mockResolvedValue({
-      elementIds: new Set(['e1', 'e2']),
-      quizIds: new Set(['q1']),
-    } as never);
-    gateway.setElementOrder.mockResolvedValue({} as never);
-    gateway.setQuizOrder.mockResolvedValue({} as never);
+    gateway.getCourseById.mockResolvedValue({ id: 'c1' } as never);
+    gateway.getModels.mockResolvedValue([{ id: 's1', number: 1 }] as never);
+    gateway.getSectionsForRenumber.mockResolvedValue([] as never);
+    gateway.getLowestModelNumber.mockResolvedValue(1 as never);
+    gateway.createSection.mockResolvedValue({ id: 'm1' } as never);
+    gateway.updateSection.mockResolvedValue({} as never);
+    gateway.getSectionById.mockResolvedValue({ id: 'm1', courseId: 'c1', type: 'TEXT' } as never);
+    quizGateway.findOneTimeQuiz.mockResolvedValue(null as never);
   });
 
-  it('refuses an item that is not in this section', async () => {
-    await expect(
-      CurriculumService.reorderSectionContent('m1', [{ kind: 'element', id: 'elsewhere' }]),
-    ).rejects.toThrow(/not in this section/);
-  });
-
-  /** Elements and quizzes share one sequence, so a quiz can sit mid-section. */
-  it('numbers elements and quizzes into a single sequence', async () => {
-    await CurriculumService.reorderSectionContent('m1', [
-      { kind: 'element', id: 'e1' },
-      { kind: 'quiz', id: 'q1' },
-      { kind: 'element', id: 'e2' },
-    ]);
-
-    expect(gateway.setElementOrder).toHaveBeenCalledWith('e1', 1, expect.anything());
-    expect(gateway.setQuizOrder).toHaveBeenCalledWith('q1', 2, expect.anything());
-    expect(gateway.setElementOrder).toHaveBeenCalledWith('e2', 3, expect.anything());
-  });
-});
-
-describe('createElement', () => {
-  beforeEach(() => {
-    passThroughTransaction();
-    gateway.getSectionById.mockResolvedValue({ id: 'm1' } as never);
-    gateway.getLastContentOrder.mockResolvedValue(2 as never);
-    gateway.createElement.mockResolvedValue({} as never);
-  });
-
-  it('rejects an unknown element type', async () => {
-    await expect(CurriculumService.createElement('m1', { type: 'AUDIO' })).rejects.toThrow(
-      /type must be one of/,
-    );
-  });
+  /** What createSection wrote for the new row. */
+  const written = () =>
+    gateway.createSection.mock.calls[0][0] as unknown as Record<string, unknown>;
 
   it('sanitises author rich text before storing it', async () => {
-    await CurriculumService.createElement('m1', {
+    await CurriculumService.createSection('c1', {
+      title: 'M',
       type: 'TEXT',
       textContent: '<p>Safe</p><script>alert(1)</script>',
     });
 
-    const written = gateway.createElement.mock.calls[0][1] as { textContent: string };
-    expect(written.textContent).not.toContain('<script>');
-    expect(written.textContent).toContain('<p>Safe</p>');
+    expect(written().textContent).not.toContain('<script>');
+    expect(written().textContent).toContain('<p>Safe</p>');
   });
 
   it('rejects a javascript: video link', async () => {
     await expect(
-      CurriculumService.createElement('m1', { type: 'YOUTUBE', videoUrl: 'javascript:alert(1)' }),
+      CurriculumService.createSection('c1', {
+        title: 'M',
+        type: 'YOUTUBE',
+        videoUrl: 'javascript:alert(1)',
+      }),
     ).rejects.toThrow(/must start with http/);
   });
 
   it('rejects a data: image URL', async () => {
     await expect(
-      CurriculumService.createElement('m1', {
+      CurriculumService.createSection('c1', {
+        title: 'M',
         type: 'IMAGE',
         imageUrl: 'data:text/html,<script>alert(1)</script>',
       }),
     ).rejects.toThrow(/must start with http/);
   });
 
-  it('appends after whatever is currently last in the shared sequence', async () => {
-    await CurriculumService.createElement('m1', { type: 'TEXT', textContent: 'hi' });
-    expect(gateway.createElement).toHaveBeenCalledWith(
-      'm1',
-      expect.anything(),
-      3,
-      expect.anything(),
-    );
-  });
-
   it('only records a duration for video', async () => {
-    await CurriculumService.createElement('m1', {
+    await CurriculumService.createSection('c1', {
+      title: 'M',
       type: 'TEXT',
       textContent: 'hi',
       durationMinutes: 10,
     });
-    const written = gateway.createElement.mock.calls[0][1] as { durationMinutes: number | null };
-    expect(written.durationMinutes).toBeNull();
+    expect(written().durationMinutes).toBeNull();
+  });
+
+  /** An edit must not be a way around a check that creation makes. */
+  it('applies the same checks when a section is edited', async () => {
+    await CurriculumService.updateSection('m1', {
+      textContent: '<p>Safe</p><script>alert(1)</script>',
+    });
+    const update = gateway.updateSection.mock.calls[0][1] as { textContent: string };
+    expect(update.textContent).not.toContain('<script>');
+
+    await expect(
+      CurriculumService.updateSection('m1', { videoUrl: 'javascript:alert(1)' }),
+    ).rejects.toThrow(/must start with http/);
+  });
+
+  /** The type is chosen at creation; changing content means adding a section. */
+  it('refuses to change a section into another type', async () => {
+    await expect(CurriculumService.updateSection('m1', { type: 'YOUTUBE' })).rejects.toThrow(
+      /chosen when it is created/,
+    );
+
+    // Posting the type it already has is not an error.
+    await expect(
+      CurriculumService.updateSection('m1', { type: 'TEXT', title: 'Renamed' }),
+    ).resolves.not.toThrow();
+  });
+
+  it('refuses a canvas layout on a section that is not a canvas', async () => {
+    await expect(CurriculumService.updateSection('m1', { canvas: { items: [] } })).rejects.toThrow(
+      /Only a canvas/,
+    );
+  });
+
+  /**
+   * Quizzes and content share one sequence within a model: a quiz is a section
+   * like any other, so it takes whatever position it was asked for and the grid
+   * renumbers around it. There is no second ordering to keep in step.
+   */
+  it('places a quiz section in the same sequence as the content around it', async () => {
+    gateway.getSectionsForRenumber.mockResolvedValue([
+      { id: 'a', modelId: 's1', position: 1, type: 'TEXT' },
+      { id: 'b', modelId: 's1', position: 2, type: 'TEXT' },
+    ] as never);
+    gateway.getSectionById.mockResolvedValue({ id: 'm1', courseId: 'c1', type: 'QUIZ' } as never);
+    quizGateway.createQuiz.mockResolvedValue({ id: 'quiz-1' } as never);
+
+    await CurriculumService.createSection('c1', {
+      title: 'Check',
+      type: 'QUIZ',
+      quizType: 'LEARNING_CHECK',
+      position: 2,
+    });
+
+    // The section that held position 2 moves down to make room…
+    expect(gateway.updateSection).toHaveBeenCalledWith('b', { position: 3 }, expect.anything());
+    // …the quiz section takes it…
+    expect(gateway.createSection).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'QUIZ', position: 2 }),
+      expect.anything(),
+    );
+    // …and the quiz is made inside it, with no order of its own.
+    const quiz = quizGateway.createQuiz.mock.calls[0][0] as Record<string, unknown>;
+    expect(quiz).toMatchObject({ sectionId: 'm1', type: 'LEARNING_CHECK' });
+    expect(quiz).not.toHaveProperty('order');
+  });
+
+  it('holds quizzes only in a quiz set', async () => {
+    gateway.getCourseById.mockResolvedValue({ id: 'c1', kind: 'QUIZ_SET' } as never);
+    await expect(
+      CurriculumService.createSection('c1', { title: 'Notes', type: 'TEXT' }),
+    ).rejects.toThrow(/quizzes only/);
   });
 });
 
@@ -522,30 +597,141 @@ describe('recycle bin', () => {
     gateway.findDeletedSection.mockResolvedValue(null as never);
     await expect(CurriculumService.purgeSection('m1')).rejects.toThrow(/not in the recycle bin/);
 
-    gateway.findDeletedModule.mockResolvedValue(null as never);
-    await expect(CurriculumService.purgeModule('s1')).rejects.toThrow(/not in the recycle bin/);
+    gateway.findDeletedModel.mockResolvedValue(null as never);
+    await expect(CurriculumService.purgeModel('s1')).rejects.toThrow(/not in the recycle bin/);
   });
 
   /**
-   * A section only has a number because it sits in a module. Restoring it into
+   * A section only has a number because it sits in a model. Restoring it into
    * one that is itself deleted would leave it live but unnumbered.
    */
-  it('refuses to restore a section whose module is still deleted', async () => {
-    gateway.findDeletedSection.mockResolvedValue({ id: 'm1', moduleId: 's1' } as never);
-    gateway.getModuleById.mockResolvedValue(null as never);
+  it('refuses to restore a section whose model is still deleted', async () => {
+    gateway.findDeletedSection.mockResolvedValue({ id: 'm1', modelId: 's1' } as never);
+    gateway.getModelById.mockResolvedValue(null as never);
 
-    await expect(CurriculumService.restoreSection('m1')).rejects.toThrow(/module first/);
+    await expect(CurriculumService.restoreSection('m1')).rejects.toThrow(/model first/);
+  });
+
+  /** "A deleted model's sections come back with it." */
+  it('restores a model together with every section deleted inside it', async () => {
+    passThroughTransaction();
+    gateway.findDeletedModel.mockResolvedValue({ id: 's1', courseId: 'c1' } as never);
+    gateway.restoreModel.mockResolvedValue({ id: 's1' } as never);
+    gateway.getDeletedSectionsOfModel.mockResolvedValue([
+      { id: 'm1', type: 'TEXT' },
+      { id: 'm2', type: 'QUIZ' },
+    ] as never);
+    gateway.getModels.mockResolvedValue([] as never);
+    gateway.getSectionsForRenumber.mockResolvedValue([] as never);
+    gateway.getLowestModelNumber.mockResolvedValue(0 as never);
+
+    await CurriculumService.restoreModel('s1');
+
+    expect(gateway.restoreSection).toHaveBeenCalledWith('m1', 's1', expect.anything());
+    expect(gateway.restoreSection).toHaveBeenCalledWith('m2', 's1', expect.anything());
+    // A quiz section's quiz comes back with it.
+    expect(quizGateway.restoreQuizzesInSection).toHaveBeenCalledWith('m2', expect.anything());
+    expect(gateway.touchDraft).toHaveBeenCalledWith('c1');
+  });
+
+  /** Deleting a quiz section and deleting its quiz are the same act. */
+  it('takes a quiz into the bin with its section', async () => {
+    passThroughTransaction();
+    gateway.getSectionById.mockResolvedValue({ id: 'm1', courseId: 'c1', type: 'QUIZ' } as never);
+    gateway.softDeleteSection.mockResolvedValue({ id: 'm1' } as never);
+    gateway.getModels.mockResolvedValue([] as never);
+    gateway.getSectionsForRenumber.mockResolvedValue([] as never);
+    gateway.getLowestModelNumber.mockResolvedValue(0 as never);
+
+    await CurriculumService.deleteSection('m1');
+
+    expect(quizGateway.softDeleteQuizzesInSection).toHaveBeenCalledWith('m1', expect.anything());
+  });
+
+  /**
+   * The admin recycle bin is for courses (and, through QuizService, standalone
+   * quizzes). A model or section deleted inside a live course is in that
+   * course's Archive, so none of the bin's three actions may reach it.
+   */
+  it('lists, restores and empties courses only', async () => {
+    gateway.purgeCoursesDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    gateway.purgeModelsDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    gateway.purgeSectionsDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    quizGateway.purgeQuizzesDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    gateway.getAccessibleCourseIds.mockResolvedValue(['c1'] as never);
+    gateway.getDeletedCourses.mockResolvedValue([{ id: 'c1', title: 'Old' }] as never);
+    gateway.restoreAllCourses.mockResolvedValue({ count: 1 } as never);
+    gateway.purgeCourses.mockResolvedValue({ count: 1 } as never);
+
+    const listed = await CurriculumService.getDeletedItems(7, true);
+    expect(Object.keys(listed).sort()).toEqual(['courses', 'retentionDays']);
+
+    expect(await CurriculumService.restoreAll(7, true)).toEqual({ courses: 1 });
+    expect(await CurriculumService.purgeAll(7, true)).toEqual({ courses: 1 });
+
+    // Nothing that restores or purges a model or a section was reached.
+    expect(gateway.restoreModel).not.toHaveBeenCalled();
+    expect(gateway.restoreSection).not.toHaveBeenCalled();
+    expect(gateway.hardDeleteModel).not.toHaveBeenCalled();
+    expect(gateway.hardDeleteSection).not.toHaveBeenCalled();
+    expect(gateway).not.toHaveProperty('purgeModels');
+    expect(gateway).not.toHaveProperty('purgeSections');
+  });
+
+  /** The Archive list is shaped the way it is restored. */
+  it('lists a course’s deleted models, sections and quizzes for its Archive', async () => {
+    gateway.purgeCoursesDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    gateway.purgeModelsDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    gateway.purgeSectionsDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    quizGateway.purgeQuizzesDeletedBefore.mockResolvedValue({ count: 0 } as never);
+    const when = new Date('2026-11-01T00:00:00Z');
+    gateway.getDeletedStructure.mockResolvedValue({
+      models: [{ id: 'gone', title: 'Old model', deletedAt: when }],
+      sections: [
+        { id: 'in-model', title: 'Inside', type: 'TEXT', modelId: 'gone', deletedAt: when },
+        { id: 'loose', title: 'Loose', type: 'IMAGE', modelId: 'live', deletedAt: when },
+        { id: 'quiz-sec', title: 'Check', type: 'QUIZ', modelId: 'live', deletedAt: when },
+      ],
+    } as never);
+    quizGateway.getQuizzesInDeletedSections.mockResolvedValue([
+      { id: 'quiz-1', title: 'Safety check', sectionId: 'quiz-sec', deletedAt: when },
+    ] as never);
+
+    const archive = await CurriculumService.getDeletedStructure('c1');
+
+    // A deleted model carries the sections that come back with it.
+    expect(archive.models).toEqual([
+      {
+        id: 'gone',
+        title: 'Old model',
+        deletedAt: when,
+        sections: [{ id: 'in-model', title: 'Inside', type: 'TEXT' }],
+      },
+    ]);
+    // A section whose model is live stands alone…
+    expect(archive.sections.map((section) => section.id)).toEqual(['loose']);
+    // …and a quiz section is listed once, as its quiz, under its section's title.
+    expect(archive.quizzes).toEqual([
+      {
+        id: 'quiz-1',
+        title: 'Safety check',
+        sectionId: 'quiz-sec',
+        sectionTitle: 'Check',
+        deletedAt: when,
+      },
+    ]);
+    expect(archive.retentionDays).toBe(RECYCLE_BIN_DAYS);
   });
 
   it('sweeps expired items outermost-first so cascades do the work', async () => {
     gateway.purgeCoursesDeletedBefore.mockResolvedValue({ count: 1 } as never);
-    gateway.purgeModulesDeletedBefore.mockResolvedValue({ count: 2 } as never);
+    gateway.purgeModelsDeletedBefore.mockResolvedValue({ count: 2 } as never);
     gateway.purgeSectionsDeletedBefore.mockResolvedValue({ count: 3 } as never);
     quizGateway.purgeQuizzesDeletedBefore.mockResolvedValue({ count: 4 } as never);
 
     const result = await CurriculumService.purgeExpired();
 
-    expect(result).toEqual({ courses: 1, modules: 2, sections: 3, quizzes: 4 });
+    expect(result).toEqual({ courses: 1, models: 2, sections: 3, quizzes: 4 });
   });
 
   /** A failed sweep must not take the page down with it. */
@@ -554,7 +740,7 @@ describe('recycle bin', () => {
 
     await expect(CurriculumService.purgeExpired()).resolves.toEqual({
       courses: 0,
-      modules: 0,
+      models: 0,
       sections: 0,
       quizzes: 0,
     });

@@ -190,12 +190,14 @@ export interface QuizSession {
   result: AttemptResult | null;
 }
 
+/**
+ * A standalone quiz in the admin recycle bin — one that belongs to no course.
+ * A quiz inside a course is not here: it is in that course's Archive tab.
+ */
 export interface DeletedQuiz {
   id: string;
   title: string;
   deletedAt: string;
-  /** Where it came from, so the recycle bin can say which course it belonged to. */
-  section: { title: string; course: { id: string; title: string } | null } | null;
 }
 
 /**
@@ -264,6 +266,7 @@ export const quizApi = {
     return response.quizzes ?? [];
   },
 
+  /** The recycle bin's quizzes: standalone ones only. */
   getDeletedQuizzes: async (): Promise<DeletedQuiz[]> => {
     const response = await HttpHelper.get('quizzes/deleted');
     return response.quizzes ?? [];
@@ -320,10 +323,10 @@ export const quizApi = {
 
   restoreQuiz: (quizId: string) => HttpHelper.post(`quizzes/${quizId}/restore`, {}),
 
-  /** Restores every deleted quiz. */
+  /** Restores every standalone quiz in the recycle bin. */
   restoreAllQuizzes: () => HttpHelper.post('quizzes/deleted/restore-all', {}),
 
-  /** Permanent — removes every deleted quiz. */
+  /** Permanent — removes every standalone quiz in the recycle bin. */
   purgeAllQuizzes: () => HttpHelper.delete('quizzes/deleted'),
 
   purgeQuiz: (quizId: string) => HttpHelper.delete(`quizzes/deleted/${quizId}`),

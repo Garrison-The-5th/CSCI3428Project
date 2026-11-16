@@ -10,7 +10,7 @@
  * clicked.
  *
  * One component so that every lock in the app looks and behaves the same. What
- * is being locked differs — a module somebody else has open, a question being
+ * is being locked differs — a model somebody else has open, a question being
  * written, a quiz's kind after it has been published — but "you cannot touch
  * this right now" is one idea and should read as one thing.
  *
@@ -41,7 +41,7 @@ interface LockOverlayProps {
    * Classes for the wrapper, so a caller can bound the sheet to the control.
    *
    * The wrapper is a block by default and so fills its column, which is right
-   * for locking a module and wrong for locking a dropdown — the grey ran the
+   * for locking a model and wrong for locking a dropdown — the grey ran the
    * width of the pane and covered empty space beside the thing it was about.
    * `w-fit` is the usual answer.
    */

@@ -45,9 +45,8 @@ export default class PublicationGateway {
     version: number;
     snapshot: Prisma.InputJsonValue;
     publishedById: number | null;
-    newModuleIds: string[];
+    newModelIds: string[];
     newSectionIds: string[];
-    newElementIds: string[];
     newQuizIds: string[];
   }) {
     return prisma.coursePublication.create({ data });
@@ -63,7 +62,7 @@ export default class PublicationGateway {
 
   /**
    * Versions for the editor's archive list. The snapshot itself is left out —
-   * it carries every element's base64 media, and the list only needs the
+   * it carries every section's base64 media, and the list only needs the
    * headline figures.
    */
   static listForCourse(courseId: string) {
@@ -76,9 +75,8 @@ export default class PublicationGateway {
         publishedAt: true,
         supersededAt: true,
         archivedAt: true,
-        newModuleIds: true,
+        newModelIds: true,
         newSectionIds: true,
-        newElementIds: true,
         newQuizIds: true,
         publishedBy: { select: { id: true, email: true, name: true } },
         archivedBy: { select: { id: true, email: true, name: true } },
@@ -145,9 +143,8 @@ export default class PublicationGateway {
       select: {
         version: true,
         publishedAt: true,
-        newModuleIds: true,
+        newModelIds: true,
         newSectionIds: true,
-        newElementIds: true,
         newQuizIds: true,
       },
     });

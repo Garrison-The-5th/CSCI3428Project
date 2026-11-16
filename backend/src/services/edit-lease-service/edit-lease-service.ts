@@ -1,6 +1,6 @@
 /**
  * File: edit-lease-service.ts
- * Description: Who currently has a module or a question open, so two authors do
+ * Description: Who currently has a model or a question open, so two authors do
  *   not overwrite each other.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
@@ -15,8 +15,8 @@ import { EditScope } from '../../../generated/prisma';
  *
  * The editor renews every `EDIT_LEASE_HEARTBEAT_MS`, so this is several beats'
  * grace: a slow request or a browser that was busy for a moment must not hand
- * somebody's module to the next person to glance at it. The cost of it being
- * generous is that a closed tab locks a module for this long, which is a far
+ * somebody's model to the next person to glance at it. The cost of it being
+ * generous is that a closed tab locks a model for this long, which is a far
  * smaller annoyance than losing work to a race.
  */
 export const EDIT_LEASE_TTL_MS = 45_000;
@@ -54,8 +54,8 @@ function staleBefore() {
  * to say it has gone — so the failure mode of enforcing would be content nobody
  * can edit, which is worse than the race it prevents.
  *
- * Two scopes, and the difference matters. A module is claimed whole, because
- * editing one is really editing the sections and elements inside it and there is
+ * Two scopes, and the difference matters. A model is claimed whole, because
+ * editing one is really editing the sections inside it and there is
  * no smaller unit an author works in. A question is claimed on its own, because
  * two people writing different questions in the same quiz is ordinary
  * collaboration and locking the quiz would stop it for no reason.
@@ -96,7 +96,7 @@ export default class EditLeaseService {
    * What is locked in this course right now, from the asker's point of view.
    *
    * Their own claims come back marked `mine` rather than filtered out: the
-   * editor needs them to know which module it is still holding, and dropping
+   * editor needs them to know which model it is still holding, and dropping
    * them here would have it fight itself for its own lock.
    */
   static async listForCourse(courseId: string, userId: number): Promise<Lease[]> {

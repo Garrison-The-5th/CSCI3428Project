@@ -59,7 +59,7 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Vite injects styles inline, and the module tints are computed from
+        // Vite injects styles inline, and the model tints are computed from
         // author-chosen colours at render time.
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],

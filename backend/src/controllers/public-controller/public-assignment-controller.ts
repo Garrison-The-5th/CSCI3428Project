@@ -118,24 +118,15 @@ export default class PublicAssignmentController {
     }
   }
 
-  /** Marks a section as viewed by the link's holder. */
+  /**
+   * Marks a section as viewed by the link's holder — which is also what unlocks
+   * the next one on a sequential course.
+   */
   @post('/:token/sections/:sectionId/view')
   @use(writeLimit)
   async recordView(req: Request, res: Response) {
     try {
       await AssignmentService.recordView(param(req, 'token'), param(req, 'sectionId'));
-      return res.send({ message: 'Progress recorded' });
-    } catch (error) {
-      return sendFailure(res, error);
-    }
-  }
-
-  /** One piece of content seen — what unlocks the next on a sequential course. */
-  @post('/:token/elements/:elementId/view')
-  @use(writeLimit)
-  async recordElementView(req: Request, res: Response) {
-    try {
-      await AssignmentService.recordElementView(param(req, 'token'), param(req, 'elementId'));
       return res.send({ message: 'Progress recorded' });
     } catch (error) {
       return sendFailure(res, error);

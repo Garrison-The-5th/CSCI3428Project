@@ -23,6 +23,7 @@ import QuizService from '@/services/quiz-service/quiz-service';
 
 import { CourseKind } from '../generated/prisma';
 import { prisma } from '../prisma/prisma-client';
+import { createQuizSection } from './quiz-section';
 
 let failures = 0;
 
@@ -37,11 +38,21 @@ function check(label: string, actual: unknown, expected: unknown) {
   }
 }
 
-/** A published course with one section, ready to assign, owned by `authorId`. */
+/**
+ * A published course, ready to assign, owned by `authorId`. A lesson goes out
+ * with one text section; a quiz set goes out empty, and the scenario that uses
+ * one adds its quiz afterwards — which is the point of that scenario.
+ */
 async function makeCourse(title: string, authorId: number, kind: CourseKind = CourseKind.LESSON) {
   const course = await CurriculumService.createCourse(title, kind, authorId);
-  const [module] = await CurriculumGateway.getModules(course!.id);
-  await CurriculumService.createSection(course!.id, { moduleId: module.id, title: 'Only' });
+  const [model] = await CurriculumGateway.getModels(course!.id);
+  if (kind !== CourseKind.QUIZ_SET) {
+    await CurriculumService.createSection(course!.id, {
+      modelId: model.id,
+      title: 'Only',
+      type: 'TEXT',
+    });
+  }
   // Going live takes a snapshot, so this is the publish path rather than a
   // flag on the course row.
   await PublicationService.publish(course!.id, null);
@@ -73,7 +84,7 @@ async function main() {
 
   console.log('\nand each link opens only its own course');
   for (const [index, link] of links.entries()) {
-    const session = await AssignmentService.getSessionCatalogue(link.token);
+    const session = await AssignmentService.getSessionCatalogue(link.token!);
     check(
       `link ${index + 1} sees one course`,
       session.courses.map((c) => c.id),
@@ -93,7 +104,7 @@ async function main() {
     courseId: alpha,
   });
   try {
-    await AssignmentService.resolveToken(enrolled.token);
+    await AssignmentService.resolveToken(enrolled.token!);
     check('refused', 'no error', 'an error');
   } catch (error) {
     check('refused with sign-in', (error as AssignmentError).reason, 'sign-in');
@@ -137,14 +148,10 @@ async function main() {
   const inside = await makeCourse('ASSIGN TEST Echo — safe to delete', author.id, 'QUIZ_SET');
   await AssignmentService.assign({ email: other, type: 'PLATFORM', courseId: inside });
 
-  const [sectionOfOutside] = (await CurriculumGateway.getCourseById(outside))!.sections;
-  const hidden = await QuizService.createQuiz({
-    title: 'Hidden',
-    sectionId: sectionOfOutside.id,
-  });
-
-  const [sectionOfInside] = (await CurriculumGateway.getCourseById(inside))!.sections;
-  const visible = await QuizService.createQuiz({ title: 'Visible', sectionId: sectionOfInside.id });
+  // Added after the publish above. In a course a quiz is a section of type
+  // QUIZ, made together with its quiz.
+  const { quiz: hidden } = await createQuizSection(outside, { title: 'Hidden' });
+  const { quiz: visible } = await createQuizSection(inside, { title: 'Visible' });
 
   /*
    * A question, so the redaction checks below have an answer key to redact.
@@ -235,14 +242,14 @@ async function main() {
   console.log('\na revoked link stops working');
   await AssignmentService.revoke(links[0].id);
   try {
-    await AssignmentService.resolveToken(links[0].token);
+    await AssignmentService.resolveToken(links[0].token!);
     check('refused', 'no error', 'an error');
   } catch (error) {
     check('refused as revoked', (error as AssignmentError).reason, 'revoked');
   }
 
   console.log('\n...and the other links are untouched');
-  const stillGood = await AssignmentService.getSessionCatalogue(links[1].token);
+  const stillGood = await AssignmentService.getSessionCatalogue(links[1].token!);
   check(
     'link 2 still opens bravo',
     stillGood.courses.map((c) => c.id),

@@ -9,13 +9,15 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import ElementView, { plainPreview, toYouTubeEmbedUrl } from '@/components/common/element-view';
-import type { SectionElement } from '@/services/curriculum-api';
+import type { SectionContent } from '@/services/curriculum-api';
 
-function element(overrides: Partial<SectionElement>): SectionElement {
+/**
+ * The content of one section. `ElementView` keeps its name, but what it is
+ * handed is a section: the content fields live on the section itself.
+ */
+function section(overrides: Partial<SectionContent>): SectionContent {
   return {
-    id: 'e1',
-    sectionId: 'm1',
-    order: 1,
+    id: 's1',
     type: 'TEXT',
     videoUrl: null,
     imageUrl: null,
@@ -25,7 +27,7 @@ function element(overrides: Partial<SectionElement>): SectionElement {
     textContent: null,
     durationMinutes: null,
     ...overrides,
-  } as SectionElement;
+  };
 }
 
 describe('plainPreview', () => {
@@ -85,7 +87,7 @@ describe('ElementView — text', () => {
     const open = jest.spyOn(window, 'open').mockImplementation(() => null);
     render(
       <ElementView
-        element={element({ textContent: '<p><a href="https://example.com/">Read more</a></p>' })}
+        section={section({ textContent: '<p><a href="https://example.com/">Read more</a></p>' })}
       />,
     );
 
@@ -97,19 +99,19 @@ describe('ElementView — text', () => {
   });
 
   it('renders sanitised author markup', () => {
-    render(<ElementView element={element({ type: 'TEXT', textContent: '<p>Hello there</p>' })} />);
+    render(<ElementView section={section({ type: 'TEXT', textContent: '<p>Hello there</p>' })} />);
     expect(screen.getByText('Hello there')).toBeInTheDocument();
   });
 
   it('renders nothing for an empty block outside preview mode', () => {
     const { container } = render(
-      <ElementView element={element({ type: 'TEXT', textContent: '' })} />,
+      <ElementView section={section({ type: 'TEXT', textContent: '' })} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('explains an empty block to an author in preview mode', () => {
-    render(<ElementView element={element({ type: 'TEXT', textContent: '' })} preview />);
+    render(<ElementView section={section({ type: 'TEXT', textContent: '' })} preview />);
     expect(screen.getByText(/Empty text block/)).toBeInTheDocument();
   });
 });
@@ -118,7 +120,7 @@ describe('ElementView — video', () => {
   it('embeds a valid YouTube link', () => {
     render(
       <ElementView
-        element={element({ type: 'YOUTUBE', videoUrl: 'https://youtu.be/dQw4w9WgXcQ' })}
+        section={section({ type: 'YOUTUBE', videoUrl: 'https://youtu.be/dQw4w9WgXcQ' })}
       />,
     );
 
@@ -128,7 +130,7 @@ describe('ElementView — video', () => {
 
   it('falls back to a plain link when the URL is not YouTube', () => {
     render(
-      <ElementView element={element({ type: 'YOUTUBE', videoUrl: 'https://vimeo.com/12345' })} />,
+      <ElementView section={section({ type: 'YOUTUBE', videoUrl: 'https://vimeo.com/12345' })} />,
     );
 
     const link = screen.getByRole('link', { name: /vimeo/ });
@@ -140,7 +142,7 @@ describe('ElementView — video', () => {
   it('warns an author in preview mode that a link will not embed', () => {
     render(
       <ElementView
-        element={element({ type: 'YOUTUBE', videoUrl: 'https://vimeo.com/12345' })}
+        section={section({ type: 'YOUTUBE', videoUrl: 'https://vimeo.com/12345' })}
         preview
       />,
     );
@@ -152,7 +154,7 @@ describe('ElementView — image', () => {
   it('renders an uploaded image with zoom controls', () => {
     render(
       <ElementView
-        element={element({ type: 'IMAGE', imageData: 'AAAA', imageType: 'image/png' })}
+        section={section({ type: 'IMAGE', imageData: 'AAAA', imageType: 'image/png' })}
       />,
     );
 
@@ -164,7 +166,7 @@ describe('ElementView — image', () => {
   it('starts at 100% with zoom-out and fit disabled', () => {
     render(
       <ElementView
-        element={element({ type: 'IMAGE', imageData: 'AAAA', imageType: 'image/png' })}
+        section={section({ type: 'IMAGE', imageData: 'AAAA', imageType: 'image/png' })}
       />,
     );
 
@@ -174,7 +176,7 @@ describe('ElementView — image', () => {
   });
 
   it('prompts an author when no image has been set', () => {
-    render(<ElementView element={element({ type: 'IMAGE' })} preview />);
+    render(<ElementView section={section({ type: 'IMAGE' })} preview />);
     expect(screen.getByText(/No image yet/)).toBeInTheDocument();
   });
 });
@@ -183,7 +185,7 @@ describe('ElementView — PDF', () => {
   it('renders a viewer with a download fallback', () => {
     render(
       <ElementView
-        element={element({
+        section={section({
           type: 'PDF',
           imageData: 'AAAA',
           imageType: 'application/pdf',
@@ -196,7 +198,37 @@ describe('ElementView — PDF', () => {
   });
 
   it('explains a missing file to an author', () => {
-    render(<ElementView element={element({ type: 'PDF' })} preview />);
+    render(<ElementView section={section({ type: 'PDF' })} preview />);
     expect(screen.getByText(/No file attached/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The input is a section now. A section is one piece of content, so the same
+ * object that carries a number and a title is what gets drawn.
+ */
+describe('ElementView — given a whole section', () => {
+  it('draws a course section directly, ignoring what it does not need', () => {
+    const courseSection = {
+      ...section({ type: 'TEXT', textContent: '<p>From the section itself</p>' }),
+      courseId: 'c1',
+      modelId: 'm1',
+      position: 2,
+      number: '1.2',
+      title: 'Exits',
+      estimatedMinutes: 5,
+      quizzes: [],
+    };
+
+    render(<ElementView section={courseSection} />);
+
+    expect(screen.getByText('From the section itself')).toBeInTheDocument();
+  });
+
+  /** A quiz section's content is its quiz, which the quiz runner draws. */
+  it('draws nothing for a quiz section, even in the authoring preview', () => {
+    const { container } = render(<ElementView section={section({ type: 'QUIZ' })} preview />);
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

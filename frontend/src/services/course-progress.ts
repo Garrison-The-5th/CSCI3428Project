@@ -15,62 +15,48 @@
  * the rule would drift, and the two would disagree about what is locked — which
  * is the one thing a learner would definitely notice.
  */
-import {
-  Course,
-  CourseSection,
-  LearnerProgress,
-  sectionContent,
-  SectionElement,
-} from '@/services/curriculum-api';
+import { Course, CourseSection, LearnerProgress, quizOf } from '@/services/curriculum-api';
 import { Quiz } from '@/services/quiz-api';
 
-/** One thing a learner can open, tagged with the section it belongs to. */
+/**
+ * One thing a learner can open: a section.
+ *
+ * A course is two layers, and a section is a single piece of content, so the
+ * course in reading order is simply its sections. A quiz section carries its
+ * quiz alongside, because "done" means something different for it — attempted,
+ * rather than opened.
+ */
 export type CourseItem =
-  | { kind: 'element'; sectionId: string; element: SectionElement }
-  | { kind: 'quiz'; sectionId: string; quiz: Quiz };
+  | { kind: 'content'; sectionId: string; section: CourseSection }
+  | { kind: 'quiz'; sectionId: string; section: CourseSection; quiz: Quiz };
 
-/** The id of a course item, whichever kind it is. */
+/**
+ * The id of a course item: its section's id, whichever kind it is.
+ *
+ * Exported as `idOf` too — the player and the dashboard both key their unlock
+ * sets on it, and the two must agree.
+ */
 export function itemId(item: CourseItem): string {
-  return item.kind === 'element' ? item.element.id : item.quiz.id;
+  return item.sectionId;
 }
+
+export const idOf = itemId;
 
 /**
  * Every item in the course in reading order.
  *
- * `sectionContent` interleaves elements and quizzes by the sequence they share,
- * so a quiz dropped into the middle of a section is reached in the right place
- * rather than after everything else.
+ * `course.sections` arrives sorted model-then-position, so this is one pass. A
+ * QUIZ section whose quiz did not travel with it — a one-time link is stripped
+ * from the browsing path — has nothing to open and is left out, rather than
+ * offered as a blank page.
  */
 export function flattenCourse(course: Course): CourseItem[] {
-  return course.sections.flatMap((section) =>
-    sectionContent(section).map((item): CourseItem =>
-      item.kind === 'element'
-        ? { kind: 'element', sectionId: section.id, element: item.element }
-        : { kind: 'quiz', sectionId: section.id, quiz: item.quiz },
-    ),
-  );
-}
+  return course.sections.flatMap((section): CourseItem[] => {
+    if (section.type !== 'QUIZ') return [{ kind: 'content', sectionId: section.id, section }];
 
-/**
- * Sections that predate per-element tracking.
- *
- * Progress used to be recorded only per section, so an old account has sections
- * marked viewed with no element rows behind them. Reading that as "nothing in
- * this section has been seen" would re-lock courses people had already worked
- * through. A viewed section with no element views at all is therefore treated as
- * fully seen; the moment any element view lands for it — which the first click
- * does — the fine-grained rule takes over.
- */
-export function legacySectionIds(course: Course, progress: LearnerProgress): Set<string> {
-  const viewedSections = new Set(progress.viewedSectionIds);
-  const viewedElements = new Set(progress.viewedElementIds ?? []);
-
-  const legacy = new Set<string>();
-  for (const section of course.sections) {
-    if (!viewedSections.has(section.id)) continue;
-    if (!section.elements.some((element) => viewedElements.has(element.id))) legacy.add(section.id);
-  }
-  return legacy;
+    const quiz = quizOf(section);
+    return quiz ? [{ kind: 'quiz', sectionId: section.id, section, quiz }] : [];
+  });
 }
 
 /**
@@ -105,10 +91,10 @@ export function shutLayerQuizIds(course: Course, progress: LearnerProgress): Set
 /**
  * What the learner has unlocked.
  *
- * On a sequential course items open one at a time: the first is always available
- * and every other waits for the one before it. Sections and modules fall out of
- * the same rule rather than being locked separately — a section is locked when
- * none of its items are reachable, and a module when none of its sections are.
+ * On a sequential course sections open one at a time: the first is always
+ * available and every other waits for the one before it. Models fall out of the
+ * same rule rather than being locked separately — a model is locked when none
+ * of its sections are reachable.
  *
  * Non-sequential courses lock nothing — except a layer quiz, which is not a
  * matter of pace. Both passes end by shutting those, so everything downstream of
@@ -152,42 +138,42 @@ export function unlockedItemIds(
   return shutLayers(unlocked);
 }
 
-/** Whether one item counts as done, which is what opens the next one. */
-export function itemDoneFor(course: Course, progress: LearnerProgress) {
-  const viewedElements = new Set(progress.viewedElementIds ?? []);
+/**
+ * Whether one item counts as done, which is what opens the next one.
+ *
+ * A content section is done once it has been opened. A quiz section is done
+ * once its quiz has been attempted — opening a quiz and walking past it is
+ * exactly what a learning check exists to prevent.
+ */
+export function itemDoneFor(_course: Course, progress: LearnerProgress) {
+  const viewed = new Set(progress.viewedSectionIds);
   const attempted = new Set(progress.attemptedQuizIds);
-  const legacy = legacySectionIds(course, progress);
 
   return (item: CourseItem): boolean =>
-    item.kind === 'quiz'
-      ? attempted.has(item.quiz.id)
-      : viewedElements.has(item.element.id) || legacy.has(item.sectionId);
+    item.kind === 'quiz' ? attempted.has(item.quiz.id) : viewed.has(item.sectionId);
 }
 
 /**
- * A section is reachable when any of its items is.
+ * Whether a section can be opened.
  *
- * The pace setting is checked second rather than first, because a layer quiz's
- * section can be shut on a course that is not sequential at all — the branch
- * point is part of how the course is built, not a preference about how fast to
- * go through it.
+ * A section with nothing to open — a quiz section whose quiz was not sent —
+ * cannot block anything, and locking it would leave a padlock nobody can ever
+ * open. Otherwise it is reachable exactly when the unlock walk reached it,
+ * which covers both pace (a sequential course) and branch points (a layer quiz
+ * that is still shut, on a course that is not sequential at all).
  */
 export function sectionUnlocked(
-  course: Course,
+  _course: Course,
   items: CourseItem[],
   unlocked: Set<string>,
   sectionId: string,
 ): boolean {
-  const own = items.filter((item) => item.sectionId === sectionId);
-  // A section with no content at all cannot block anything, and locking it would
-  // leave a padlock nobody can ever open.
-  if (own.length === 0) return true;
-  if (own.some((item) => unlocked.has(itemId(item)))) return true;
-  return !course.sequential && !own.some((item) => item.kind === 'quiz');
+  if (!items.some((item) => item.sectionId === sectionId)) return true;
+  return unlocked.has(sectionId);
 }
 
-/** A module is reachable when any of the sections inside it is. */
-export function moduleUnlocked(
+/** A model is reachable when any of the sections inside it is. */
+export function modelUnlocked(
   course: Course,
   items: CourseItem[],
   unlocked: Set<string>,
@@ -200,19 +186,14 @@ export function moduleUnlocked(
 /**
  * Whether they have started this course at all.
  *
- * Any recorded activity counts — a section opened, an element read, a quiz
- * attempted — because all three mean the same thing to the button on the landing
- * page: there is something to come back to. Scoped to this course's own ids,
- * since progress arrives for everything the learner has ever done.
+ * Any recorded activity counts — a section opened or a quiz attempted — because
+ * both mean the same thing to the button on the landing page: there is
+ * something to come back to. Scoped to this course's own ids, since progress
+ * arrives for everything the learner has ever done.
  */
 export function hasStartedCourse(course: Course, progress: LearnerProgress): boolean {
   const ownSections = new Set(course.sections.map((section) => section.id));
   if (progress.viewedSectionIds.some((id) => ownSections.has(id))) return true;
-
-  const ownElements = new Set(
-    course.sections.flatMap((section) => section.elements.map((element) => element.id)),
-  );
-  if ((progress.viewedElementIds ?? []).some((id) => ownElements.has(id))) return true;
 
   const ownQuizzes = new Set(
     course.sections.flatMap((section) => section.quizzes.map((quiz) => quiz.id)),
@@ -224,7 +205,7 @@ export function hasStartedCourse(course: Course, progress: LearnerProgress): boo
  * Where Continue should drop them: the last thing they actually opened.
  *
  * Deliberately the most recently viewed item rather than the first unfinished
- * one. Somebody who read to the end of module 3 and then jumped back to re-read
+ * one. Somebody who read to the end of model 3 and then jumped back to re-read
  * 1.2 is *at* 1.2, and "Continue" that threw them forward to the first thing
  * they had not ticked would be answering a different question.
  *
@@ -241,12 +222,11 @@ export function resumeItem(
 ): CourseItem | null {
   const byId = new Map(items.map((item) => [itemId(item), item]));
 
-  // `elementViews` arrives newest first. Quizzes are not in it — an attempt is
-  // not a "view" — so a learner whose last act was a quiz resumes at the last
-  // element they read, which is the nearest honest answer.
-  for (const view of progress.elementViews ?? []) {
-    const item = byId.get(view.elementId);
-    if (item && unlocked.has(view.elementId)) return item;
+  // `sectionViews` arrives newest first, and opening a quiz section records a
+  // view like any other, so this is the last thing they had on screen.
+  for (const view of progress.sectionViews ?? []) {
+    const item = byId.get(view.sectionId);
+    if (item && unlocked.has(view.sectionId)) return item;
   }
 
   const done = itemDoneFor(course, progress);
@@ -260,6 +240,5 @@ export function resumeItem(
 /** An empty progress record, for the authoring preview and for a failed load. */
 export const NO_PROGRESS: LearnerProgress = {
   viewedSectionIds: [],
-  viewedElementIds: [],
   attemptedQuizIds: [],
 };

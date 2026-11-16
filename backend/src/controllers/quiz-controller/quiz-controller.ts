@@ -67,35 +67,38 @@ export default class QuizController {
     return res.send({ quizzes });
   }
 
-  /** The quizzes in this person's recycle bin. */
+  /**
+   * The standalone quizzes in the recycle bin — the ones that belong to no
+   * course. A quiz inside a course is in that course's Archive tab instead.
+   */
   @get('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
   async getDeletedQuizzes(req: AuthenticatedRequest, res: Response) {
-    const quizzes = await QuizService.getDeletedQuizzes(req.user!.id, isGlobalAuthor(req));
+    const quizzes = await QuizService.getDeletedQuizzes(isGlobalAuthor(req));
     return res.send({ quizzes });
   }
 
-  /** Restores this person's deleted quizzes in one go. */
+  /** Restores the bin's standalone quizzes in one go. */
   @post('/deleted/restore-all')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
   async restoreAllQuizzes(req: AuthenticatedRequest, res: Response) {
     try {
-      const restored = await QuizService.restoreAllQuizzes(req.user!.id, isGlobalAuthor(req));
+      const restored = await QuizService.restoreAllQuizzes(isGlobalAuthor(req));
       return res.send({ message: 'Quizzes restored', restored });
     } catch (error) {
       return fail(res, error, 'Error restoring quizzes');
     }
   }
 
-  /** Permanently removes this person's deleted quizzes. */
+  /** Permanently removes the bin's standalone quizzes. */
   @del('/deleted')
   @use(requireAuthor())
   @use(authenticateAndAttachUser)
   async purgeAllQuizzes(req: AuthenticatedRequest, res: Response) {
     try {
-      const purged = await QuizService.purgeAllQuizzes(req.user!.id, isGlobalAuthor(req));
+      const purged = await QuizService.purgeAllQuizzes(isGlobalAuthor(req));
       return res.send({ message: 'Deleted quizzes permanently removed', purged });
     } catch (error) {
       return fail(res, error, 'Error emptying deleted quizzes');

@@ -14,7 +14,7 @@
  * nothing but types.
  *
  * What comes out is an ordinary course tree. The branches this learner did not
- * pick are gone, and what is left has been rewritten into modules and sections
+ * pick are gone, and what is left has been rewritten into models and sections
  * in the order the map lays out — the root's content, then the quiz that asks
  * what applies to them, then the branches they picked, then the next quiz, and
  * so on down. That shape is the whole trick: the player, the progress
@@ -24,7 +24,7 @@
  * Ids are never minted here. A section keeps the id it was authored with
  * wherever the map puts it, because progress is keyed on that id and a learner
  * who drops a branch and takes it back must find their training where they left
- * it. Only `number`, `position`, `sortKey` and `moduleId` — all of them display
+ * it. Only `number`, `position`, `sortKey` and `modelId` — all of them display
  * and ordering — are rewritten.
  */
 
@@ -64,11 +64,11 @@ export interface SnapshotMapEdge {
   optionId?: string | null;
 }
 
-/** One generated layer quiz, and the module holding it. */
+/** One generated layer quiz, and the model holding it. */
 export interface SnapshotMapLayer {
   depth: number;
   quizId: string;
-  moduleId: string;
+  modelId: string;
   sectionId: string;
 }
 
@@ -111,7 +111,7 @@ export interface DirectedLock {
  */
 interface ProjectableSection {
   id: string;
-  moduleId: string | null;
+  modelId: string | null;
   position: number;
   number: string;
   /**
@@ -130,7 +130,7 @@ interface ProjectableQuiz {
   questions?: Array<{ options?: Array<{ id: string }> }>;
 }
 
-interface ProjectableModule {
+interface ProjectableModel {
   id: string;
   courseId: string;
   number: number;
@@ -140,7 +140,7 @@ interface ProjectableModule {
 
 export interface ProjectableCourse {
   id: string;
-  modules: ProjectableModule[];
+  models: ProjectableModel[];
   sections: ProjectableSection[];
 }
 
@@ -297,7 +297,7 @@ function groupsFor(map: SnapshotMap, visible: Set<string>): Group[] {
       quizNumber += 1;
       groups.push({
         kind: 'layer',
-        id: layer.moduleId,
+        id: layer.modelId,
         title: `Directed learning quiz ${quizNumber}`,
         sectionIds: [layer.sectionId],
         depth,
@@ -399,7 +399,7 @@ export function projectDirectedCourse<T extends ProjectableCourse>(
   const groups = groupsFor(map, visible);
   const sectionById = new Map(course.sections.map((section) => [section.id, section]));
 
-  const modules: ProjectableModule[] = [];
+  const models: ProjectableModel[] = [];
   const sections: T['sections'] = [];
   const locks: DirectedLock[] = [];
   /** Content seen so far, which is what each layer quiz waits on. */
@@ -412,15 +412,15 @@ export function projectDirectedCourse<T extends ProjectableCourse>(
       .filter((section): section is T['sections'][number] => section !== undefined);
 
     // A node with nothing in it is a decision, not a chapter. Drawing an empty
-    // module would tell the learner a part of their course is missing.
+    // model would tell the learner a part of their course is missing.
     if (placed.length === 0) return;
 
-    modules.push({ id: group.id, courseId: course.id, number, title: group.title, color: null });
+    models.push({ id: group.id, courseId: course.id, number, title: group.title, color: null });
 
     placed.forEach((section, position) => {
       const placedHere = {
         ...section,
-        moduleId: group.id,
+        modelId: group.id,
         position: position + 1,
         number: `${number}.${position + 1}`,
       };
@@ -451,17 +451,17 @@ export function projectDirectedCourse<T extends ProjectableCourse>(
 
   // Renumbered from 1 so the learner reads 1.1, 1.2, 2.1 — the empty groups
   // skipped above would otherwise leave holes in the numbering.
-  const renumbered = modules.map((module, index) => ({ ...module, number: index + 1 }));
-  const numberById = new Map(renumbered.map((module) => [module.id, module.number]));
+  const renumbered = models.map((model, index) => ({ ...model, number: index + 1 }));
+  const numberById = new Map(renumbered.map((model) => [model.id, model.number]));
 
   return {
     course: {
       ...course,
-      modules: renumbered,
+      models: renumbered,
       sections: sections.map((section) => {
-        const moduleNumber = numberById.get(String(section.moduleId)) ?? 1;
+        const modelNumber = numberById.get(String(section.modelId)) ?? 1;
         const [, position] = section.number.split('.');
-        return { ...section, number: `${moduleNumber}.${position}` };
+        return { ...section, number: `${modelNumber}.${position}` };
       }),
     },
     locks,

@@ -9,8 +9,12 @@
  *
  * Sits in the same shell as the lesson editor and takes the same slot the course
  * structure does — the sidebar just says Quiz instead of Modules. Left is the
- * selected section's quizzes; right is the rail of modules and sections, so
+ * selected section's quiz; right is the rail of models and sections, so
  * picking where a quiz goes reads exactly as it does when writing the lesson.
+ *
+ * A quiz in a lesson is a section of its own, of type QUIZ. So adding one here
+ * adds a quiz section straight after the section that is selected, and a
+ * section of any other type simply has no quiz to show.
  *
  * The quiz editor itself is untouched: this only decides which quizzes are on
  * screen and where a new one lands.
@@ -23,8 +27,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import QuizSetPane from '@/pages/private/admin/editor/quiz-set-pane';
-import { Course, curriculumApi, moduleGroups, moduleTint } from '@/services/curriculum-api';
-import { QUIZ_TYPE_LABELS, quizApi, QuizType } from '@/services/quiz-api';
+import { Course, curriculumApi, modelGroups, modelTint } from '@/services/curriculum-api';
+import { QUIZ_TYPE_LABELS, QuizType } from '@/services/quiz-api';
 
 interface Props {
   course: Course;
@@ -57,7 +61,7 @@ const QuizPane = ({
   onDelete,
   run,
 }: Props) => {
-  /** New-quiz title and kind, keyed by the section or module it will land in. */
+  /** New-quiz title and kind, keyed by the section or model it will land in. */
   const [drafts, setDrafts] = useState<Record<string, { title: string; type: QuizType }>>({});
 
   /*
@@ -72,7 +76,7 @@ const QuizPane = ({
    */
   const isQuizSet = course.kind === 'QUIZ_SET';
 
-  const groups = moduleGroups(course);
+  const groups = modelGroups(course);
   const selectedSection = course.sections.find((s) => s.id === selectedSectionId) ?? null;
   /** A layer quiz's section holds that quiz alone — see structure-editor. */
   const layerSection = selectedSection?.quizzes.some((quiz) => quiz.type === 'DIRECTED') ?? false;
@@ -93,14 +97,31 @@ const QuizPane = ({
   const setDraft = (key: string, patch: Partial<{ title: string; type: QuizType }>) =>
     setDrafts((prev) => ({ ...prev, [key]: { ...draftFor(key), ...patch } }));
 
-  /** Creates a quiz in a section from that section's new-quiz form. */
-  const createInSection = async (sectionId: string) => {
+  /**
+   * Adds a quiz straight after a section, from that section's new-quiz form.
+   *
+   * The quiz arrives as a QUIZ section of its own — made together with its
+   * quiz by the server — in the same model, one place down, and is then the
+   * section on screen.
+   */
+  const createAfterSection = async (sectionId: string) => {
+    const after = course.sections.find((section) => section.id === sectionId);
     const draft = draftFor(sectionId);
     const title = draft.title.trim();
+    if (!after) return;
     if (!title) return onNotify('Quiz needs a title', 'error');
 
     const ok = await run(
-      () => quizApi.createQuiz({ title, sectionId, type: draft.type }),
+      async () => {
+        const created = await curriculumApi.createSection(course.id, {
+          type: 'QUIZ',
+          quizType: draft.type,
+          modelId: after.modelId ?? undefined,
+          position: after.position + 1,
+          title,
+        });
+        if (created?.section?.id) onSelectSection(created.section.id);
+      },
       `${QUIZ_TYPE_LABELS[draft.type]} "${title}" created`,
       'Failed to create quiz',
     );
@@ -108,36 +129,29 @@ const QuizPane = ({
   };
 
   /**
-   * Starting a module that has no sections yet.
-   *
-   * A quiz has to live in a section, so an empty module cannot take one directly.
-   * Rather than sending the author to the lesson editor to make a section first
-   * and come back, the section is created here and named after the quiz — which
-   * is almost always what it would have been called anyway, and is renameable in
-   * the lesson editor if not.
+   * Starting a model that has no sections yet: the quiz section is its first.
    */
-  const createInEmptyModule = async (moduleId: string) => {
-    const draft = draftFor(moduleId);
+  const createInEmptyModel = async (modelId: string) => {
+    const draft = draftFor(modelId);
     const title = draft.title.trim();
     if (!title) return onNotify('Quiz needs a title', 'error');
 
     const ok = await run(
       async () => {
         const created = await curriculumApi.createSection(course.id, {
-          moduleId,
+          type: 'QUIZ',
+          quizType: draft.type,
+          modelId,
           title,
-          estimatedMinutes: 0,
         });
-        const sectionId = created?.section?.id;
-        if (!sectionId) throw new Error('The section could not be created');
-        await quizApi.createQuiz({ title, sectionId, type: draft.type });
-        onSelectSection(sectionId);
+        if (!created?.section?.id) throw new Error('The quiz could not be created');
+        onSelectSection(created.section.id);
       },
-      `Section and quiz "${title}" created`,
+      `${QUIZ_TYPE_LABELS[draft.type]} "${title}" created`,
       'Failed to create the quiz',
     );
 
-    if (ok) setDraft(moduleId, { title: '' });
+    if (ok) setDraft(modelId, { title: '' });
   };
 
   /** The quiz-kind dropdown for one new-quiz form. */
@@ -187,7 +201,7 @@ const QuizPane = ({
         {!selectedSection ? (
           <Card className="bg-light-gray">
             <CardContent className="py-16 text-center">
-              <p>Pick a section to edit its quizzes.</p>
+              <p>Pick a section to edit its quiz.</p>
             </CardContent>
           </Card>
         ) : (
@@ -198,8 +212,9 @@ const QuizPane = ({
                   {selectedSection.number} {selectedSection.title}
                 </CardTitle>
                 <p className="text-sm text-dark-gray">
-                  {selectedSection.quizzes.length} quiz
-                  {selectedSection.quizzes.length === 1 ? '' : 'zes'} in this section
+                  {selectedSection.type === 'QUIZ'
+                    ? 'A quiz section'
+                    : 'Not a quiz section — add a quiz after it below'}
                 </p>
               </CardHeader>
 
@@ -213,12 +228,12 @@ const QuizPane = ({
                     <Input
                       value={draftFor(selectedSection.id).title}
                       onChange={(e) => setDraft(selectedSection.id, { title: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Enter' && createInSection(selectedSection.id)}
-                      placeholder={`New quiz for ${selectedSection.number} ${selectedSection.title}`}
+                      onKeyDown={(e) => e.key === 'Enter' && createAfterSection(selectedSection.id)}
+                      placeholder={`New quiz after ${selectedSection.number} ${selectedSection.title}`}
                       className={`${inputClass} min-w-60 flex-1`}
                     />
                     <Button
-                      onClick={() => createInSection(selectedSection.id)}
+                      onClick={() => createAfterSection(selectedSection.id)}
                       className={primaryBtn}
                     >
                       <PlusIcon className="w-5 h-5 stroke-2" /> Add Quiz
@@ -231,7 +246,7 @@ const QuizPane = ({
             {selectedSection.quizzes.length === 0 ? (
               <Card className="bg-light-gray">
                 <CardContent className="py-16 text-center">
-                  <p>No quizzes in this section yet.</p>
+                  <p>This section is not a quiz. Pick a quiz in the list, or add one above.</p>
                 </CardContent>
               </Card>
             ) : (
@@ -279,14 +294,14 @@ const QuizPane = ({
 
           <div className="max-h-[70vh] overflow-y-auto p-2">
             {groups.map((group) => (
-              <div key={group.module.id} className="mb-3">
+              <div key={group.model.id} className="mb-3">
                 <h3
                   className={`rounded-md border-l-4 px-2 py-1 text-xs font-bold uppercase
                   tracking-wide text-dark-gray
-                  ${group.module.color ? '' : 'border-l-navy/30 bg-navy/5'}`}
-                  style={moduleTint(group.module.color)}
+                  ${group.model.color ? '' : 'border-l-navy/30 bg-navy/5'}`}
+                  style={modelTint(group.model.color)}
                 >
-                  {group.module.number}. {group.module.title}
+                  {group.model.number}. {group.model.title}
                 </h3>
 
                 <ul className="mt-1 flex flex-col">
@@ -319,22 +334,22 @@ const QuizPane = ({
                   })}
 
                   {group.sections.length === 0 && (
-                    // An empty module is workable rather than a dead end: naming a
+                    // An empty model is workable rather than a dead end: naming a
                     // quiz here creates its first section along with it.
                     <li
                       className="flex flex-col gap-2 rounded-md border-2 border-dashed
                         border-navy/30 p-2"
                     >
-                      {typePicker(group.module.id)}
+                      {typePicker(group.model.id)}
                       <Input
-                        value={draftFor(group.module.id).title}
-                        onChange={(e) => setDraft(group.module.id, { title: e.target.value })}
-                        onKeyDown={(e) => e.key === 'Enter' && createInEmptyModule(group.module.id)}
+                        value={draftFor(group.model.id).title}
+                        onChange={(e) => setDraft(group.model.id, { title: e.target.value })}
+                        onKeyDown={(e) => e.key === 'Enter' && createInEmptyModel(group.model.id)}
                         placeholder="New quiz title"
                         className={`${inputClass} h-8`}
                       />
                       <Button
-                        onClick={() => createInEmptyModule(group.module.id)}
+                        onClick={() => createInEmptyModel(group.model.id)}
                         className={`${primaryBtn} h-8`}
                       >
                         <PlusIcon className="w-4 h-4 stroke-2" /> Add quiz

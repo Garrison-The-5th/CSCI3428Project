@@ -38,7 +38,7 @@ import { logger } from '@/utils/logger';
 interface CourseMapPaneProps {
   course: Course;
   onNotify: (message: string, type?: 'success' | 'error') => void;
-  /** Reloads the course, so the Modules tab picks up a generated layer quiz. */
+  /** Reloads the course, so the Models tab picks up a generated layer quiz. */
   onRefresh: () => Promise<void> | void;
 }
 
@@ -56,7 +56,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
    * Picking several sections to move at once.
    *
    * Owned here rather than by either list, because one selection spans both: a
-   * module's worth of sections ticked in the staging manager is dragged onto a
+   * model's worth of sections ticked in the staging manager is dragged onto a
    * node, and sections ticked inside a node are dragged to another node or back
    * to the pool. Two selections would have made "drag what is ticked" mean
    * different things depending on where the pointer went down.
@@ -125,7 +125,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
    * Runs a change, takes the map it returns, and reloads the course behind it.
    *
    * The course reload is what puts a newly generated "Directed learning quiz N"
-   * module in the Modules tab without the author having to go and look.
+   * model in the Models tab without the author having to go and look.
    */
   const run = useCallback(
     async (action: () => Promise<{ map: CourseMap } | CourseMap>, failure: string) => {
@@ -544,7 +544,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
 
       {/*
         The red "stage first" pop-up. Shown when a change is tried on a map whose
-        course has had sections or modules added since it was last staged; the
+        course has had sections or models added since it was last staged; the
         change itself was not saved.
       */}
       {mustStage && (
@@ -569,7 +569,7 @@ const CourseMapPane = ({ course, onNotify, onRefresh }: CourseMapPaneProps) => {
                 </h2>
                 <p className="mt-2 text-sm">
                   {map.stagedAt
-                    ? 'New sections or modules have been added since this course was last staged. '
+                    ? 'New sections or models have been added since this course was last staged. '
                     : 'This course has not been staged yet. '}
                   Your change has not been saved — stage the course, then make it again.
                 </p>

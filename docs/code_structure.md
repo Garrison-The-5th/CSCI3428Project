@@ -23,8 +23,8 @@ Companion documents: [API Reference](./api-reference.md) (every route),
 ## The domain in one page
 
 ```
-Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | IMAGE | PDF | CANVAS)
-        │                      └─ Quiz ──── Question ──── Option
+Course ─┬─ Model ─── Section   (TEXT | YOUTUBE | IMAGE | PDF | CANVAS | QUIZ)
+        │                └─ Quiz ──── Question ──── Option   (QUIZ sections only)
         ├─ CoursePublication  (a frozen snapshot per published version)
         ├─ Instructor         (many-to-many, credited on the course page)
         ├─ Assignment         (PLATFORM enrolment or a tokenized LINK)
@@ -34,29 +34,44 @@ Course ─┬─ Module ─── Section ─┬─ Element   (TEXT | YOUTUBE | 
               └─ CourseMapEdge  (parent → child, and the quiz option offering it)
 ```
 
-26 Prisma models in total. Beyond the tree above: `SectionProgress` and
-`ElementProgress` (what a learner has opened), `QuizAttempt`, `QuizAnswer` and
-`QuizSession` (results, the frozen paper, and the server-anchored clock on a
-timed quiz), `CourseCompletion` (stamped at 100%), `EditLease` (who has a module
-or question open), `Note`, `User`, and the four remaining directed-learning
+24 Prisma models in total. Beyond the tree above: `SectionProgress` (what a
+learner has opened), `QuizAttempt`, `QuizAnswer` and `QuizSession` (results, the
+frozen paper, and the server-anchored clock on a timed quiz), `CourseCompletion`
+(stamped at 100%), `EditLease` (who has a model or question open), `Note`, `User`, and the four remaining directed-learning
 tables — `CourseMapImport`, `CourseMapSubgraph` (another course's whole map
 linked in, read-only), `DirectedLayerQuiz` and `DirectedChoice`.
 
 - A **Course** is what the UI calls a "lesson". Created by name, then edited.
-- A **Module** is a named group of sections and supplies the first digit of every
+A course is **two layers**: models, and the sections inside them.
+
+- A **Model** is a named group of sections and supplies the first digit of every
   section number inside it. Authors may tint one from a closed eight-colour palette.
-- A **Section** lives inside a module. Its number (`2.3`) means "third section of the
-  second module" — position in the grid is the only source of truth, and there is no
-  free-text number field. `sortKey` is the zero-padded form so `1.10` sorts after `1.2`.
-  Every write that can disturb the grid ends by calling `CurriculumService.renumberCourse`.
-- **Elements and quizzes share one ordering sequence** inside a section, so a quiz
-  can sit between two pieces of content.
-- Every **Quiz** belongs to exactly one section. A course's quizzes are its sections'
-  quizzes.
-- Progress: `SectionProgress` (a section auto-completes on view), `ElementProgress`
-  (finer grained, so a sequential course can unlock item by item), `QuizAttempt`,
-  `QuizSession` (the deadline on a timed quiz, stored server-side), and
-  `CourseCompletion` (stamped at 100%, used to detect new content later).
+  (It was called a Module until the two-layer change; the table, the routes and
+  the code were renamed together. The editor's tab is still labelled "Modules".)
+- A **Section** lives inside a model and **is one piece of content**: a text, a
+  video, a picture, a PDF, a canvas or a quiz. `Section.type` says which, is
+  chosen when the section is created, and is required — the column has no
+  default and the API refuses a section without one. The content fields
+  (`textContent`, `videoUrl`, `imageData`, `canvasData`, …) are on the section
+  itself. There is no `Element` table any more.
+- Its number (`2.3`) means "third section of the second model" — position in the
+  grid is the only source of truth, and there is no free-text number field.
+  `sortKey` is the zero-padded form so `1.10` sorts after `1.2`.
+- **Every write that can disturb the grid ends by calling
+  `CurriculumService.renumberCourse`** — creating, deleting, restoring or
+  dragging a model or a section. Because a quiz is a section, that one grid is
+  also the whole of content ordering: there is no second sequence inside a
+  section to keep in step.
+- A **Quiz** in a course is the whole of a section of type `QUIZ`: one QUIZ
+  section, one quiz, and no quiz in a section of any other type.
+  `CurriculumService.createSection` makes the pair together, and deleting or
+  restoring either one takes the other with it. A quiz with no section is a
+  *standalone* quiz, which belongs to no course.
+- Progress: `SectionProgress` (a section completes on view, and a sequential
+  course unlocks section by section), `QuizAttempt` (a quiz section is done once
+  its quiz has been attempted), `QuizSession` (the deadline on a timed quiz,
+  stored server-side), and `CourseCompletion` (stamped at 100%, used to detect
+  new content later).
 
 ### Directed learning
 
@@ -81,7 +96,7 @@ Three rules carry the design:
   not be: taking three of a course's four sections is the point of importing.
 
 The learner never sees any of this. `directed-path.ts` projects the published
-snapshot down to the branches they picked and rewrites it into ordinary modules
+snapshot down to the branches they picked and rewrites it into ordinary models
 and sections in map order — depth top to bottom, canvas `x` left to right — so
 the player, the progress sums and the dashboard all read a normal course. Section
 ids are never reminted, which is what lets somebody drop a branch and take it
@@ -134,6 +149,19 @@ publication's timestamp to answer "are there unpublished changes?".
 Ids stay stable across a publish, so learner progress survives every version.
 Superseded versions stay readable for 14 days (`ARCHIVE_DAYS`) and are then swept.
 
+**Old published versions are converted on read, never rewritten.** A snapshot
+published before the two-layer change is still stored in its old shape
+(`modules` → `sections` → `elements`). Every read of
+`CoursePublication.snapshot` goes through `upgradeSnapshot`
+(`publication-service/legacy-snapshot.ts`), which returns the current shape
+(`models` → typed `sections`) — so a learner on an old version and the Archive's
+read-only view both keep working, and the next publish of a course stores the
+new shape. The reader applies the same rules as the migration
+(`20261113120000_two_layer_model`), including the same derived ids for the
+sections that elements and quizzes became; the two have to agree or learners'
+progress would point at ids their version does not contain. Change one and you
+must change the other — `two-layer-migration.test.ts` checks that they match.
+
 ---
 
 ## Project root
@@ -180,7 +208,7 @@ backend/
     │   ├── validation.ts      # length limits, dates, emails, safe URLs
     │   ├── app-url.ts         # the public URL used in email links
     │   ├── client-address.ts  # caller IP behind proxies (TRUST_PROXY)
-    │   ├── module-colors.ts   # the closed module/section colour palette
+    │   ├── model-colors.ts    # the closed model/section colour palette
     │   └── logger.ts          # pino, plus the security-event log
     │
     ├── controllers/           # HTTP layer, wired by decorators
@@ -192,7 +220,7 @@ backend/
     │   │   ├── authorization-middleware.ts  # requireRole / requireAnyRole / requireAuthor
     │   │   └── course-access-middleware.ts  # requireCourseEditor — per-course access,
     │   │                                    #   draft marking, edit attribution
-    │   ├── curriculum-controller/   # courses, modules, sections, elements, notes,
+    │   ├── curriculum-controller/   # courses, models, sections, notes,
     │   │                            #   instructors, contributors, versions, progress
     │   ├── course-map-controller/   # directed-learning map
     │   ├── quiz-controller/
@@ -203,8 +231,9 @@ backend/
     │   └── table-controller/        # demo data table
     │
     ├── services/              # business logic; no HTTP knowledge
-    │   ├── curriculum-service/      # course/module/section/element rules, the numbering grid
-    │   ├── publication-service/     # publish, snapshots, versions, "new since you started"
+    │   ├── curriculum-service/      # course/model/section rules, the numbering grid
+    │   ├── publication-service/     # publish, snapshots, versions, "new since you started";
+    │   │                            #   legacy-snapshot.ts reads old versions as the new shape
     │   ├── course-map-service/      # the map, layer-quiz generation; directed-path.ts
     │   │                            #   narrows a snapshot to one learner's branches
     │   ├── quiz-service/            # grading, answer redaction, timed runs, quiz kinds
@@ -242,9 +271,19 @@ view (published, not deleted, quiz answers stripped). `/curriculum/courses/manag
 and `/quizzes/manage` are the author view (drafts included, answers intact). Keep
 them separate — that separation is what stops answers leaking.
 
-**Deleting is soft.** Courses, sections and quizzes set `deletedAt` and appear in the
-Admin Dashboard recycle bin. Only the `/deleted/...` routes hard delete, and they
-refuse anything not already in the bin.
+**Deleting is soft, and where a deleted thing goes depends on what it belongs to.**
+Everything sets `deletedAt` and is cleared after 14 days (`RECYCLE_BIN_DAYS`).
+
+- A **course** (a quiz set is one) and a **standalone quiz** go to the Admin
+  Dashboard **recycle bin** (`GET /curriculum/deleted`, `GET /quizzes/deleted`).
+  Its Restore all and Empty recycle bin act on those two kinds only.
+- A **model, section or course quiz** deleted from a course that is still live
+  goes to **that course's Archive tab** (`GET /curriculum/courses/:courseId/deleted`),
+  and nothing the recycle bin does reaches it. Restoring a model brings back
+  every section deleted inside it.
+
+Only the `/deleted/...` routes hard delete, and they refuse anything that is not
+already soft deleted.
 
 **`req.params` is `string | string[]` in Express 5.** Every controller has a small
 `param(req, name)` helper; use it rather than reading params directly.
@@ -263,11 +302,12 @@ frontend/src/
 │   ├── auth-context.tsx       # Keycloak session; isAdmin / isAuthor
 │   ├── guest-context.tsx      # assignment-link session (token in sessionStorage)
 │   ├── editor-access-context.tsx  # which courses this person may edit
+│   ├── app-sidebar-context.tsx    # lets a page tuck the main sidebar away for a while
 │   ├── new-content-context.tsx    # courses with content added since they finished
 │   └── edit-locks-context.tsx     # who else is editing this course, and what that locks
 │
 ├── services/                  # everything that talks to the API
-│   ├── curriculum-api.ts      # courses, sections, elements, notes, versions
+│   ├── curriculum-api.ts      # courses, models, sections, notes, versions
 │   ├── quiz-api.ts            # quizzes, questions, attempts
 │   ├── assignment-api.ts      # author assignment management + public guest endpoints
 │   ├── course-map-api.ts      # directed-learning map
@@ -283,15 +323,16 @@ frontend/src/
 ├── components/
 │   ├── protected-route.tsx    # authenticated / admin / author / canEdit gates
 │   ├── common/
-│   │   ├── element-view.tsx   # ⭐ renders section content + plainPreview() helper
-│   │   ├── element-editor.tsx # one auto-saving content row with a live preview
+│   │   ├── element-view.tsx   # ⭐ renders a section's content + plainPreview() helper
+│   │   ├── element-editor.tsx # edits a section's content, auto-saving, with a live preview
+│   │   │                      #   (both take a section; the names predate the two-layer change)
 │   │   ├── rich-text-editor.tsx, rich-text-table.ts  # toolbar, tables, cell resizing
 │   │   ├── quiz-runner.tsx    # taking a quiz, used everywhere quizzes appear
 │   │   ├── quiz-editor.tsx, question-fields.tsx, quiz-timer.tsx
 │   │   ├── assign-panel.tsx, assignment-roster.tsx  # hand out and manage assignments
 │   │   ├── new-badge.tsx, edited-tag.tsx, privacy-notice.tsx, color-picker.tsx
 │   │   └── confirm-dialog.tsx, toast-notification.tsx, unauthorized.tsx
-│   ├── canvas/                # canvas element: model (pure geometry), editor, view
+│   ├── canvas/                # canvas section: model (pure geometry), editor, view
 │   ├── navbar/
 │   ├── tour/                  # first-login walkthrough: tour-steps.ts (the script and
 │   │                          #   all its wording), tour-context (TourProvider, useTour),
@@ -332,7 +373,7 @@ frontend/src/
 which returns either the JWT-backed or token-backed implementation of the same
 interface. Add a learner feature there and it works for both audiences at once.
 
-**One renderer for lesson content.** `ElementView` renders it; `plainPreview()`
+**One renderer for lesson content.** `ElementView` renders a section's content; `plainPreview()`
 summarises it for lists and rails. Lesson text is stored as HTML, so anything that
 shows a snippet must go through `plainPreview` or it will display raw tags — this
 has bitten twice.
@@ -370,12 +411,14 @@ test, just behaviour that is quietly wrong. Check the list before a change in
 the area it names.
 
 1. **New fields and the snapshot.** Learners read `CoursePublication`, never the
-   live rows. `PublicationService.buildSnapshot` picks **Course, Module and
-   Section** fields by name, so a new field there never reaches learners until
-   it is added to that list. **Elements and quizzes** are copied whole, so a new
-   field there reaches learners automatically — including one they must not see.
-   Strip those in `redactCourse` (`curriculum-service.ts`) or `redactAnswers`
-   (`quiz-service.ts`).
+   live rows. `PublicationService.buildSnapshot` picks **Course, Model and
+   Section** fields by name — a section's content fields included — so a new
+   field there never reaches learners until it is added to that list.
+   **Quizzes** are copied whole, so a new field there reaches learners
+   automatically — including one they must not see. Strip those in
+   `redactCourse` (`curriculum-service.ts`) or `redactAnswers`
+   (`quiz-service.ts`). A change to the snapshot's *shape* also needs
+   `legacy-snapshot.ts` teaching how to read the shape it replaces.
 2. **A new canvas item property needs adding on the server too.** `cleanItem` in
    `config/canvas.ts` rebuilds every item field by field from an allow-list, so
    a property added only in `canvas-model.ts` / `canvas-editor.tsx` is dropped
@@ -391,14 +434,16 @@ the area it names.
    changes". Routes guarded only by `requireAuthor` (the recycle-bin restores)
    must call `CurriculumGateway.touchDraft` themselves; routes that change
    nothing a learner reads pass `marksDraftEdited: false`.
-5. **Anything that moves modules or sections must renumber.** Do it in a
+5. **Anything that moves models or sections must renumber.** Do it in a
    transaction and finish with `CurriculumService.renumberCourse`. The unique
    index on `(courseId, number)` counts soft-deleted rows, which is why rows are
-   parked on throwaway values first — see `renumberCourse` and `parkModuleOrder`.
+   parked on throwaway values first — see `renumberCourse` and `parkModelOrder`.
+   This now covers quizzes too: a quiz is a section, so adding, deleting or
+   restoring one moves the grid.
 6. **The course map owns some content.** Directed-learning layer quizzes, and the
-   modules and sections they live in, are generated by `CourseMapService`. Code
-   that edits modules, sections or quizzes has to refuse those (see
-   `layerModuleIds` and `assertNotDirected`), and any change to the map's shape
+   models and QUIZ sections they live in, are generated by `CourseMapService`. Code
+   that edits models, sections or quizzes has to refuse those (see
+   `layerModelIds` and `assertNotDirected`), and any change to the map's shape
    must end with the quizzes being regenerated.
 7. **Visibility comes from assignments, not from publishing.** Publishing makes a
    course *eligible*; a signed-in learner sees it only once it is assigned to
@@ -406,9 +451,11 @@ the area it names.
    an enrolment. Deadlines are per assignment and the lock is computed on the
    server (`withLearnerDueDate`) — never decide in the browser whether something
    is past due.
-8. **Progress rules exist twice on the client.** `course-player.tsx` repeats the
-   unlocking logic in `services/course-progress.ts` (`idOf` / `shutLayers`). The
-   player and the dashboard disagree if only one is changed.
+8. **Progress rules live in one place on the client.** `services/course-progress.ts`
+   decides what is unlocked (`idOf`, `unlockedItemIds`, `shutLayerQuizIds`), section
+   by section, and `course-player.tsx` and the course page both *call* it. Keep it
+   that way: a second copy in the player is how the player and the dashboard came
+   to disagree before.
 9. **A new learner feature goes through `learner-api.ts`,** in both the
    signed-in and the token implementation, or it works for one audience only.
 10. **A new route is not live until its controller is imported in `index.ts`,**

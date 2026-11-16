@@ -15,11 +15,11 @@ Unit → Integration → E2E → Security → Performance
 
 | Layer                   | Tool                                                | Where                                      | Count          | Needs a database?                                 |
 | ----------------------- | --------------------------------------------------- | ------------------------------------------ | -------------- | ------------------------------------------------- |
-| Backend unit            | Jest + ts-jest                                      | `backend/tests/unit/`                      | 562            | No — a unit test that touches Prisma fails loudly |
-| Backend integration     | Jest + Supertest                                    | `backend/tests/integration/`               | 38             | Yes                                               |
+| Backend unit            | Jest + ts-jest                                      | `backend/tests/unit/`                      | 796            | No — a unit test that touches Prisma fails loudly |
+| Backend integration     | Jest + Supertest                                    | `backend/tests/integration/`               | 115            | Yes                                               |
 | Database                | Jest + Prisma                                       | `backend/tests/integration/schema.test.ts` | included above | Yes                                               |
-| Frontend unit/component | Jest + React Testing Library                        | `frontend/tests/`                          | 110            | No                                                |
-| E2E                     | Playwright                                          | `frontend/e2e/`                            | 16             | Yes, plus both servers                            |
+| Frontend unit/component | Jest + React Testing Library                        | `frontend/tests/`                          | 304            | No                                                |
+| E2E                     | Playwright                                          | `frontend/e2e/`                            | 17             | Yes, plus both servers                            |
 | Security                | CodeQL + `npm audit`                                | CI only                                    | —              | No                                                |
 | Performance             | not implemented (§5.4 recommends, does not require) | —                                          | —              | —                                                 |
 
@@ -90,6 +90,13 @@ through Prisma. These check that middleware is _wired in_ and in the right
 order — the failure mode unit tests cannot see. Also the §5.5 database tests:
 migration state and ordering, schema and uniqueness validation, and foreign-key
 and cascade integrity.
+
+One integration test is unlike the rest: `two-layer-migration.test.ts` rebuilds
+the *old* three-layer schema in a schema of its own (by replaying every earlier
+migration there), inserts a fixture, and runs the real
+`20261113120000_two_layer_model` SQL against it — so the data migration is
+tested as the SQL that `migrate deploy` will run, and is checked against the
+legacy snapshot reader. It leaves `public` alone and drops its schema afterwards.
 
 **E2E.** Real user flows in a real browser against the production build, not the
 dev server. Covers the four areas §5.1.1 names: authentication flows, critical
@@ -171,6 +178,15 @@ leaves its fixtures behind and the next run then fails on them.
 ```bash
 docker compose exec postgres createdb -U <user> learning_test
 DATABASE_URL="postgresql://…/learning_test" npm run test:smoke --prefix backend
+```
+
+`scripts/verify-two-layer.ts` is not part of that run. It is a one-off,
+read-only check of a database after the two-layer migration — numbering, quiz
+sections, published versions and the default tutorial — and is safe to point at
+production:
+
+```bash
+DATABASE_URL="postgresql://…" npx ts-node -r tsconfig-paths/register scripts/verify-two-layer.ts
 ```
 
 They are kept because they still catch things — three of them were red for a

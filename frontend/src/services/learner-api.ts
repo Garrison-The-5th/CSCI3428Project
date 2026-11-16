@@ -40,9 +40,11 @@ export interface LearnerApi {
   getQuizzes: () => Promise<Quiz[]>;
   getDashboard: () => Promise<Dashboard>;
   getProgress: () => Promise<LearnerProgress>;
+  /**
+   * One section opened. Sections complete on view, so this is all the progress
+   * a piece of content has — and what unlocks the next on a sequential course.
+   */
   recordSectionView: (sectionId: string) => Promise<unknown>;
-  /** One item seen. Credits its section too, so callers never need both. */
-  recordElementView: (elementId: string) => Promise<unknown>;
   /**
    * Reports the run already open at a quiz, without opening one. What lets the
    * player show a quiz's details behind a Start button and skip that screen for
@@ -89,7 +91,6 @@ export function makeLearnerApi(token: string | null): LearnerApi {
       getDashboard: () => assignmentApi.getDashboard(token),
       getProgress: () => assignmentApi.getProgress(token),
       recordSectionView: (sectionId) => assignmentApi.recordView(token, sectionId),
-      recordElementView: (elementId) => assignmentApi.recordElementView(token, elementId),
       peekQuiz: (quizId) => assignmentApi.peekSession(token, quizId),
       startQuiz: (quizId) => assignmentApi.startSession(token, quizId),
       submitAttempt: (quizId, answers) => assignmentApi.submitAttempt(token, quizId, answers),
@@ -122,7 +123,6 @@ export function makeLearnerApi(token: string | null): LearnerApi {
     getDashboard: () => curriculumApi.getDashboard(),
     getProgress: () => curriculumApi.getProgress(),
     recordSectionView: (sectionId) => curriculumApi.recordSectionView(sectionId),
-    recordElementView: (elementId) => curriculumApi.recordElementView(elementId),
     peekQuiz: (quizId) => quizApi.peekSession(quizId),
     startQuiz: (quizId) => quizApi.startSession(quizId),
     submitAttempt: (quizId, answers) => quizApi.submitAttempt(quizId, answers),

@@ -122,7 +122,7 @@ const AdminLearning = () => {
   /**
    * Lessons only.
    *
-   * A quiz set is a course underneath — one module nobody sees and a section per
+   * A quiz set is a course underneath — one model nobody sees and a section per
    * quiz — which is what had them turning up on this page beside real lessons,
    * where nothing about the card describes what they are. They are made and
    * edited on the Quizzes tab, and that is the only place they belong.

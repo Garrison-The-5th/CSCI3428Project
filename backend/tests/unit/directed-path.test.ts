@@ -110,22 +110,20 @@ function exampleMap(): SnapshotMap {
       { parentId: 'woods', childId: 'wood-dev' },
     ],
     layers: [
-      { depth: 1, quizId: 'quiz-1', moduleId: 'mod-q1', sectionId: 's-q1' },
-      { depth: 2, quizId: 'quiz-2', moduleId: 'mod-q2', sectionId: 's-q2' },
+      { depth: 1, quizId: 'quiz-1', modelId: 'mod-q1', sectionId: 's-q1' },
+      { depth: 2, quizId: 'quiz-2', modelId: 'mod-q2', sectionId: 's-q2' },
     ],
   };
 }
 
 function section(id: string, title = id) {
-  return { id, moduleId: 'original', position: 1, number: '9.9', title };
+  return { id, modelId: 'original', position: 1, number: '9.9', title };
 }
 
 function exampleCourse() {
   return {
     id: 'course-1',
-    modules: [
-      { id: 'original', courseId: 'course-1', number: 1, title: 'Everything', color: null },
-    ],
+    models: [{ id: 'original', courseId: 'course-1', number: 1, title: 'Everything', color: null }],
     sections: [
       section('s-general'),
       section('s-bees'),
@@ -183,7 +181,7 @@ describe('projectDirectedCourse', () => {
   it('serves the root and the first quiz to a learner who has answered nothing', () => {
     const { course } = projectDirectedCourse(exampleCourse(), exampleMap(), choices({}));
 
-    expect(course.modules.map((module) => module.title)).toEqual([
+    expect(course.models.map((model) => model.title)).toEqual([
       'General content',
       'Directed learning quiz 1',
     ]);
@@ -197,7 +195,7 @@ describe('projectDirectedCourse', () => {
       choices({ 1: ['bees', 'woods'], 2: ['bee-site', 'wood-site', 'wood-dev'] }),
     );
 
-    expect(course.modules.map((module) => module.title)).toEqual([
+    expect(course.models.map((model) => model.title)).toEqual([
       'General content',
       'Directed learning quiz 1',
       // x = 100 then x = 300: the order the boxes sit in, not the order they
@@ -270,13 +268,13 @@ describe('projectDirectedCourse', () => {
     ]);
   });
 
-  it('drops a node that holds nothing rather than drawing an empty module', () => {
+  it('drops a node that holds nothing rather than drawing an empty model', () => {
     const map = exampleMap();
     map.nodes = map.nodes.map((node) => (node.id === 'bees' ? { ...node, sectionIds: [] } : node));
 
     const { course } = projectDirectedCourse(exampleCourse(), map, choices({ 1: ['bees'] }));
 
-    expect(course.modules.map((module) => module.title)).not.toContain('Bee keeping project');
+    expect(course.models.map((model) => model.title)).not.toContain('Bee keeping project');
   });
 
   it('does not offer a layer quiz when the layer above it has no content to read', () => {
@@ -286,7 +284,7 @@ describe('projectDirectedCourse', () => {
 
     const { course } = projectDirectedCourse(exampleCourse(), map, choices({}));
 
-    expect(course.modules).toEqual([]);
+    expect(course.models).toEqual([]);
   });
 });
 
@@ -307,7 +305,7 @@ function mapWithOptions(): SnapshotMap {
 
 interface QuizzedSection {
   id: string;
-  moduleId: string;
+  modelId: string;
   position: number;
   number: string;
   title: string;
@@ -414,7 +412,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       choices({ 1: ['drones'] }),
     );
 
-    expect(course.modules.map((module) => module.title)).toEqual([
+    expect(course.models.map((model) => model.title)).toEqual([
       'General content',
       'Directed learning quiz 1',
       'Drone mapping project',
@@ -428,7 +426,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       choices({ 1: ['drones', 'bees'] }),
     );
 
-    expect(course.modules.map((module) => module.title)).toContain('Directed learning quiz 2');
+    expect(course.models.map((model) => model.title)).toContain('Directed learning quiz 2');
   });
 
   /*
@@ -447,7 +445,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       sectionIds: ['s-hive'],
     });
     map.edges.push({ parentId: 'bee-site', childId: 'bee-deep' });
-    map.layers.push({ depth: 3, quizId: 'quiz-3', moduleId: 'mod-q3', sectionId: 's-q3' });
+    map.layers.push({ depth: 3, quizId: 'quiz-3', modelId: 'mod-q3', sectionId: 's-q3' });
 
     // Woodlands all the way down: depth 2 is reached, depth 3 is not.
     const { course } = projectDirectedCourse(
@@ -456,7 +454,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       choices({ 1: ['woods'], 2: ['wood-site'] }),
     );
 
-    const titles = course.modules.map((module) => module.title);
+    const titles = course.models.map((model) => model.title);
     expect(titles).toContain('Directed learning quiz 2');
     expect(titles).not.toContain('Directed learning quiz 3');
   });
@@ -488,7 +486,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       { parentId: 'bee-site', childId: 'bee-deep' },
       { parentId: 'bee-site', childId: 'bee-queen' },
     );
-    map.layers.push({ depth: 3, quizId: 'quiz-3', moduleId: 'mod-q3', sectionId: 's-q3' });
+    map.layers.push({ depth: 3, quizId: 'quiz-3', modelId: 'mod-q3', sectionId: 's-q3' });
 
     const { course } = projectDirectedCourse(
       {
@@ -499,7 +497,7 @@ describe('a layer quiz is only offered when the learner can actually reach that 
       choices({ 1: ['bees'], 2: ['bee-site'] }),
     );
 
-    expect(course.modules.map((module) => module.title)).toContain('Directed learning quiz 3');
+    expect(course.models.map((model) => model.title)).toContain('Directed learning quiz 3');
   });
 });
 
@@ -520,13 +518,13 @@ describe('a node with only one child is followed without a quiz', () => {
         { parentId: 'next', childId: 'last' },
       ],
       // A stale layer from before the rule: it must still not be asked.
-      layers: [{ depth: 1, quizId: 'quiz-1', moduleId: 'mod-q1', sectionId: 's-q1' }],
+      layers: [{ depth: 1, quizId: 'quiz-1', modelId: 'mod-q1', sectionId: 's-q1' }],
     };
   }
 
   const lineCourse = () => ({
     id: 'course-1',
-    modules: exampleCourse().modules,
+    models: exampleCourse().models,
     sections: [section('s-a'), section('s-b'), section('s-c'), section('s-q1')],
   });
 
@@ -537,7 +535,7 @@ describe('a node with only one child is followed without a quiz', () => {
   it('asks no quiz along the way', () => {
     const { course, locks } = projectDirectedCourse(lineCourse(), lineMap(), choices({}));
 
-    expect(course.modules.map((module) => module.title)).toEqual(['General', 'Next', 'Last']);
+    expect(course.models.map((model) => model.title)).toEqual(['General', 'Next', 'Last']);
     expect(locks).toEqual([]);
   });
 
@@ -560,8 +558,62 @@ describe('a node with only one child is followed without a quiz', () => {
       choices({ 1: ['bees'], 2: ['bee-site'] }),
     );
 
-    const titles = course.modules.map((module) => module.title);
+    const titles = course.models.map((model) => model.title);
     expect(titles).toContain('Advanced hives');
     expect(titles).not.toContain('Directed learning quiz 3');
+  });
+});
+
+/**
+ * Two layers, on a directed course: what the learner is served is models and
+ * the sections inside them, and a layer quiz is an ordinary QUIZ section that
+ * happens to sit in a model the map generated.
+ */
+describe('the projection on a two-layer course', () => {
+  /** The example course with each section saying what it holds. */
+  function typedCourse() {
+    const course = exampleCourse();
+    return {
+      ...course,
+      sections: course.sections.map((entry) => ({
+        ...entry,
+        type: entry.id.startsWith('s-q') ? 'QUIZ' : 'TEXT',
+      })),
+    };
+  }
+
+  it('puts each layer quiz in its layer model, as a QUIZ section', () => {
+    const { course } = projectDirectedCourse(typedCourse(), exampleMap(), choices({ 1: ['bees'] }));
+
+    const layerSection = course.sections.find((entry) => entry.id === 's-q1')!;
+    // The layer's own model — the id the map recorded for it — not the model
+    // the section was authored in.
+    expect(layerSection.modelId).toBe('mod-q1');
+    expect(layerSection.type).toBe('QUIZ');
+    expect(course.models.find((model) => model.id === 'mod-q1')?.title).toBe(
+      'Directed learning quiz 1',
+    );
+  });
+
+  it('keeps every section’s type and id through the rewrite', () => {
+    const { course } = projectDirectedCourse(typedCourse(), exampleMap(), choices({ 1: ['bees'] }));
+
+    expect(course.sections.find((entry) => entry.id === 's-general')?.type).toBe('TEXT');
+    expect(course.sections.find((entry) => entry.id === 's-bees')?.type).toBe('TEXT');
+    // Every section sits in a model the projection actually produced.
+    const modelIds = new Set(course.models.map((model) => model.id));
+    for (const entry of course.sections) expect(modelIds.has(String(entry.modelId))).toBe(true);
+    // Nothing is called a module, and nothing carries elements.
+    expect(course).not.toHaveProperty('modules');
+    for (const entry of course.sections) expect(entry).not.toHaveProperty('elements');
+  });
+
+  /** A layer quiz waits on the sections above it — sections, not elements. */
+  it('locks a layer quiz on the sections that come before it', () => {
+    const { locks } = projectDirectedCourse(typedCourse(), exampleMap(), choices({}));
+
+    expect(locks).toEqual([
+      expect.objectContaining({ quizId: 'quiz-1', sectionId: 's-q1', requires: ['s-general'] }),
+    ]);
   });
 });

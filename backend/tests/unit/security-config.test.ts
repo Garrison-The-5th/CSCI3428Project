@@ -1,7 +1,7 @@
 /**
  * File: security-config.test.ts
  * Description: Unit tests for logging redaction, proxy trust resolution,
- *   module colour parsing and email redaction.
+ *   model colour parsing and email redaction.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -10,7 +10,7 @@ import type { Request } from 'express';
 
 import { clientAddress, configureTrustProxy, parseTrustProxy } from '@/config/client-address';
 import { safeForLog } from '@/config/logger';
-import { MODULE_COLORS, parseModuleColor } from '@/config/module-colors';
+import { MODEL_COLORS, parseModelColor } from '@/config/model-colors';
 import { maskSensitivePath } from '@/controllers/middleware/request-logger';
 import {
   describeSmtpFailure,
@@ -196,30 +196,30 @@ describe('clientAddress', () => {
   });
 });
 
-describe('parseModuleColor', () => {
+describe('parseModelColor', () => {
   it('accepts every colour in the palette', () => {
-    for (const colour of MODULE_COLORS) {
-      expect(parseModuleColor(colour)).toBe(colour);
+    for (const colour of MODEL_COLORS) {
+      expect(parseModelColor(colour)).toBe(colour);
     }
   });
 
   it('normalises case', () => {
-    expect(parseModuleColor(MODULE_COLORS[0].toUpperCase())).toBe(MODULE_COLORS[0]);
+    expect(parseModelColor(MODEL_COLORS[0].toUpperCase())).toBe(MODEL_COLORS[0]);
   });
 
   it('treats empty and null as clearing the tint', () => {
-    expect(parseModuleColor('')).toBeNull();
-    expect(parseModuleColor(null)).toBeNull();
-    expect(parseModuleColor(undefined)).toBeNull();
+    expect(parseModelColor('')).toBeNull();
+    expect(parseModelColor(null)).toBeNull();
+    expect(parseModelColor(undefined)).toBeNull();
   });
 
   /**
-   * A closed palette, so a module can only hold a colour the UI knows how to
+   * A closed palette, so a model can only hold a colour the UI knows how to
    * render — and so an arbitrary string cannot reach a style attribute.
    */
   it('refuses a colour outside the palette', () => {
-    expect(() => parseModuleColor('#ff0000')).toThrow(/not one of the module colours/);
-    expect(() => parseModuleColor('red')).toThrow();
-    expect(() => parseModuleColor('javascript:alert(1)')).toThrow();
+    expect(() => parseModelColor('#ff0000')).toThrow(/not one of the model colours/);
+    expect(() => parseModelColor('red')).toThrow();
+    expect(() => parseModelColor('javascript:alert(1)')).toThrow();
   });
 });

@@ -595,23 +595,6 @@ export default class AssignmentService {
   }
 
   /**
-   * Records that one piece of content was opened, and credits its section too —
-   * the same pairing the signed-in path does, so a guest working through a
-   * sequential course unlocks exactly as a member would.
-   */
-  static async recordElementView(token: string, elementId: string) {
-    const { user, courses } = await AssignmentService.getSessionCatalogue(token);
-
-    const owner = courses
-      .flatMap((course) => course.sections)
-      .find((section) => section.elements.some((element) => element.id === elementId));
-    if (!owner) throw new Error('that content is not part of your assigned learning');
-
-    await CurriculumGateway.recordSectionView(user.id, owner.id);
-    return CurriculumGateway.recordElementView(user.id, elementId);
-  }
-
-  /**
    * Starts the clock on an assigned quiz, or reports the one already running.
    * The same server-anchored deadline a signed-in learner gets, so a guest who
    * closes the tab comes back to the time they had left, not a fresh allowance.
@@ -773,7 +756,7 @@ export default class AssignmentService {
   static async getSessionNewIds(token: string, courseId: string): Promise<NewIds> {
     const { user, courses } = await AssignmentService.getSessionCatalogue(token);
     if (!courses.some((course) => course.id === courseId)) {
-      return { newModuleIds: [], newSectionIds: [], newElementIds: [], newQuizIds: [] };
+      return { newModelIds: [], newSectionIds: [], newQuizIds: [] };
     }
     return PublicationService.getNewIdsForLearner(courseId, user.id);
   }
@@ -841,10 +824,7 @@ export default class AssignmentService {
           const ids = await PublicationService.getNewIdsForLearner(course.id, user.id, course);
           return [
             course.id,
-            ids.newModuleIds.length +
-              ids.newSectionIds.length +
-              ids.newElementIds.length +
-              ids.newQuizIds.length,
+            ids.newModelIds.length + ids.newSectionIds.length + ids.newQuizIds.length,
           ];
         }),
       ),
@@ -856,26 +836,24 @@ export default class AssignmentService {
   /** What the guest has done, scoped to their assigned content. */
   static async getSessionProgress(token: string) {
     const { user, courses, quizzes } = await AssignmentService.getSessionCatalogue(token);
-    const [views, elementViews, attempts] = await Promise.all([
+    const [views, attempts] = await Promise.all([
       CurriculumGateway.getViewedSectionIds(user.id),
-      CurriculumGateway.getViewedElementIds(user.id),
       QuizGateway.getAttemptsForUser(user.id),
     ]);
 
     const ownSections = new Set(courses.flatMap((c) => c.sections.map((m) => m.id)));
-    const ownElements = new Set(
-      courses.flatMap((c) => c.sections.flatMap((m) => m.elements.map((e) => e.id))),
-    );
     const ownQuizzes = new Set(quizzes.map((q) => q.id));
+    const ownViews = views.filter((v) => ownSections.has(v.sectionId));
 
     return {
-      viewedSectionIds: views.map((v) => v.sectionId).filter((id) => ownSections.has(id)),
-      viewedElementIds: elementViews.map((v) => v.elementId).filter((id) => ownElements.has(id)),
-      // Same shape a signed-in learner gets, so Continue resumes at the last
-      // thing a link holder opened rather than sending them back to the start.
-      elementViews: elementViews
-        .filter((v) => ownElements.has(v.elementId))
-        .map((v) => ({ elementId: v.elementId, viewedAt: v.viewedAt.toISOString() })),
+      viewedSectionIds: ownViews.map((v) => v.sectionId),
+      // Same shape a signed-in learner gets, newest first, so Continue resumes
+      // at the last thing a link holder opened rather than sending them back to
+      // the start.
+      sectionViews: ownViews.map((v) => ({
+        sectionId: v.sectionId,
+        viewedAt: v.viewedAt.toISOString(),
+      })),
       attemptedQuizIds: [
         ...new Set(attempts.map((a) => a.quizId).filter((id) => ownQuizzes.has(id))),
       ],

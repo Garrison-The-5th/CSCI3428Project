@@ -8,9 +8,13 @@
 /**
  * The recycle bin.
  *
- * Courses, modules, sections and quizzes are soft deleted, so they land here.
- * Each can be restored or permanently removed, and the whole bin can be restored
- * or emptied at once. The server clears anything older than its retention window
+ * Courses and standalone quizzes are soft deleted, so they land here. (A quiz
+ * set is a course, so it is among the courses.) Each can be restored or
+ * permanently removed, and the whole bin can be restored or emptied at once.
+ *
+ * Nothing from inside a course is here. A model, a section or a quiz deleted
+ * from a course that is still live is in that course's own Archive tab, and
+ * neither Restore all nor Empty recycle bin reaches it. The server clears anything older than its retention window
  * on its own, so every row says how long it has left rather than only when it
  * arrived — the countdown is the part that matters.
  */
@@ -20,43 +24,25 @@ import { useCallback, useEffect, useState } from 'react';
 import ConfirmDialog from '@/components/common/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  curriculumApi,
-  DeletedCourse,
-  DeletedModule,
-  DeletedSection,
-} from '@/services/curriculum-api';
+import { curriculumApi, DeletedCourse } from '@/services/curriculum-api';
 import { DeletedQuiz, quizApi } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
+import { timeLeft } from '@/utils/retention';
 
 /** What the confirm dialog is asking about. `all` empties the whole bin. */
-type Pending =
-  | { kind: 'course' | 'module' | 'section' | 'quiz'; id: string; label: string }
-  | { kind: 'all' }
-  | null;
+type Pending = { kind: 'course' | 'quiz'; id: string; label: string } | { kind: 'all' } | null;
 
 interface TrashBinProps {
   onNotify: (message: string, type?: 'success' | 'error') => void;
 }
 
-/** "3 days left", or "clearing soon" once it is inside the last day. */
-function timeLeft(deletedAt: string, retentionDays: number): string {
-  const expiresAt = new Date(deletedAt).getTime() + retentionDays * 86_400_000;
-  const days = Math.ceil((expiresAt - Date.now()) / 86_400_000);
-  if (days <= 0) return 'clearing now';
-  if (days === 1) return 'clears tomorrow';
-  return `clears in ${days} days`;
-}
-
 /**
- * The recycle bin: deleted courses, modules, sections and quizzes this person may edit, each
- * restorable or deletable for good, plus restore-all and empty-bin. Items expire after
+ * The recycle bin: the deleted courses this person may edit and the deleted standalone quizzes,
+ * each restorable or deletable for good, plus restore-all and empty-bin. Items expire after
  * `retentionDays`.
  */
 const TrashBin = ({ onNotify }: TrashBinProps) => {
   const [courses, setCourses] = useState<DeletedCourse[]>([]);
-  const [modules, setModules] = useState<DeletedModule[]>([]);
-  const [sections, setSections] = useState<DeletedSection[]>([]);
   const [quizzes, setQuizzes] = useState<DeletedQuiz[]>([]);
   const [retentionDays, setRetentionDays] = useState(14);
   const [loading, setLoading] = useState(true);
@@ -71,8 +57,6 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
         quizApi.getDeletedQuizzes(),
       ]);
       setCourses(curriculum.courses ?? []);
-      setModules(curriculum.modules ?? []);
-      setSections(curriculum.sections ?? []);
       setQuizzes(deletedQuizzes);
       if (curriculum.retentionDays) setRetentionDays(curriculum.retentionDays);
     } catch (err) {
@@ -103,18 +87,18 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
     }
   };
 
-  /** Restores everything in the bin — curriculum first, then quizzes. */
+  /** Restores everything in the bin: the courses, then the standalone quizzes. */
   const restoreAll = () =>
     run(
       async () => {
         await curriculumApi.restoreAllDeleted();
         await quizApi.restoreAllQuizzes();
       },
-      'Everything restored',
+      'Courses and standalone quizzes restored',
       'Failed to restore everything',
     );
 
-  /** Permanently deletes everything in the bin. */
+  /** Permanently deletes everything in the bin: the courses and the standalone quizzes. */
   const emptyBin = () =>
     run(
       async () => {
@@ -130,19 +114,15 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
     const call =
       target.kind === 'course'
         ? () => curriculumApi.purgeCourse(target.id)
-        : target.kind === 'module'
-          ? () => curriculumApi.purgeModule(target.id)
-          : target.kind === 'section'
-            ? () => curriculumApi.purgeSection(target.id)
-            : () => quizApi.purgeQuiz(target.id);
+        : () => quizApi.purgeQuiz(target.id);
 
     return run(call, `"${target.label}" permanently deleted`, 'Failed to delete permanently');
   };
 
-  const total = courses.length + modules.length + sections.length + quizzes.length;
+  const total = courses.length + quizzes.length;
 
   const row = (
-    kind: 'course' | 'module' | 'section' | 'quiz',
+    kind: 'course' | 'quiz',
     id: string,
     title: string,
     origin: string,
@@ -196,7 +176,12 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                 Recycle bin{total > 0 ? ` (${total})` : ''}
               </CardTitle>
               <p className="text-sm text-dark-gray">
-                Deleted items are cleared automatically after {retentionDays} days.
+                Deleted courses and standalone quizzes. They are cleared automatically after{' '}
+                {retentionDays} days.
+              </p>
+              <p className="text-sm text-dark-gray">
+                A model, section or quiz deleted from inside a course is in that course&rsquo;s
+                Archive tab.
               </p>
             </div>
           </div>
@@ -209,7 +194,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                 variant="outline"
                 className="gap-2 bg-white text-dark-gray hover:bg-light-gray"
               >
-                <ArrowUturnLeftIcon className="w-4 h-4" /> Restore all
+                <ArrowUturnLeftIcon className="w-4 h-4" /> Restore all courses and quizzes
               </Button>
               <Button
                 onClick={() => setPending({ kind: 'all' })}
@@ -228,7 +213,7 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
             <p className="py-8 text-center text-dark-gray">Loading...</p>
           ) : total === 0 ? (
             <p className="py-8 text-center text-dark-gray">
-              Nothing deleted. Items you remove will appear here.
+              Nothing deleted. Courses and standalone quizzes you remove will appear here.
             </p>
           ) : (
             <>
@@ -249,69 +234,17 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
                 </section>
               )}
 
-              {modules.length > 0 && (
-                <section>
-                  <h3 className="mb-2 font-semibold text-dark-gray">Modules</h3>
-                  <ul className="flex flex-col gap-2">
-                    {modules.map((module) =>
-                      row(
-                        'module',
-                        module.id,
-                        module.title,
-                        `${module.course?.title ?? 'Unknown course'} · comes back at the end`,
-                        module.deletedAt,
-                        () =>
-                          run(
-                            () => curriculumApi.restoreModule(module.id),
-                            `"${module.title}" restored`,
-                            'Failed to restore module',
-                          ),
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-
-              {sections.length > 0 && (
-                <section>
-                  <h3 className="mb-2 font-semibold text-dark-gray">Sections</h3>
-                  <ul className="flex flex-col gap-2">
-                    {sections.map((section) =>
-                      row(
-                        'section',
-                        section.id,
-                        section.title,
-                        section.course?.title ?? 'Unknown course',
-                        section.deletedAt,
-                        () =>
-                          run(
-                            () => curriculumApi.restoreSection(section.id),
-                            `"${section.title}" restored`,
-                            'Failed to restore section',
-                          ),
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-
               {quizzes.length > 0 && (
                 <section>
-                  <h3 className="mb-2 font-semibold text-dark-gray">Quizzes</h3>
+                  <h3 className="mb-2 font-semibold text-dark-gray">Standalone quizzes</h3>
                   <ul className="flex flex-col gap-2">
                     {quizzes.map((quiz) =>
-                      row(
-                        'quiz',
-                        quiz.id,
-                        quiz.title,
-                        quiz.section?.course?.title ?? '',
-                        quiz.deletedAt,
-                        () =>
-                          run(
-                            () => quizApi.restoreQuiz(quiz.id),
-                            `"${quiz.title}" restored`,
-                            'Failed to restore quiz',
-                          ),
+                      row('quiz', quiz.id, quiz.title, 'Belongs to no course', quiz.deletedAt, () =>
+                        run(
+                          () => quizApi.restoreQuiz(quiz.id),
+                          `"${quiz.title}" restored`,
+                          'Failed to restore quiz',
+                        ),
                       ),
                     )}
                   </ul>
@@ -329,14 +262,16 @@ const TrashBin = ({ onNotify }: TrashBinProps) => {
         message={
           pending?.kind === 'all' ? (
             <>
-              Permanently delete all {total} item{total === 1 ? '' : 's'} in the recycle bin?
+              Permanently delete the {courses.length} course{courses.length === 1 ? '' : 's'} and{' '}
+              {quizzes.length} standalone quiz{quizzes.length === 1 ? '' : 'zes'} in the recycle
+              bin? Each course&rsquo;s models, sections and content go with it.
               <br />
-              This cannot be undone.
+              This cannot be undone. Items in a live course&rsquo;s Archive tab are not affected.
             </>
           ) : (
             <>
               Permanently delete <span className="font-semibold">{pending?.label}</span>?
-              {pending?.kind === 'course' && ' Its sections and content go with it.'}
+              {pending?.kind === 'course' && ' Its models, sections and content go with it.'}
               <br />
               This cannot be undone.
             </>

@@ -73,7 +73,7 @@ export interface CourseMap {
   directedLearning: boolean;
   stagedAt: string | null;
   /**
-   * True when sections or modules have been added since the last stage (or it
+   * True when sections or models have been added since the last stage (or it
    * has never been staged). Mapping is refused until the course is staged.
    */
   needsStaging?: boolean;

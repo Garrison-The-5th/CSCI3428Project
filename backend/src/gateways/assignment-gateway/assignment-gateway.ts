@@ -222,9 +222,6 @@ export default class AssignmentGateway {
    */
   static clearCourseProgress(userId: number, courseId: string) {
     return prisma.$transaction([
-      prisma.elementProgress.deleteMany({
-        where: { userId, element: { section: { courseId } } },
-      }),
       prisma.sectionProgress.deleteMany({ where: { userId, section: { courseId } } }),
       prisma.quizAttempt.deleteMany({ where: { userId, quiz: { section: { courseId } } } }),
       prisma.quizSession.deleteMany({ where: { userId, quiz: { section: { courseId } } } }),

@@ -99,7 +99,7 @@ const stagedCourse = (overrides: Record<string, unknown> = {}) => ({
   directedLearning: true,
   stagedAt: new Date('2026-10-01'),
   stagedContentIds: ['m1', 's1'],
-  modules: [{ id: 'm1' }],
+  models: [{ id: 'm1' }],
   sections: [{ id: 's1', title: 'Intro' }],
   ...overrides,
 });
@@ -191,20 +191,20 @@ describe('CourseMapService.needsStaging', () => {
     expect(CourseMapService.needsStaging(stagedCourse(), [])).toBe(false);
   });
 
-  it('is true once a module is added', () => {
-    const course = stagedCourse({ modules: [{ id: 'm1' }, { id: 'm2' }] });
+  it('is true once a model is added', () => {
+    const course = stagedCourse({ models: [{ id: 'm1' }, { id: 'm2' }] });
     expect(CourseMapService.needsStaging(course, [])).toBe(true);
   });
 
-  it('ignores the map’s own layer modules and sections', () => {
+  it('ignores the map’s own layer models and sections', () => {
     const course = stagedCourse({
-      modules: [{ id: 'm1' }, { id: 'layer-mod' }],
+      models: [{ id: 'm1' }, { id: 'layer-mod' }],
       sections: [
         { id: 's1', title: 'Intro' },
         { id: 'layer-sec', title: 'Directed learning quiz 1' },
       ],
     });
-    expect(CourseMapService.needsStaging(course, [{ moduleId: 'layer-mod' }])).toBe(false);
+    expect(CourseMapService.needsStaging(course, [{ modelId: 'layer-mod' }])).toBe(false);
   });
 
   it('does not ask for a stage just because something was deleted', () => {
@@ -313,7 +313,7 @@ describe('CourseMapService.assertMappable', () => {
     map.getNodes.mockResolvedValue([node('root')] as never);
 
     await expect(CourseMapService.assertMappable('c1')).rejects.toThrow(
-      /General content needs an element to publish/i,
+      /General content needs a section to publish/i,
     );
   });
 
@@ -358,7 +358,7 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     quiz.getQuizById.mockResolvedValue({
       id: 'quiz-1',
@@ -404,8 +404,8 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e6', courseId: 'c1', parentId: 'woods', childId: 'wood-home', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
-      { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', moduleId: 'mod-2' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
+      { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', modelId: 'mod-2' },
     ] as never);
     quiz.getQuizById.mockImplementation(
       (id: string) =>
@@ -451,7 +451,7 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: 'opt-2' },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     quiz.getQuizById.mockResolvedValue({
       id: 'quiz-1',
@@ -487,7 +487,7 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'b', optionId: 'opt-1' },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     quiz.getQuizById.mockResolvedValue({
       id: 'quiz-1',
@@ -528,7 +528,7 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e2', courseId: 'c1', parentId: 'root', childId: 'woods', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     quiz.getQuizById.mockResolvedValue({
       id: 'quiz-1',
@@ -559,20 +559,20 @@ describe('CourseMapService.syncQuizzes', () => {
     expect(quiz.updateQuiz).not.toHaveBeenCalled();
   });
 
-  it('removes the module and quiz of a layer the map no longer has', async () => {
+  it('removes the model and quiz of a layer the map no longer has', async () => {
     map.getNodes.mockResolvedValue([node('root')] as never);
     map.getEdges.mockResolvedValue([]);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     map.deleteLayer.mockResolvedValue({} as never);
     quiz.hardDeleteQuiz.mockResolvedValue({} as never);
-    curriculum.hardDeleteModule.mockResolvedValue({} as never);
+    curriculum.hardDeleteModel.mockResolvedValue({} as never);
 
     await CourseMapService.syncQuizzes('c1');
 
     expect(quiz.hardDeleteQuiz).toHaveBeenCalledWith('quiz-1');
-    expect(curriculum.hardDeleteModule).toHaveBeenCalledWith('mod-1');
+    expect(curriculum.hardDeleteModel).toHaveBeenCalledWith('mod-1');
   });
 
   /*
@@ -590,11 +590,11 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e2', courseId: 'c1', parentId: 'a', childId: 'b', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
     ] as never);
     map.deleteLayer.mockResolvedValue({} as never);
     quiz.hardDeleteQuiz.mockResolvedValue({} as never);
-    curriculum.hardDeleteModule.mockResolvedValue({} as never);
+    curriculum.hardDeleteModel.mockResolvedValue({} as never);
 
     await CourseMapService.syncQuizzes('c1');
 
@@ -622,8 +622,8 @@ describe('CourseMapService.syncQuizzes', () => {
       { id: 'e5', courseId: 'c1', parentId: 'b', childId: 'b1', optionId: null },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', moduleId: 'mod-1' },
-      { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', moduleId: 'mod-2' },
+      { id: 'l1', courseId: 'c1', depth: 1, quizId: 'quiz-1', modelId: 'mod-1' },
+      { id: 'l2', courseId: 'c1', depth: 2, quizId: 'quiz-2', modelId: 'mod-2' },
     ] as never);
     quiz.getQuizById.mockImplementation(
       (id: string) =>
@@ -655,7 +655,7 @@ describe('CourseMapService.recordChoice', () => {
       courseId: 'c1',
       depth: 1,
       quizId: 'quiz-1',
-      moduleId: 'mod-1',
+      modelId: 'mod-1',
     } as never);
     map.getEdges.mockResolvedValue([
       { id: 'e1', courseId: 'c1', parentId: 'root', childId: 'bees', optionId: 'o-bees' },
@@ -674,7 +674,7 @@ describe('CourseMapService.recordChoice', () => {
       courseId: 'c1',
       depth: 2,
       quizId: 'quiz-2',
-      moduleId: 'mod-2',
+      modelId: 'mod-2',
     } as never);
     // Shared training offered under two parents, so two options mean one node.
     map.getEdges.mockResolvedValue([
@@ -763,8 +763,8 @@ describe('CourseMapService.previewFor', () => {
     curriculum.getCourseById.mockImplementation(((id: string) =>
       Promise.resolve(
         id === 'c1'
-          ? { id: 'c1', directedLearning: true, modules: [], sections: [ownSection] }
-          : { id: 'lender', directedLearning: false, modules: [], sections: [borrowedSection] },
+          ? { id: 'c1', directedLearning: true, models: [], sections: [ownSection] }
+          : { id: 'lender', directedLearning: false, models: [], sections: [borrowedSection] },
       )) as never);
 
     // The root holds this course's own section; the branch holds one borrowed
@@ -787,7 +787,7 @@ describe('CourseMapService.previewFor', () => {
       { id: 'e2', parentId: 'root', childId: 'other', optionId: 'opt-2' },
     ] as never);
     map.getLayers.mockResolvedValue([
-      { id: 'l1', depth: 1, quizId: 'layer-quiz', moduleId: 'mod-q1', sectionId: 's-q1' },
+      { id: 'l1', depth: 1, quizId: 'layer-quiz', modelId: 'mod-q1', sectionId: 's-q1' },
     ] as never);
     quiz.getQuizById.mockResolvedValue({ id: 'layer-quiz', sectionId: 's-q1' } as never);
   });
@@ -807,10 +807,10 @@ describe('CourseMapService.previewFor', () => {
     ]);
   });
 
-  it('draws the branch as a module rather than dropping it as empty', async () => {
+  it('draws the branch as a model rather than dropping it as empty', async () => {
     const preview = await CourseMapService.previewFor('c1', new Map([[1, ['branch']]]));
 
-    expect(preview.course.modules.map((module) => module.title)).toContain('branch');
+    expect(preview.course.models.map((model) => model.title)).toContain('branch');
   });
 
   it('still leaves out a branch the learner did not pick', async () => {
@@ -1139,5 +1139,51 @@ describe('CourseMapService.propagate', () => {
     expect(quizzes).toHaveBeenCalledWith('c1', expect.any(Set));
     sync.mockRestore();
     quizzes.mockRestore();
+  });
+});
+
+/**
+ * The model, section and quiz the map generates for a layer. On a two-layer
+ * course the section is the content, so a layer's section is a QUIZ section and
+ * the quiz hangs off it — the same shape an author's quiz has.
+ */
+describe('CourseMapService.mintLayer', () => {
+  it('makes a layer model holding one QUIZ section and its directed quiz', async () => {
+    curriculum.getHighestModelNumber.mockResolvedValue(2 as never);
+    curriculum.createModel.mockResolvedValue({ id: 'layer-model' } as never);
+    curriculum.createSection.mockResolvedValue({ id: 'layer-section' } as never);
+    quiz.createQuiz.mockResolvedValue({ id: 'layer-quiz' } as never);
+    map.createLayer.mockResolvedValue({ quizId: 'layer-quiz' } as never);
+
+    const quizId = await CourseMapService.mintLayer('c1', 1, 'Directed learning quiz 1');
+
+    expect(quizId).toBe('layer-quiz');
+    expect(curriculum.createModel).toHaveBeenCalledWith(
+      expect.objectContaining({ courseId: 'c1', number: 3 }),
+    );
+    expect(curriculum.createSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'layer-model',
+        type: 'QUIZ',
+        position: 1,
+        number: '3.1',
+      }),
+    );
+    expect(quiz.createQuiz).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'DIRECTED', sectionId: 'layer-section' }),
+    );
+    expect(map.createLayer).toHaveBeenCalledWith({
+      courseId: 'c1',
+      depth: 1,
+      quizId: 'layer-quiz',
+      modelId: 'layer-model',
+    });
+  });
+
+  /** `layerModelIds` is what makes the structure editor treat them as read-only. */
+  it('names its layer models so the editor can refuse edits to them', async () => {
+    map.getLayers.mockResolvedValue([{ modelId: 'layer-model' }] as never);
+
+    expect(await CourseMapService.layerModelIds('c1')).toEqual(new Set(['layer-model']));
   });
 });

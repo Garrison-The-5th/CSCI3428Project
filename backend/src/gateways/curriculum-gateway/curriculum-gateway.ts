@@ -1,11 +1,11 @@
 /**
  * File: curriculum-gateway.ts
- * Description: All database access for courses, modules, sections and progress.
+ * Description: All database access for courses, models, sections and progress.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
-import { CourseKind, Prisma } from '../../../generated/prisma';
+import { CourseKind, Prisma, SectionType } from '../../../generated/prisma';
 import { prisma } from '../../../prisma/prisma-client';
 
 /**
@@ -26,12 +26,12 @@ export type CourseReach = boolean | 'all';
 type Db = Prisma.TransactionClient;
 
 /**
- * Modules come back as bare headings — id, number, title — and the sections stay
- * in the flat `sections` list, tagged with `moduleId`. Nesting the sections inside
- * their module instead would send every element twice, and elements carry base64
+ * Models come back as bare headings — id, number, title — and the sections stay
+ * in the flat `sections` list, tagged with `modelId`. Nesting the sections inside
+ * their model instead would send every section twice, and sections carry base64
  * images.
  */
-const moduleHeadings = {
+const modelHeadings = {
   where: { deletedAt: null },
   orderBy: { number: 'asc' as const },
 } as const;
@@ -40,19 +40,18 @@ const moduleHeadings = {
  * Learners see published, non-deleted content only. Authors see everything that
  * is not deleted. `live` is the learner view.
  *
- * `sortKey` is module-then-position, so one ordering pass puts the whole course
- * in reading order without needing the modules joined in.
+ * `sortKey` is model-then-position, so one ordering pass puts the whole course
+ * in reading order without needing the models joined in.
  */
 function sectionTree(live: boolean) {
   return {
     where: live ? { deletedAt: null } : { deletedAt: null },
     orderBy: { sortKey: 'asc' as const },
     include: {
-      elements: { orderBy: { order: 'asc' as const } },
+      // A QUIZ section's one quiz; empty on every other type.
       quizzes: {
         where: live ? { deletedAt: null, published: true } : { deletedAt: null },
-        // Shares one sequence with elements so the two can be interleaved.
-        orderBy: { order: 'asc' as const },
+        orderBy: { createdAt: 'asc' as const },
         include: {
           questions: {
             orderBy: { order: 'asc' as const },
@@ -70,7 +69,7 @@ export default class CurriculumGateway {
     return prisma.course.findMany({
       where: { deletedAt: null, published: true },
       orderBy: { createdAt: 'asc' },
-      include: { modules: moduleHeadings, sections: sectionTree(true), instructors: true },
+      include: { models: modelHeadings, sections: sectionTree(true), instructors: true },
     });
   }
 
@@ -78,7 +77,7 @@ export default class CurriculumGateway {
    * Published courses reduced to what the dashboard actually reads: counts,
    * minutes and dates.
    *
-   * The full tree is enormous by comparison — every element carries its base64
+   * The full tree is enormous by comparison — every section carries its base64
    * media, every quiz its questions and options — and the dashboard renders none
    * of it. It needs to know how many sections there are and which quizzes sit in
    * them, so that is all this selects.
@@ -157,7 +156,7 @@ export default class CurriculumGateway {
   }
 
   /**
-   * Creates the default tutorial's course row, flagged, with the one module
+   * Creates the default tutorial's course row, flagged, with the one model
    * every course starts with.
    *
    * Only the shell: the section and its content go in through the ordinary
@@ -168,7 +167,7 @@ export default class CurriculumGateway {
   static createDefaultTutorial(content: {
     title: string;
     shortDescription: string;
-    moduleTitle: string;
+    modelTitle: string;
   }) {
     return prisma.$transaction(async (db) => {
       const course = await db.course.create({
@@ -184,8 +183,8 @@ export default class CurriculumGateway {
           lockAfterDue: false,
         },
       });
-      await db.module.create({
-        data: { courseId: course.id, number: 1, title: content.moduleTitle },
+      await db.model.create({
+        data: { courseId: course.id, number: 1, title: content.modelTitle },
       });
       return course;
     });
@@ -199,7 +198,7 @@ export default class CurriculumGateway {
     return prisma.course.findMany({
       where: { deletedAt: null, ...CurriculumGateway.accessibleCourses(userId, includeUnowned) },
       orderBy: { createdAt: 'asc' },
-      include: { modules: moduleHeadings, sections: sectionTree(false), instructors: true },
+      include: { models: modelHeadings, sections: sectionTree(false), instructors: true },
     });
   }
 
@@ -224,7 +223,7 @@ export default class CurriculumGateway {
   static getCourseById(id: string, live = false) {
     return prisma.course.findFirst({
       where: { id, deletedAt: null, ...(live ? { published: true } : {}) },
-      include: { modules: moduleHeadings, sections: sectionTree(live), instructors: true },
+      include: { models: modelHeadings, sections: sectionTree(live), instructors: true },
     });
   }
 
@@ -236,7 +235,7 @@ export default class CurriculumGateway {
   ) {
     return prisma.course.create({
       data: { title, kind, createdById },
-      include: { modules: moduleHeadings, sections: sectionTree(false) },
+      include: { models: modelHeadings, sections: sectionTree(false) },
     });
   }
 
@@ -270,7 +269,7 @@ export default class CurriculumGateway {
     return prisma.course.update({
       where: { id },
       data,
-      include: { modules: moduleHeadings, sections: sectionTree(false), instructors: true },
+      include: { models: modelHeadings, sections: sectionTree(false), instructors: true },
     });
   }
 
@@ -307,13 +306,13 @@ export default class CurriculumGateway {
     return match !== null;
   }
 
-  /** Which course a module/section/element/quiz/question ultimately belongs to. */
-  static async courseIdFromModule(moduleId: string) {
-    const module = await prisma.module.findUnique({
-      where: { id: moduleId },
+  /** Which course a model/section/quiz/question ultimately belongs to. */
+  static async courseIdFromModel(modelId: string) {
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
       select: { courseId: true },
     });
-    return module?.courseId ?? null;
+    return model?.courseId ?? null;
   }
 
   /** Owning course of a section, or null if the section does not exist. */
@@ -323,15 +322,6 @@ export default class CurriculumGateway {
       select: { courseId: true },
     });
     return section?.courseId ?? null;
-  }
-
-  /** Owning course of an element, via its section. */
-  static async courseIdFromElement(elementId: string) {
-    const element = await prisma.element.findUnique({
-      where: { id: elementId },
-      select: { section: { select: { courseId: true } } },
-    });
-    return element?.section.courseId ?? null;
   }
 
   /** Owning course of a quiz; null for the older quizzes that have no section. */
@@ -432,10 +422,12 @@ export default class CurriculumGateway {
   /**
    * The recycle bin, scoped to the courses this person may edit.
    *
-   * Every bin query takes the same `courseIds` list rather than working it out
-   * for itself, so the whole bin is answered from one access decision — and a
-   * course, a module and a section deleted together can never disagree about
-   * whether their owner may see them.
+   * Takes the `courseIds` list rather than working it out for itself, so the
+   * bin is answered from the one access decision its caller already made.
+   *
+   * Courses only. A deleted model or section is not here: it belongs to a
+   * course that is still live, and is found in that course's Archive tab — see
+   * `getDeletedStructure`.
    */
   static getDeletedCourses(courseIds: string[]) {
     return prisma.course.findMany({
@@ -450,7 +442,7 @@ export default class CurriculumGateway {
     return prisma.course.findFirst({ where: { id, deletedAt: { not: null } } });
   }
 
-  /** Permanent. Sections, elements and progress go with it via ON DELETE CASCADE. */
+  /** Permanent. Models, sections and progress go with it via ON DELETE CASCADE. */
   static hardDeleteCourse(id: string) {
     return prisma.course.delete({ where: { id } });
   }
@@ -489,9 +481,9 @@ export default class CurriculumGateway {
     return prisma.course.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
 
-  /** Permanently deletes modules binned before the cutoff. */
-  static purgeModulesDeletedBefore(cutoff: Date) {
-    return prisma.module.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
+  /** Permanently deletes models binned before the cutoff. */
+  static purgeModelsDeletedBefore(cutoff: Date) {
+    return prisma.model.deleteMany({ where: { deletedAt: { not: null, lt: cutoff } } });
   }
 
   /** Permanently deletes sections binned before the cutoff. */
@@ -510,7 +502,7 @@ export default class CurriculumGateway {
   /**
    * Records that the draft has moved on from what is published.
    *
-   * Called by every content mutation, however small — a renamed module counts
+   * Called by every content mutation, however small — a renamed model counts
    * as much as a new section, because both are held back from learners until the
    * next publish and the editor has to be able to say so.
    *
@@ -572,7 +564,7 @@ export default class CurriculumGateway {
   }
 
   /**
-   * Live sections of a course added since a moment, with the module they landed
+   * Live sections of a course added since a moment, with the model they landed
    * in — which is what a "there is new content" mail has to name to be worth
    * sending. Ordered the way the course reads.
    */
@@ -584,7 +576,7 @@ export default class CurriculumGateway {
         id: true,
         number: true,
         title: true,
-        module: { select: { id: true, number: true, title: true } },
+        model: { select: { id: true, number: true, title: true } },
       },
     });
   }
@@ -607,170 +599,174 @@ export default class CurriculumGateway {
             id: true,
             number: true,
             title: true,
-            module: { select: { id: true, number: true, title: true } },
+            model: { select: { id: true, number: true, title: true } },
           },
         },
       },
     });
   }
 
-  // ---- Modules ----
+  // ---- Models ----
 
-  /** A course's live modules in number order. */
-  static getModules(courseId: string, db: Db = prisma) {
-    return db.module.findMany({
+  /** A course's live models in number order. */
+  static getModels(courseId: string, db: Db = prisma) {
+    return db.model.findMany({
       where: { courseId, deletedAt: null },
       orderBy: { number: 'asc' },
     });
   }
 
-  /** One live module, or null if it is missing or in the bin. */
-  static getModuleById(id: string) {
-    return prisma.module.findFirst({ where: { id, deletedAt: null } });
+  /** One live model, or null if it is missing or in the bin. */
+  static getModelById(id: string) {
+    return prisma.model.findFirst({ where: { id, deletedAt: null } });
   }
 
   /**
-   * The lowest module number in a course, counting recycled ones. Anything
+   * The lowest model number in a course, counting recycled ones. Anything
    * parking below this is guaranteed not to collide, which is what lets a
-   * renumber run past modules already parked in the bin.
+   * renumber run past models already parked in the bin.
    */
-  static async getLowestModuleNumber(courseId: string, db: Db = prisma): Promise<number> {
-    const lowest = await db.module.aggregate({ where: { courseId }, _min: { number: true } });
+  static async getLowestModelNumber(courseId: string, db: Db = prisma): Promise<number> {
+    const lowest = await db.model.aggregate({ where: { courseId }, _min: { number: true } });
     return Math.min(lowest._min.number ?? 0, 0);
   }
 
   /**
-   * The highest module number in use, ignoring recycled ones.
+   * The highest model number in use, ignoring recycled ones.
    *
-   * Recycled modules are parked at negative numbers by `softDeleteModule`, so
+   * Recycled models are parked at negative numbers by `softDeleteModel`, so
    * they cannot collide with anything placed above this. What this guards
-   * against is a course whose live numbers are not dense — counting the modules
+   * against is a course whose live numbers are not dense — counting the models
    * and adding one would then hand back a number already taken, and the unique
    * index on (courseId, number) would refuse the insert.
    */
-  static async getHighestModuleNumber(courseId: string, db: Db = prisma): Promise<number> {
-    const highest = await db.module.aggregate({
+  static async getHighestModelNumber(courseId: string, db: Db = prisma): Promise<number> {
+    const highest = await db.model.aggregate({
       where: { courseId, deletedAt: null },
       _max: { number: true },
     });
     return Math.max(highest._max.number ?? 0, 0);
   }
 
-  /** Inserts a module. The caller picks `number` (see getHighestModuleNumber). */
-  static createModule(
+  /** Inserts a model. The caller picks `number` (see getHighestModelNumber). */
+  static createModel(
     data: { courseId: string; number: number; title: string; color?: string | null },
     db: Db = prisma,
   ) {
-    return db.module.create({ data });
+    return db.model.create({ data });
   }
 
-  /** Partial update of a module; also used by the renumber pass to move it. */
-  static updateModule(
+  /** Partial update of a model; also used by the renumber pass to move it. */
+  static updateModel(
     id: string,
     data: Partial<{ number: number; title: string; color: string | null }>,
     db: Db = prisma,
   ) {
-    return db.module.update({ where: { id }, data });
+    return db.model.update({ where: { id }, data });
   }
 
   /**
-   * Soft delete, moving the module out of the numbering space on the way.
+   * Soft delete, moving the model out of the numbering space on the way.
    *
-   * A recycled module must not keep reserving its number: the modules after it
+   * A recycled model must not keep reserving its number: the models after it
    * shift up to close the gap, and the unique index on (courseId, number) spans
-   * deleted rows, so leaving it on 2 makes the new module 2 impossible. It parks
+   * deleted rows, so leaving it on 2 makes the new model 2 impossible. It parks
    * below every number the course has ever used, which cannot collide and cannot
    * be reached by renumbering. Restoring puts it back through the renumber pass.
    */
-  static async softDeleteModule(id: string, courseId: string, db: Db = prisma) {
-    const lowest = await db.module.aggregate({
+  static async softDeleteModel(id: string, courseId: string, db: Db = prisma) {
+    const lowest = await db.model.aggregate({
       where: { courseId },
       _min: { number: true },
     });
 
-    return db.module.update({
+    return db.model.update({
       where: { id },
       data: { deletedAt: new Date(), number: Math.min(lowest._min.number ?? 0, 0) - 1 },
     });
   }
 
   /** Comes back on the end of the course; the renumber pass tidies up from there. */
-  static async restoreModule(id: string, courseId: string, db: Db = prisma) {
-    const highest = await db.module.aggregate({
+  static async restoreModel(id: string, courseId: string, db: Db = prisma) {
+    const highest = await db.model.aggregate({
       where: { courseId },
       _max: { number: true },
     });
 
-    return db.module.update({
+    return db.model.update({
       where: { id },
       data: { deletedAt: null, number: Math.max(highest._max.number ?? 0, 0) + 1 },
     });
   }
 
-  /** Only matches an already soft-deleted module, so live content can't be hard deleted. */
-  static findDeletedModule(id: string) {
-    return prisma.module.findFirst({ where: { id, deletedAt: { not: null } } });
+  /** Only matches an already soft-deleted model, so live content can't be hard deleted. */
+  static findDeletedModel(id: string) {
+    return prisma.model.findFirst({ where: { id, deletedAt: { not: null } } });
   }
 
-  /** Permanent. Its sections, elements and progress go with it via ON DELETE CASCADE. */
-  static hardDeleteModule(id: string) {
-    return prisma.module.delete({ where: { id } });
+  /** Permanent. Its sections and their progress go with it via ON DELETE CASCADE. */
+  static hardDeleteModel(id: string) {
+    return prisma.model.delete({ where: { id } });
   }
 
   /**
-   * No `number`: a recycled module has been parked outside the numbering space,
-   * and the number it used to hold now belongs to whatever closed the gap. Naming
-   * it in the bin would point at the wrong module.
+   * What one course has in its Archive: its deleted models and sections.
+   *
+   * No `number` on either. A recycled row has been parked outside the numbering
+   * space, and the number it used to hold now belongs to whatever closed the
+   * gap — naming it would point at the wrong thing.
+   *
+   * Scoped to one course by id. Whether the caller may see that course at all
+   * is decided before this is reached, by `accessibleCourses`.
    */
-  static getDeletedModules(courseIds: string[]) {
-    return prisma.module.findMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
-      orderBy: { deletedAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        deletedAt: true,
-        course: { select: { id: true, title: true } },
-      },
-    });
+  static async getDeletedStructure(courseId: string) {
+    const [models, sections] = await Promise.all([
+      prisma.model.findMany({
+        where: { courseId, deletedAt: { not: null } },
+        orderBy: { deletedAt: 'desc' },
+        select: { id: true, title: true, deletedAt: true },
+      }),
+      prisma.section.findMany({
+        where: { courseId, deletedAt: { not: null } },
+        orderBy: [{ deletedAt: 'desc' }, { position: 'asc' }],
+        select: { id: true, title: true, type: true, modelId: true, deletedAt: true },
+      }),
+    ]);
+    return { models, sections };
   }
 
-  /** "Restore all" for modules in the given courses. */
-  static restoreAllModules(courseIds: string[]) {
-    return prisma.module.updateMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
-      data: { deletedAt: null },
-    });
-  }
-
-  /** "Empty bin" for modules in the given courses. */
-  static purgeModules(courseIds: string[]) {
-    return prisma.module.deleteMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
+  /** The deleted sections of one model, which are what comes back with it. */
+  static getDeletedSectionsOfModel(modelId: string, db: Db = prisma) {
+    return db.section.findMany({
+      where: { modelId, deletedAt: { not: null } },
+      // The order they held; where two share a stale position, the one that
+      // left first comes back first, so the result does not depend on ids.
+      orderBy: [{ position: 'asc' }, { deletedAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, type: true },
     });
   }
 
   /**
-   * A course's live sections, ordered by their place within a module.
+   * A course's live sections, ordered by their place within a model.
    *
    * Ordered by `position` rather than `sortKey` on purpose: the renumber pass
    * runs after the numbers have been parked on throwaway values, so sortKey at
    * that moment says nothing about where anything belongs. `position` is the
-   * intent — it is what a reorder writes — and is unique within a module, so
-   * bucketing this list by moduleId yields each module's sections in order.
+   * intent — it is what a reorder writes — and is unique within a model, so
+   * bucketing this list by modelId yields each model's sections in order.
    */
   static getSectionsForRenumber(courseId: string, db: Db = prisma) {
     return db.section.findMany({
       where: { courseId, deletedAt: null },
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
-      select: { id: true, moduleId: true, position: true, number: true },
+      select: { id: true, modelId: true, position: true, number: true, type: true },
     });
   }
 
-  /** Highest position used in a module, so something can be put on the end. */
-  static async getHighestSectionPosition(moduleId: string, db: Db = prisma): Promise<number> {
+  /** Highest position used in a model, so something can be put on the end. */
+  static async getHighestSectionPosition(modelId: string, db: Db = prisma): Promise<number> {
     const highest = await db.section.aggregate({
-      where: { moduleId },
+      where: { modelId },
       _max: { position: true },
     });
     return highest._max.position ?? 0;
@@ -788,30 +784,52 @@ export default class CurriculumGateway {
   static createSection(
     data: {
       courseId: string;
-      moduleId: string;
+      modelId: string;
       position: number;
       number: string;
       sortKey: string;
       title: string;
+      /** Required: a section is one piece of content, and this says which. */
+      type: SectionType;
       estimatedMinutes: number;
       color?: string | null;
+      videoUrl?: string | null;
+      imageUrl?: string | null;
+      imageData?: string | null;
+      imageType?: string | null;
+      fileName?: string | null;
+      textContent?: string | null;
+      durationMinutes?: number | null;
+      canvasData?: Prisma.InputJsonValue;
     },
     db: Db = prisma,
   ) {
     return db.section.create({ data });
   }
 
-  /** Partial update of a section, including moving it to another module or position. */
+  /**
+   * Partial update of a section: its heading, its content, or its place (moving
+   * it to another model or position).
+   */
   static updateSection(
     id: string,
     data: Partial<{
-      moduleId: string;
+      modelId: string;
       position: number;
       number: string;
       sortKey: string;
       title: string;
+      type: SectionType;
       estimatedMinutes: number;
       color: string | null;
+      videoUrl: string | null;
+      imageUrl: string | null;
+      imageData: string | null;
+      imageType: string | null;
+      fileName: string | null;
+      textContent: string | null;
+      durationMinutes: number | null;
+      canvasData: Prisma.InputJsonValue;
     }>,
     db: Db = prisma,
   ) {
@@ -820,7 +838,7 @@ export default class CurriculumGateway {
 
   /**
    * Soft delete, moving the section out of the numbering space on the way. Same
-   * reason as modules: the sections after it close the gap, and the unique index
+   * reason as models: the sections after it close the gap, and the unique index
    * on (courseId, number) counts deleted rows, so a recycled 1.2 would block the
    * section that becomes 1.2. Its id makes the parked value unique by
    * construction, and no real number can look like it.
@@ -832,13 +850,21 @@ export default class CurriculumGateway {
     });
   }
 
+  /** One section, deleted or not — for callers that act on a quiz's section either way. */
+  static findSectionAnyState(id: string, db: Db = prisma) {
+    return db.section.findUnique({
+      where: { id },
+      select: { id: true, courseId: true, modelId: true, type: true, deletedAt: true },
+    });
+  }
+
   /**
-   * Comes back on the end of its module. Its old position was reused the moment
+   * Comes back on the end of its model. Its old position was reused the moment
    * it left, and two sections sharing a position would make the order between
    * them arbitrary — the end is the one slot always free.
    */
-  static async restoreSection(id: string, moduleId: string, db: Db = prisma) {
-    const last = await CurriculumGateway.getHighestSectionPosition(moduleId, db);
+  static async restoreSection(id: string, modelId: string, db: Db = prisma) {
+    const last = await CurriculumGateway.getHighestSectionPosition(modelId, db);
     return db.section.update({
       where: { id },
       data: { deletedAt: null, position: last + 1 },
@@ -850,107 +876,9 @@ export default class CurriculumGateway {
     return prisma.section.findFirst({ where: { id, deletedAt: { not: null } } });
   }
 
-  /** Permanent. Elements and progress go with it via ON DELETE CASCADE. */
+  /** Permanent. Its quiz and its progress go with it via ON DELETE CASCADE. */
   static hardDeleteSection(id: string) {
     return prisma.section.delete({ where: { id } });
-  }
-
-  /** "Restore all" for sections in the given courses. */
-  static restoreAllSections(courseIds: string[]) {
-    return prisma.section.updateMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
-      data: { deletedAt: null },
-    });
-  }
-
-  /** "Empty bin" for sections in the given courses. */
-  static purgeSections(courseIds: string[]) {
-    return prisma.section.deleteMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
-    });
-  }
-
-  /** No `number`, for the same reason as modules — see getDeletedModules. */
-  static getDeletedSections(courseIds: string[]) {
-    return prisma.section.findMany({
-      where: { deletedAt: { not: null }, courseId: { in: courseIds } },
-      orderBy: { deletedAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        deletedAt: true,
-        course: { select: { id: true, title: true } },
-      },
-    });
-  }
-
-  /** The section's last element by order (quizzes not counted — see getLastContentOrder). */
-  static getLastElementOrder(sectionId: string, db: Db = prisma) {
-    return db.element.findFirst({ where: { sectionId }, orderBy: { order: 'desc' } });
-  }
-
-  /**
-   * Highest position used in a section by either an element or a quiz. They share
-   * one sequence so a quiz can sit between two pieces of content.
-   */
-  static async getLastContentOrder(sectionId: string, db: Db = prisma): Promise<number> {
-    const [element, quiz] = await Promise.all([
-      db.element.findFirst({ where: { sectionId }, orderBy: { order: 'desc' } }),
-      db.quiz.findFirst({ where: { sectionId, deletedAt: null }, orderBy: { order: 'desc' } }),
-    ]);
-    return Math.max(element?.order ?? 0, quiz?.order ?? 0);
-  }
-
-  /** Moves an element within its section's shared element/quiz sequence. */
-  static setElementOrder(id: string, order: number, db: Db = prisma) {
-    return db.element.update({ where: { id }, data: { order } });
-  }
-
-  /** Moves a quiz within its section's shared element/quiz sequence. */
-  static setQuizOrder(id: string, order: number, db: Db = prisma) {
-    return db.quiz.update({ where: { id }, data: { order } });
-  }
-
-  /** Elements and quizzes of a section, for validating a reorder request. */
-  static async getSectionContentIds(sectionId: string) {
-    const [elements, quizzes] = await Promise.all([
-      prisma.element.findMany({ where: { sectionId }, select: { id: true } }),
-      prisma.quiz.findMany({ where: { sectionId, deletedAt: null }, select: { id: true } }),
-    ]);
-    return {
-      elementIds: new Set(elements.map((e) => e.id)),
-      quizIds: new Set(quizzes.map((q) => q.id)),
-    };
-  }
-
-  /** Adds a piece of content (video, image, text, canvas, …) to a section at `order`. */
-  static createElement(
-    sectionId: string,
-    data: {
-      type: Prisma.ElementCreateInput['type'];
-      videoUrl?: string | null;
-      imageUrl?: string | null;
-      imageData?: string | null;
-      imageType?: string | null;
-      fileName?: string | null;
-      textContent?: string | null;
-      durationMinutes?: number | null;
-      canvasData?: Prisma.InputJsonValue;
-    },
-    order: number,
-    db: Db = prisma,
-  ) {
-    return db.element.create({ data: { sectionId, order, ...data } });
-  }
-
-  /** Partial update of an element's content. */
-  static updateElement(id: string, data: Prisma.ElementUpdateInput) {
-    return prisma.element.update({ where: { id }, data });
-  }
-
-  /** Permanent — elements have no recycle bin; their progress rows cascade with them. */
-  static deleteElement(id: string) {
-    return prisma.element.delete({ where: { id } });
   }
 
   /** Records that a user opened a section. Sections auto-complete on view. */
@@ -983,43 +911,27 @@ export default class CurriculumGateway {
     return earliest?.viewedAt ?? null;
   }
 
-  /** Every section this learner has opened, with when — the basis of course progress. */
+  /**
+   * Every section this learner has opened, newest first — the basis of course
+   * progress.
+   *
+   * Newest first because Continue has to resume where they actually stopped,
+   * which is the most recently opened section — not the first unfinished one,
+   * which could be miles behind them if they skipped ahead and came back.
+   */
   static getViewedSectionIds(userId: number) {
     return prisma.sectionProgress.findMany({
       where: { userId },
+      orderBy: { viewedAt: 'desc' },
       select: { sectionId: true, viewedAt: true },
     });
   }
 
-  /** Records that a user opened one piece of content, for item-by-item unlocking. */
-  static recordElementView(userId: number, elementId: string) {
-    return prisma.elementProgress.upsert({
-      where: { userId_elementId: { userId, elementId } },
-      create: { userId, elementId },
-      update: {},
-    });
-  }
-
-  /**
-   * Every element this person has opened, newest first.
-   *
-   * `viewedAt` rides along because Continue has to resume where they actually
-   * stopped, which is the most recently opened item — not the first unfinished
-   * one, which could be miles behind them if they skipped ahead and came back.
-   */
-  static getViewedElementIds(userId: number) {
-    return prisma.elementProgress.findMany({
-      where: { userId },
-      orderBy: { viewedAt: 'desc' },
-      select: { elementId: true, viewedAt: true },
-    });
-  }
-
   /** What a canvas save needs: its type, and the stored pictures to merge back in. */
-  static getElementCanvas(id: string) {
-    return prisma.element.findUnique({
-      where: { id },
-      select: { id: true, type: true, canvasData: true },
+  static getSectionCanvas(id: string) {
+    return prisma.section.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, courseId: true, type: true, canvasData: true },
     });
   }
 
@@ -1038,14 +950,6 @@ export default class CurriculumGateway {
       where: { courseId },
       create: { courseId, data },
       update: { data },
-    });
-  }
-
-  /** An element's ids only — enough to locate it and check access to its course. */
-  static getElementById(id: string) {
-    return prisma.element.findUnique({
-      where: { id },
-      select: { id: true, sectionId: true, section: { select: { courseId: true } } },
     });
   }
 

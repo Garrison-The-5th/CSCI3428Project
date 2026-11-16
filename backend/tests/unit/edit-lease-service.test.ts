@@ -38,7 +38,7 @@ describe('claim', () => {
   it('grants a claim nobody else holds', async () => {
     mockGateway.claim.mockResolvedValue({ userId: 1, user: ada } as never);
 
-    expect(await EditLeaseService.claim('c1', 'MODULE', 'm1', 1)).toMatchObject({
+    expect(await EditLeaseService.claim('c1', 'MODEL', 'm1', 1)).toMatchObject({
       granted: true,
       holder: 'Ada',
     });
@@ -51,7 +51,7 @@ describe('claim', () => {
   it('refuses when somebody else holds it, and says who', async () => {
     mockGateway.claim.mockResolvedValue({ userId: 2, user: grace } as never);
 
-    expect(await EditLeaseService.claim('c1', 'MODULE', 'm1', 1)).toMatchObject({
+    expect(await EditLeaseService.claim('c1', 'MODEL', 'm1', 1)).toMatchObject({
       granted: false,
       holder: 'Grace',
     });
@@ -71,19 +71,19 @@ describe('claim', () => {
 describe('listForCourse', () => {
   /**
    * Your own claims come back marked rather than filtered out: the editor needs
-   * them to know which module it is still holding, and dropping them here would
+   * them to know which model it is still holding, and dropping them here would
    * have it fight itself for its own lock.
    */
   it('marks your own claims as yours', async () => {
     mockGateway.listLive.mockResolvedValue([
-      { scope: 'MODULE', targetId: 'm1', userId: 1, user: ada },
+      { scope: 'MODEL', targetId: 'm1', userId: 1, user: ada },
       { scope: 'QUESTION', targetId: 'q1', userId: 2, user: grace },
     ] as never);
 
     const leases = await EditLeaseService.listForCourse('c1', 1);
 
     expect(leases).toEqual([
-      { scope: 'MODULE', targetId: 'm1', userId: 1, holder: 'Ada', mine: true },
+      { scope: 'MODEL', targetId: 'm1', userId: 1, holder: 'Ada', mine: true },
       { scope: 'QUESTION', targetId: 'q1', userId: 2, holder: 'Grace', mine: false },
     ]);
   });
@@ -93,9 +93,9 @@ describe('release', () => {
   /** Scoped to the holder, so one tab cannot drop somebody else's claim. */
   it('reports whether anything was actually given up', async () => {
     mockGateway.release.mockResolvedValue({ count: 0 } as never);
-    expect(await EditLeaseService.release('MODULE', 'm1', 1)).toEqual({ released: false });
+    expect(await EditLeaseService.release('MODEL', 'm1', 1)).toEqual({ released: false });
 
     mockGateway.release.mockResolvedValue({ count: 1 } as never);
-    expect(await EditLeaseService.release('MODULE', 'm1', 1)).toEqual({ released: true });
+    expect(await EditLeaseService.release('MODEL', 'm1', 1)).toEqual({ released: true });
   });
 });

@@ -61,7 +61,7 @@ async function publishedCourse(title: string) {
     data: {
       courseId: course.id,
       version: 1,
-      snapshot: { id: course.id, title, modules: [], sections: [] },
+      snapshot: { id: course.id, title, models: [], sections: [] },
     },
   });
   return course;
@@ -298,7 +298,7 @@ describeWithDatabase('a learning account under a shared login', () => {
     it('leaves a quiz set holding a one-time quiz on its link', async () => {
       const set = await publishedCourse('Exit check set');
       const section = await prisma.section.create({
-        data: { courseId: set.id, number: '1', sortKey: '1', title: 'Exit check' },
+        data: { courseId: set.id, number: '1', sortKey: '1', title: 'Exit check', type: 'QUIZ' },
       });
       await prisma.quiz.create({
         data: { title: 'Exit check', type: 'ONE_TIME', published: true, sectionId: section.id },

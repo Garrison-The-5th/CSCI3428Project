@@ -141,9 +141,10 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `GET` | `/curriculum/courses/:id/contributors` | signed in, can edit this course | Who else may edit this course |
 | `PUT` | `/curriculum/courses/:id/contributors` | signed in, can edit this course | Names the other authors on this course |
 | `GET` | `/curriculum/courses/manage` | signed in, author/admin | Author view: drafts included, scoped to what this person owns or was named on |
-| `GET` | `/curriculum/deleted` | signed in, author/admin | This person's recycle bin, for the admin dashboard |
-| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores this person's deleted courses and sections in one go |
-| `DELETE` | `/curriculum/deleted` | signed in, author/admin | Empties this person's recycle bin |
+| `GET` | `/curriculum/deleted` | signed in, author/admin | The recycle bin's **courses only** (quiz sets are courses), for the admin dashboard. Returns `{ courses, retentionDays }` — no models, no sections |
+| `POST` | `/curriculum/deleted/restore-all` | signed in, author/admin | Restores this person's deleted **courses**. Models and sections are not touched |
+| `DELETE` | `/curriculum/deleted` | signed in, author/admin | Empties this person's recycle bin of **courses**. A model or section deleted inside a live course survives |
+| `GET` | `/curriculum/courses/:courseId/deleted` | signed in, can edit this course | What that course's Archive tab lists as deleted: `{ models, sections, quizzes, retentionDays }`. Each model carries the deleted `sections` that come back with it; `sections` are the ones whose model is still live; `quizzes` are deleted QUIZ sections, listed as the quiz with its `sectionId` and `sectionTitle` |
 | `DELETE` | `/curriculum/deleted/courses/:id` | signed in, can edit this course | Permanently removes one deleted course |
 | `DELETE` | `/curriculum/deleted/sections/:id` | signed in, can edit this course | Permanently removes one deleted section |
 | `GET` | `/curriculum/courses/:id` | signed in | One course for a learner |
@@ -156,25 +157,22 @@ Defined in `backend/src/controllers/**/curriculum-controller.ts`.
 | `POST` | `/curriculum/courses/:id/restore` | signed in, can edit this course | Brings a course back out of the recycle bin |
 | `POST` | `/curriculum/courses/:id/image` | signed in, can edit this course, upload quota | Uploads the course cover photo shown on the Learning page |
 | `DELETE` | `/curriculum/courses/:id/image` | signed in, can edit this course | Removes the cover photo from a lesson or quiz set |
-| `GET` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | Uploads the course cover photo shown on the Learning page |
-| `POST` | `/curriculum/courses/:courseId/modules` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
-| `PUT` | `/curriculum/modules/:id` | signed in, can edit this course | A module takes a title and the place in the course it should occupy |
-| `DELETE` | `/curriculum/modules/:id` | signed in, can edit this course | Soft delete — the module and its sections move to the recycle bin |
-| `POST` | `/curriculum/modules/:id/restore` | signed in, can edit this course | Brings a module back out of the recycle bin |
-| `DELETE` | `/curriculum/deleted/modules/:id` | signed in, can edit this course | Permanently removes one deleted module |
-| `POST` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | Permanently removes one deleted module |
-| `PUT` | `/curriculum/courses/:courseId/structure` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
-| `PUT` | `/curriculum/sections/:id` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder |
-| `DELETE` | `/curriculum/sections/:id` | signed in, can edit this course | Soft delete — the section moves to the recycle bin and can be restored |
-| `POST` | `/curriculum/sections/:id/restore` | signed in, can edit this course | Brings a section back out of the recycle bin |
-| `POST` | `/curriculum/sections/:id/image` | signed in, can edit this course, upload quota | Uploads an image or PDF and stores it on the section as an element |
-| `POST` | `/curriculum/sections/:id/view` | signed in | Sections auto-complete on view, so opening one records progress |
-| `POST` | `/curriculum/elements/:id/view` | signed in | Records one piece of content as seen |
-| `PUT` | `/curriculum/sections/:id/content-order` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
-| `POST` | `/curriculum/sections/:sectionId/elements` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
-| `PUT` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
-| `DELETE` | `/curriculum/elements/:id` | signed in, can edit this course | Reorders a section's content, where elements and quizzes are interleaved |
-| `POST` | `/curriculum/elements/:id/canvas-images` | signed in, can edit this course, upload quota | Uploads a picture onto a canvas element (same file rules as a cover photo) |
+| `GET` | `/curriculum/courses/:courseId/models` | signed in, can edit this course | A course's live models in order, for the editor |
+| `POST` | `/curriculum/courses/:courseId/models` | signed in, can edit this course | A model takes a title and the place in the course it should occupy |
+| `PUT` | `/curriculum/models/:id` | signed in, can edit this course | Renames, recolours or moves a model; the grid renumbers around a move |
+| `DELETE` | `/curriculum/models/:id` | signed in, can edit this course | Soft delete — the model and its sections move to the course's Archive |
+| `POST` | `/curriculum/models/:id/restore` | signed in, can edit this course | Brings a model back out of the Archive, onto the end of its course, **with every section deleted inside it** |
+| `DELETE` | `/curriculum/deleted/models/:id` | signed in, can edit this course | Permanently removes one deleted model |
+| `POST` | `/curriculum/courses/:courseId/sections` | signed in, can edit this course | Adds a section. **`type` is required** (`TEXT`, `YOUTUBE`, `IMAGE`, `PDF`, `CANVAS` or `QUIZ`) — `400` without it. Takes `title`, optional `modelId`, `position`, `estimatedMinutes`, `color`, and the content for its type (`textContent`, `videoUrl`, `imageUrl`, `durationMinutes`). A `QUIZ` section is created with its quiz inside (`quizType`, default `EXAM`) |
+| `PUT` | `/curriculum/courses/:courseId/structure` | signed in, can edit this course | Applies a new grid for the whole course — used by drag-to-reorder. Body `{ models: [{ id, sectionIds }] }` |
+| `PUT` | `/curriculum/sections/:id` | signed in, can edit this course | Edits a section's title, time, colour or **content**; also the canvas auto-save (`canvas`). The type cannot be changed |
+| `DELETE` | `/curriculum/sections/:id` | signed in, can edit this course | Soft delete — the section moves to the course's Archive. A QUIZ section takes its quiz with it |
+| `POST` | `/curriculum/sections/:id/restore` | signed in, can edit this course | Brings a section back out of the Archive, onto the end of its model; a QUIZ section's quiz comes back with it |
+| `POST` | `/curriculum/sections/:id/file` | signed in, can edit this course, upload quota | Uploads an image or PDF into an `IMAGE` or `PDF` section, replacing what it held |
+| `POST` | `/curriculum/sections/:id/canvas-images` | signed in, can edit this course, upload quota | Uploads a picture onto a `CANVAS` section (same file rules as a cover photo) |
+| `GET` | `/curriculum/sections/:id/canvas-template` | signed in, can edit this course | The items new canvases in this section's course start with |
+| `PUT` | `/curriculum/sections/:id/canvas-template` | signed in, can edit this course | Adds one of this canvas's items to its course's defaults, or takes it out |
+| `POST` | `/curriculum/sections/:id/view` | signed in | Sections complete on view, so opening one records progress — and unlocks the next on a sequential course |
 | `GET` | `/curriculum/progress` | signed in | What this learner has already done |
 | `GET` | `/curriculum/dashboard` | signed in | Everything the home dashboard needs for the signed-in user |
 | `GET` | `/curriculum/instructors` | signed in, author/admin | Authors only |
@@ -236,7 +234,6 @@ Defined in `backend/src/controllers/**/public-assignment-controller.ts`.
 | `GET` | `/public/assignments/:token/dashboard` | public | The same dashboard a signed-in learner gets, over assigned content only |
 | `GET` | `/public/assignments/:token/progress` | public | The same dashboard a signed-in learner gets, over assigned content only |
 | `POST` | `/public/assignments/:token/sections/:sectionId/view` | public | The same dashboard a signed-in learner gets, over assigned content only |
-| `POST` | `/public/assignments/:token/elements/:elementId/view` | public | One piece of content seen — what unlocks the next on a sequential course |
 | `POST` | `/public/assignments/:token/quizzes/:quizId/start` | public | Starts the clock on an assigned quiz, or reports the one already running |
 | `POST` | `/public/assignments/:token/quizzes/:quizId/attempt` | public | Starts the clock on an assigned quiz, or reports the one already running |
 | `GET` | `/public/assignments/:token/courses/:courseId/new` | public | What arrived in this course since the link holder last worked on it |
@@ -276,15 +273,15 @@ it is a state to render, not a request to fix.
 |---|---|---|---|
 | `GET` | `/quizzes/` | signed in | Learner view: the quizzes this person can reach, with the correct answers stripped out |
 | `GET` | `/quizzes/manage` | signed in, author/admin | Author view: drafts included, answers intact — the quizzes inside courses this person may edit |
-| `GET` | `/quizzes/deleted` | signed in, author/admin | The quizzes in this person's recycle bin |
-| `POST` | `/quizzes/deleted/restore-all` | signed in, author/admin | Restores this person's deleted quizzes in one go |
-| `DELETE` | `/quizzes/deleted` | signed in, author/admin | Permanently removes this person's deleted quizzes |
-| `DELETE` | `/quizzes/deleted/:id` | signed in, can edit this course | Permanently removes one deleted quiz |
+| `GET` | `/quizzes/deleted` | signed in, author/admin | The recycle bin's **standalone quizzes** — those that belong to no course. A quiz inside a course is in that course's Archive (`/curriculum/courses/:courseId/deleted`) |
+| `POST` | `/quizzes/deleted/restore-all` | signed in, author/admin | Restores the recycle bin's standalone quizzes in one go |
+| `DELETE` | `/quizzes/deleted` | signed in, author/admin | Permanently removes the recycle bin's standalone quizzes |
+| `DELETE` | `/quizzes/deleted/:id` | signed in, can edit this course | Permanently removes one deleted quiz; a course quiz takes its deleted section with it |
 | `GET` | `/quizzes/:id` | signed in | One quiz for a learner: authenticated, scoped to what they can reach |
 | `POST` | `/quizzes/` | signed in, can edit this course | One quiz for a learner: authenticated, scoped to what they can reach |
 | `PUT` | `/quizzes/:id` | signed in, can edit this course | One quiz for a learner: authenticated, scoped to what they can reach |
-| `DELETE` | `/quizzes/:id` | signed in, can edit this course | Soft delete — the quiz moves to the recycle bin and can be restored |
-| `POST` | `/quizzes/:id/restore` | signed in, can edit this course | Brings a quiz back out of the recycle bin |
+| `DELETE` | `/quizzes/:id` | signed in, can edit this course | Soft delete. A standalone quiz goes to the recycle bin; a quiz inside a course goes to that course's Archive, section and all |
+| `POST` | `/quizzes/:id/restore` | signed in, can edit this course | Brings a quiz back; a course quiz comes back with its section |
 | `POST` | `/quizzes/:id/start` | signed in | Starts the clock, or reports the clock already running |
 | `POST` | `/quizzes/:id/attempt` | signed in, rate limited | Grades server-side and records the attempt so the quiz stops being outstanding |
 | `POST` | `/quizzes/:quizId/questions` | signed in, can edit this course | Grades server-side and records the attempt so the quiz stops being outstanding |

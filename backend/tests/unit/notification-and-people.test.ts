@@ -122,7 +122,7 @@ describe('EmailService — assignment messages', () => {
       to: 'ada@example.com',
       courseId: 'c1',
       courseTitle: 'Fire safety',
-      items: [{ kind: 'section', number: '2.3', title: 'Extinguishers', module: '2. Equipment' }],
+      items: [{ kind: 'section', number: '2.3', title: 'Extinguishers', model: '2. Equipment' }],
     });
 
     // Not configured, so not sent — but composed without throwing.
@@ -133,14 +133,14 @@ describe('EmailService — assignment messages', () => {
 describe('NotificationService.newItemsSince', () => {
   it('lists sections added since a moment', async () => {
     curriculum.getSectionsAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'New section', module: { number: 2, title: 'Equipment' } },
+      { id: 'm2', number: '2.1', title: 'New section', model: { number: 2, title: 'Equipment' } },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
 
     expect(items).toEqual([
-      { kind: 'section', number: '2.1', title: 'New section', module: '2. Equipment' },
+      { kind: 'section', number: '2.1', title: 'New section', model: '2. Equipment' },
     ]);
   });
 
@@ -150,13 +150,13 @@ describe('NotificationService.newItemsSince', () => {
    */
   it('omits a quiz whose section is also new', async () => {
     curriculum.getSectionsAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'New section', module: { number: 2, title: 'Equipment' } },
+      { id: 'm2', number: '2.1', title: 'New section', model: { number: 2, title: 'Equipment' } },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([
       {
         id: 'q1',
         title: 'New quiz',
-        section: { id: 'm2', number: '2.1', module: { number: 2, title: 'Equipment' } },
+        section: { id: 'm2', number: '2.1', model: { number: 2, title: 'Equipment' } },
       },
     ] as never);
 
@@ -171,22 +171,22 @@ describe('NotificationService.newItemsSince', () => {
       {
         id: 'q1',
         title: 'New quiz',
-        section: { id: 'm1', number: '1.1', module: { number: 1, title: 'Intro' } },
+        section: { id: 'm1', number: '1.1', model: { number: 1, title: 'Intro' } },
       },
     ] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
-    expect(items).toEqual([{ kind: 'quiz', number: '1.1', title: 'New quiz', module: '1. Intro' }]);
+    expect(items).toEqual([{ kind: 'quiz', number: '1.1', title: 'New quiz', model: '1. Intro' }]);
   });
 
-  it('labels a section with no module as ungrouped rather than crashing', async () => {
+  it('labels a section with no model as ungrouped rather than crashing', async () => {
     curriculum.getSectionsAddedSince.mockResolvedValue([
-      { id: 'm2', number: '2.1', title: 'Orphan', module: null },
+      { id: 'm2', number: '2.1', title: 'Orphan', model: null },
     ] as never);
     curriculum.getQuizzesAddedSince.mockResolvedValue([] as never);
 
     const items = await NotificationService.newItemsSince('c1', new Date('2026-01-01'));
-    expect(items[0].module).toBe('Ungrouped');
+    expect(items[0].model).toBe('Ungrouped');
   });
 });
 
@@ -209,7 +209,7 @@ describe('NotificationService.announceNewContent', () => {
   });
 
   /**
-   * An author building out a module adds five sections in five minutes; without
+   * An author building out a model adds five sections in five minutes; without
    * a quiet period that is five emails about the same course.
    */
   it('skips a learner still inside the quiet period', async () => {

@@ -43,17 +43,27 @@ function courseRow(overrides: Record<string, unknown> = {}) {
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     deletedAt: null,
-    modules: [{ id: 's1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
+    models: [{ id: 's1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
     sections: [
       {
         id: 'm1',
         courseId: 'c1',
-        moduleId: 's1',
+        modelId: 's1',
         position: 1,
         number: '1.1',
         title: 'Basics',
         estimatedMinutes: 10,
-        elements: [{ id: 'e1' }],
+        color: null,
+        // A QUIZ section: the one type that carries anything in `quizzes`.
+        type: 'QUIZ',
+        videoUrl: null,
+        imageUrl: null,
+        imageData: null,
+        imageType: null,
+        fileName: null,
+        textContent: null,
+        canvasData: null,
+        durationMinutes: null,
         quizzes: [{ id: 'q1', published: true, questions: [] }],
       },
     ],
@@ -74,8 +84,62 @@ describe('buildSnapshot', () => {
     const snapshot = await PublicationService.buildSnapshot('c1');
 
     expect(snapshot.id).toBe('c1');
-    expect(snapshot.modules).toHaveLength(1);
-    expect(snapshot.sections[0].elements).toHaveLength(1);
+    expect(snapshot.models).toHaveLength(1);
+    expect(snapshot.sections[0].quizzes).toHaveLength(1);
+  });
+
+  /**
+   * The two-layer shape: models, then sections, and each section *is* its
+   * content. There is no `elements` list anywhere, and the content fields are
+   * picked by name — a column added to Section reaches no learner until it is
+   * added to that list.
+   */
+  it('writes each section with its type and its content, and no element list', async () => {
+    curriculum.getCourseById.mockResolvedValue(
+      courseRow({
+        sections: [
+          {
+            ...courseRow().sections[0],
+            id: 'text-1',
+            type: 'TEXT',
+            textContent: '<p>Welcome</p>',
+            quizzes: [],
+            notForLearners: 'a column nobody added to the snapshot',
+          },
+          {
+            ...courseRow().sections[0],
+            id: 'video-1',
+            type: 'YOUTUBE',
+            videoUrl: 'https://youtu.be/abc',
+            durationMinutes: 7,
+            quizzes: [],
+          },
+        ],
+      }) as never,
+    );
+
+    const snapshot = await PublicationService.buildSnapshot('c1');
+
+    expect(Object.keys(snapshot)).toContain('models');
+    expect(Object.keys(snapshot)).not.toContain('modules');
+    expect(snapshot.sections).toEqual([
+      expect.objectContaining({
+        id: 'text-1',
+        modelId: 's1',
+        type: 'TEXT',
+        textContent: '<p>Welcome</p>',
+      }),
+      expect.objectContaining({
+        id: 'video-1',
+        type: 'YOUTUBE',
+        videoUrl: 'https://youtu.be/abc',
+        durationMinutes: 7,
+      }),
+    ]);
+    for (const section of snapshot.sections) {
+      expect(section).not.toHaveProperty('elements');
+      expect(section).not.toHaveProperty('notForLearners');
+    }
   });
 
   /**
@@ -84,8 +148,8 @@ describe('buildSnapshot', () => {
    * This used to drop anything not separately published, which let an author
    * press Publish, be told the course was live, and still serve a section with
    * the quiz missing from it — there was a second switch inside the quiz editor
-   * and nothing on screen said so. Elements never worked that way, and quizzes
-   * no longer do either: what is in the course when it is published is what
+   * and nothing on screen said so. Other content never worked that way, and
+   * quizzes no longer do either: what is in the course when it is published is what
    * learners get.
    */
   it('captures every quiz, however the old per-quiz flag was left', async () => {
@@ -300,7 +364,7 @@ describe('publish', () => {
           {
             ...courseRow().sections[0],
             id: 'm2',
-            elements: [{ id: 'e2' }],
+            type: 'TEXT',
             quizzes: [],
           },
         ],
@@ -309,8 +373,8 @@ describe('publish', () => {
     // The previous version had only the first section.
     publication.getLive.mockResolvedValue({
       snapshot: {
-        modules: [{ id: 's1' }],
-        sections: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
+        models: [{ id: 's1' }],
+        sections: [{ id: 'm1', quizzes: [{ id: 'q1' }] }],
       },
     } as never);
 
@@ -318,13 +382,18 @@ describe('publish', () => {
 
     expect(result.version).toBe(2);
     expect(result.added.newSectionIds).toEqual(['m2']);
-    expect(result.added.newElementIds).toEqual(['e2']);
+    // What a version added is models, sections and quizzes — nothing finer.
+    expect(Object.keys(result.added).sort()).toEqual([
+      'newModelIds',
+      'newQuizIds',
+      'newSectionIds',
+    ]);
     expect(result.hasNewContent).toBe(true);
   });
 
   it('supersedes the previous version, starting its archive clock', async () => {
     curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 3 }) as never);
-    publication.getLive.mockResolvedValue({ snapshot: { modules: [], sections: [] } } as never);
+    publication.getLive.mockResolvedValue({ snapshot: { models: [], sections: [] } } as never);
 
     await PublicationService.publish('c1', 1);
 
@@ -354,8 +423,8 @@ describe('publish', () => {
     // Identical to the current tree: a republish with no additions.
     publication.getLive.mockResolvedValue({
       snapshot: {
-        modules: [{ id: 's1' }],
-        sections: [{ id: 'm1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] }],
+        models: [{ id: 's1' }],
+        sections: [{ id: 'm1', quizzes: [{ id: 'q1' }] }],
       },
     } as never);
 
@@ -368,17 +437,16 @@ describe('publish', () => {
 
 describe('getNewIdsForLearner', () => {
   const liveSnapshot = {
-    modules: [{ id: 's1' }],
+    models: [{ id: 's1' }],
     sections: [
-      { id: 'm1', moduleId: 's1', elements: [{ id: 'e1' }], quizzes: [{ id: 'q1' }] },
-      { id: 'm2', moduleId: 's1', elements: [{ id: 'e2' }], quizzes: [] },
+      { id: 'm1', modelId: 's1', type: 'QUIZ', quizzes: [{ id: 'q1' }] },
+      { id: 'm2', modelId: 's1', type: 'TEXT', quizzes: [] },
     ],
   };
 
   beforeEach(() => {
     curriculum.getCourseById.mockResolvedValue(courseRow() as never);
     curriculum.getViewedSectionIds.mockResolvedValue([] as never);
-    curriculum.getViewedElementIds.mockResolvedValue([] as never);
     quiz.getAttemptsForUser.mockResolvedValue([] as never);
   });
 
@@ -392,7 +460,7 @@ describe('getNewIdsForLearner', () => {
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
     expect(result.newSectionIds).toEqual([]);
-    expect(result.newModuleIds).toEqual([]);
+    expect(result.newModelIds).toEqual([]);
   });
 
   it('marks nothing when no version has been published since they began', async () => {
@@ -406,13 +474,12 @@ describe('getNewIdsForLearner', () => {
   it('marks what arrived after they started', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
+      { newModelIds: [], newSectionIds: ['m2'], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
     expect(result.newSectionIds).toEqual(['m2']);
-    expect(result.newElementIds).toEqual(['e2']);
   });
 
   /**
@@ -422,15 +489,13 @@ describe('getNewIdsForLearner', () => {
   it('retires a mark once the learner has read it', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: ['e2'], newQuizIds: [] },
+      { newModelIds: [], newSectionIds: ['m2'], newQuizIds: [] },
     ] as never);
     curriculum.getViewedSectionIds.mockResolvedValue([{ sectionId: 'm2' }] as never);
-    curriculum.getViewedElementIds.mockResolvedValue([{ elementId: 'e2' }] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
 
     expect(result.newSectionIds).toEqual([]);
-    expect(result.newElementIds).toEqual([]);
   });
 
   /**
@@ -440,7 +505,7 @@ describe('getNewIdsForLearner', () => {
   it('does not mark content that no longer exists in the served version', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newModuleIds: [], newSectionIds: ['deleted-since'], newElementIds: [], newQuizIds: [] },
+      { newModelIds: [], newSectionIds: ['deleted-since'], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
@@ -454,24 +519,24 @@ describe('getNewIdsForLearner', () => {
   it('accumulates across every version published since they began', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newModuleIds: [], newSectionIds: ['m1'], newElementIds: [], newQuizIds: [] },
-      { newModuleIds: [], newSectionIds: ['m2'], newElementIds: [], newQuizIds: [] },
+      { newModelIds: [], newSectionIds: ['m1'], newQuizIds: [] },
+      { newModelIds: [], newSectionIds: ['m2'], newQuizIds: [] },
     ] as never);
 
     const result = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
     expect(result.newSectionIds.sort()).toEqual(['m1', 'm2']);
   });
 
-  /** A module heading stands in for its contents, so it clears only when they do. */
-  it('keeps a new module marked until nothing inside it is outstanding', async () => {
+  /** A model heading stands in for its contents, so it clears only when they do. */
+  it('keeps a new model marked until nothing inside it is outstanding', async () => {
     curriculum.getFirstActivityAt.mockResolvedValue(new Date('2026-01-01') as never);
     publication.listPublishedSince.mockResolvedValue([
-      { newModuleIds: ['s1'], newSectionIds: [], newElementIds: [], newQuizIds: [] },
+      { newModelIds: ['s1'], newSectionIds: [], newQuizIds: [] },
     ] as never);
     curriculum.getViewedSectionIds.mockResolvedValue([{ sectionId: 'm1' }] as never);
 
     const stillNew = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(stillNew.newModuleIds).toEqual(['s1']);
+    expect(stillNew.newModelIds).toEqual(['s1']);
 
     curriculum.getViewedSectionIds.mockResolvedValue([
       { sectionId: 'm1' },
@@ -479,7 +544,7 @@ describe('getNewIdsForLearner', () => {
     ] as never);
 
     const cleared = await PublicationService.getNewIdsForLearner('c1', 1, liveSnapshot as never);
-    expect(cleared.newModuleIds).toEqual([]);
+    expect(cleared.newModelIds).toEqual([]);
   });
 });
 
@@ -590,9 +655,8 @@ describe('restoreVersion', () => {
 
     expect(publication.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        newModuleIds: [],
+        newModelIds: [],
         newSectionIds: [],
-        newElementIds: [],
         newQuizIds: [],
       }),
     );
@@ -789,27 +853,29 @@ describe('version reads', () => {
   });
 
   /**
-   * A snapshot published before modules and sections traded names is read
-   * through a shim. Getting this wrong does not throw — it silently swaps the
-   * two levels of every old course.
+   * Stored snapshots are never rewritten, so one published before the course
+   * became two layers is still in its old shape in the database. Every read goes
+   * through the legacy reader — its rules have their own tests in
+   * `legacy-snapshot.test.ts`; this checks the reader is actually on the path.
    */
-  it('reads a snapshot published under the old module/section naming', async () => {
+  it('reads a version stored in the old three-layer shape as the current one', async () => {
     curriculum.getCourseById.mockResolvedValue(courseRow() as never);
     publication.getLive.mockResolvedValue({
       snapshot: {
         id: 'c1',
         title: 'Fire safety',
-        // The old shape: the outer level was called `sections` and the inner
-        // level `modules`, and the inner one carried the elements.
-        sections: [{ id: 'outer-1', courseId: 'c1', number: 1, title: 'Intro' }],
-        modules: [
+        modules: [{ id: 'mod-1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
+        sections: [
           {
-            id: 'inner-1',
-            sectionId: 'outer-1',
+            id: 'sec-1',
+            courseId: 'c1',
+            moduleId: 'mod-1',
+            position: 1,
             number: '1.1',
             title: 'Basics',
-            elements: [{ id: 'e1' }],
-            quizzes: [{ id: 'q1', moduleId: 'inner-1', questions: [] }],
+            estimatedMinutes: 5,
+            elements: [{ id: 'e1', order: 1, type: 'TEXT', textContent: '<p>Hi</p>' }],
+            quizzes: [],
           },
         ],
       },
@@ -817,23 +883,52 @@ describe('version reads', () => {
 
     const snapshot = await PublicationService.getLiveSnapshot('c1');
 
-    // The outer level becomes modules, the inner becomes sections.
-    expect(snapshot!.modules.map((m) => m.id)).toEqual(['outer-1']);
-    expect(snapshot!.sections.map((s) => s.id)).toEqual(['inner-1']);
-    expect(snapshot!.sections[0].moduleId).toBe('outer-1');
-    // Defaults that did not exist when the snapshot was written.
-    expect(snapshot!.kind).toBe('LESSON');
-    expect(snapshot!.sections[0].quizzes[0].type).toBe('EXAM');
-    expect(snapshot!.sections[0].quizzes[0].showResults).toBe(true);
+    expect(snapshot!.models.map((model) => model.id)).toEqual(['mod-1']);
+    expect(snapshot!.sections).toEqual([
+      expect.objectContaining({
+        id: 'sec-1',
+        modelId: 'mod-1',
+        type: 'TEXT',
+        textContent: '<p>Hi</p>',
+      }),
+    ]);
+  });
+
+  /** The Archive's read-only view gets the same treatment as a learner's read. */
+  it('hands an archived version back in the current shape too', async () => {
+    publication.getById.mockResolvedValue({
+      id: 'p1',
+      courseId: 'c1',
+      version: 2,
+      snapshot: {
+        id: 'c1',
+        modules: [{ id: 'mod-1', courseId: 'c1', number: 1, title: 'Intro' }],
+        sections: [
+          {
+            id: 'sec-1',
+            courseId: 'c1',
+            moduleId: 'mod-1',
+            number: '1.1',
+            title: 'Basics',
+            elements: [{ id: 'e1', order: 1, type: 'TEXT', textContent: 'Hi' }],
+            quizzes: [],
+          },
+        ],
+      },
+    } as never);
+
+    const version = await PublicationService.getVersion('p1');
+
+    expect(version.snapshot!.models).toHaveLength(1);
+    expect(version.snapshot!.sections[0]).toMatchObject({ id: 'sec-1', type: 'TEXT' });
   });
 
   it('reports nothing outstanding on a course that has never been published', async () => {
     curriculum.getCourseById.mockResolvedValue(courseRow({ publishedVersion: 0 }) as never);
 
     await expect(PublicationService.getUnpublishedIds('c1')).resolves.toEqual({
-      newModuleIds: [],
+      newModelIds: [],
       newSectionIds: [],
-      newElementIds: [],
       newQuizIds: [],
     });
   });
@@ -844,7 +939,7 @@ describe('version reads', () => {
       courseRow({
         sections: [
           courseRow().sections[0],
-          { ...courseRow().sections[0], id: 'm2', elements: [{ id: 'e2' }], quizzes: [] },
+          { ...courseRow().sections[0], id: 'm2', type: 'TEXT', quizzes: [] },
         ],
       }) as never,
     );
@@ -855,7 +950,7 @@ describe('version reads', () => {
     const added = await PublicationService.getUnpublishedIds('c1');
 
     expect(added.newSectionIds).toEqual(['m1', 'm2']);
-    expect(added.newElementIds).toEqual(['e1', 'e2']);
+    expect(added.newQuizIds).toEqual(['q1']);
   });
 
   /** A course never published has no snapshot, and is skipped rather than nulled into the list. */
@@ -924,12 +1019,13 @@ describe('getVersionDiff', () => {
     return {
       id: 'c1',
       title: 'Fire safety',
-      modules: [{ id: 'mod1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
+      models: [{ id: 'mod1', courseId: 'c1', number: 1, title: 'Intro', color: null }],
       sections: [
+        { id: 'sec0', modelId: 'mod1', type: 'TEXT', textContent: 'Hello', quizzes: [] },
         {
           id: 'sec1',
-          moduleId: 'mod1',
-          elements: [{ id: 'el1' }],
+          modelId: 'mod1',
+          type: 'QUIZ',
           quizzes: [{ id: 'quiz1', questions: [{ id: 'qq1' }] }],
         },
       ],
@@ -957,9 +1053,11 @@ describe('getVersionDiff', () => {
 
     const diff = await PublicationService.getVersionDiff('p1');
 
-    expect(diff.status.modules.mod1).toBe('same');
+    expect(diff.status.models.mod1).toBe('same');
     expect(diff.status.sections.sec1).toBe('same');
-    expect(diff.status.elements.el1).toBe('same');
+    // The verdicts are per model, section, quiz and question. There is no
+    // element bucket: a section is its own content.
+    expect(Object.keys(diff.status).sort()).toEqual(['models', 'questions', 'quizzes', 'sections']);
     expect(diff.status.quizzes.quiz1).toBe('same');
     expect(diff.status.questions.qq1).toBe('same');
     expect(diff.identical).toBe(true);
@@ -974,7 +1072,7 @@ describe('getVersionDiff', () => {
     } as never);
     publication.getLive.mockResolvedValue({
       snapshot: tree({
-        modules: [
+        models: [
           { id: 'mod1', courseId: 'c1', number: 1, title: 'Intro', color: null },
           { id: 'mod2', courseId: 'c1', number: 2, title: 'Later', color: null },
         ],
@@ -983,11 +1081,11 @@ describe('getVersionDiff', () => {
 
     const diff = await PublicationService.getVersionDiff('p1');
 
-    expect(diff.status.modules.mod2).toBe('added');
-    expect(diff.status.modules.mod1).toBe('same');
-    // Both versions' modules are drawn, or the added one would be marked and
+    expect(diff.status.models.mod2).toBe('added');
+    expect(diff.status.models.mod1).toBe('same');
+    // Both versions' models are drawn, or the added one would be marked and
     // then not appear anywhere.
-    expect(diff.course.modules.map((module) => module.id)).toEqual(['mod1', 'mod2']);
+    expect(diff.course.models.map((model) => model.id)).toEqual(['mod1', 'mod2']);
     expect(diff.identical).toBe(false);
   });
 
@@ -1000,17 +1098,20 @@ describe('getVersionDiff', () => {
     } as never);
     publication.getLive.mockResolvedValue({
       snapshot: tree({
-        sections: [{ id: 'sec1', moduleId: 'mod1', elements: [], quizzes: [] }],
+        sections: [{ id: 'sec1', modelId: 'mod1', type: 'QUIZ', quizzes: [] }],
       }),
     } as never);
 
     const diff = await PublicationService.getVersionDiff('p1');
 
-    expect(diff.status.elements.el1).toBe('removed');
+    expect(diff.status.sections.sec0).toBe('removed');
     expect(diff.status.quizzes.quiz1).toBe('removed');
     expect(diff.status.questions.qq1).toBe('removed');
-    // A section both versions have keeps everything either side put in it.
-    expect(diff.course.sections[0].elements.map((element) => element.id)).toEqual(['el1']);
+    // Both versions' sections are drawn — live order first, then what only the
+    // old version had — or the removed one would be marked and appear nowhere.
+    expect(diff.course.sections.map((section) => section.id)).toEqual(['sec1', 'sec0']);
+    // A section both versions have keeps the quiz either side put in it.
+    expect(diff.course.sections[0].quizzes.map((entry) => entry.id)).toEqual(['quiz1']);
   });
 
   /**
@@ -1027,10 +1128,11 @@ describe('getVersionDiff', () => {
     publication.getLive.mockResolvedValue({
       snapshot: tree({
         sections: [
+          { id: 'sec0', modelId: 'mod1', type: 'TEXT', textContent: 'Hello', quizzes: [] },
           {
             id: 'sec1',
-            moduleId: 'mod1',
-            elements: [{ id: 'el1' }],
+            modelId: 'mod1',
+            type: 'QUIZ',
             quizzes: [{ id: 'quiz1', questions: [{ id: 'qq1' }, { id: 'qq2' }] }],
           },
         ],
@@ -1064,8 +1166,8 @@ describe('getVersionDiff', () => {
 
     expect(diff.liveVersion).toBe(0);
     expect(diff.identical).toBe(false);
-    expect(diff.status.modules.mod1).toBe('removed');
+    expect(diff.status.models.mod1).toBe('removed');
     // The tree still draws, so the version is readable rather than blank.
-    expect(diff.course.modules).toHaveLength(1);
+    expect(diff.course.models).toHaveLength(1);
   });
 });

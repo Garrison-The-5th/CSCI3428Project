@@ -10,6 +10,7 @@ import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway'
 import CourseMapGateway from '@/gateways/course-map-gateway/course-map-gateway';
 import CurriculumGateway from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
+import CurriculumService from '@/services/curriculum-service/curriculum-service';
 import EnrolmentService from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 import QuizService, { redactAnswers } from '@/services/quiz-service/quiz-service';
@@ -770,10 +771,10 @@ describe('updateQuiz — the kind is fixed once published', () => {
     mockCurriculum.getSectionById.mockResolvedValue({
       id: 'section-1',
       courseId: 'course-1',
+      type: 'QUIZ',
     } as never);
     mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'QUIZ_SET' } as never);
     mockCurriculum.getSectionsForRenumber.mockResolvedValue([{ id: 'section-1' }] as never);
-    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
     mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
   });
 
@@ -879,9 +880,9 @@ describe('updateQuiz — days remaining follows placement', () => {
     mockCurriculum.getSectionById.mockResolvedValue({
       id: 'section-1',
       courseId: 'course-1',
+      type: 'QUIZ',
     } as never);
     mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'LESSON' } as never);
-    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
     mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
   });
 
@@ -933,13 +934,12 @@ describe('updateQuiz — days remaining follows placement', () => {
  * lesson, and a second quiz in its set would be handed over by the same link.
  */
 describe('one-time link placement', () => {
-  const section = { id: 'section-1', courseId: 'course-1' };
+  const section = { id: 'section-1', courseId: 'course-1', type: 'QUIZ' };
 
   beforeEach(() => {
     mockCurriculum.getSectionById.mockResolvedValue(section as never);
     mockQuizGateway.createQuiz.mockResolvedValue(quizFixture() as never);
     mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
-    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
   });
 
   /** One section means one quiz: the set is nothing but the one-time link. */
@@ -1140,9 +1140,9 @@ describe('directed learning quizzes are the map’s, not an author’s', () => {
     mockCurriculum.getSectionById.mockResolvedValue({
       id: 'section-1',
       courseId: 'course-1',
+      type: 'QUIZ',
     } as never);
     mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'LESSON' } as never);
-    mockCurriculum.getLastContentOrder.mockResolvedValue(0 as never);
     mockQuizGateway.updateQuiz.mockResolvedValue(quizFixture() as never);
   });
 
@@ -1253,7 +1253,7 @@ describe('directed learning quizzes are the map’s, not an author’s', () => {
       courseId: 'course-1',
       depth: 1,
       quizId: 'quiz-1',
-      moduleId: 'module-1',
+      modelId: 'model-1',
     } as never);
     mockCourseMap.getEdges.mockResolvedValue([
       { id: 'e1', courseId: 'course-1', parentId: 'root', childId: 'bees', optionId: 'a2' },
@@ -1266,5 +1266,169 @@ describe('directed learning quizzes are the map’s, not an author’s', () => {
     // Option a2 is the route to the beekeeping branch, so that is the branch
     // this person's course grows.
     expect(mockCourseMap.saveChoice).toHaveBeenCalledWith(7, 'course-1', 1, ['bees']);
+  });
+});
+
+/**
+ * A quiz in a course is the whole of a QUIZ section — one section, one quiz —
+ * and where a deleted quiz goes depends on whether it belongs to a course.
+ */
+describe('a quiz and its section', () => {
+  beforeEach(() => {
+    mockCurriculum.getCourseById.mockResolvedValue({ id: 'course-1', kind: 'LESSON' } as never);
+    mockQuizGateway.createQuiz.mockResolvedValue(quizFixture() as never);
+    mockQuizGateway.sectionHasQuiz.mockResolvedValue(false as never);
+  });
+
+  it('refuses a quiz in a section that is not a QUIZ section', async () => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'TEXT',
+    } as never);
+
+    await expect(
+      QuizService.createQuiz({ title: 'Check', sectionId: 'section-1', type: 'LEARNING_CHECK' }),
+    ).rejects.toThrow(/section of type QUIZ/);
+    expect(mockQuizGateway.createQuiz).not.toHaveBeenCalled();
+  });
+
+  it('refuses a second quiz in a QUIZ section', async () => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'QUIZ',
+    } as never);
+    mockQuizGateway.sectionHasQuiz.mockResolvedValue(true as never);
+
+    await expect(
+      QuizService.createQuiz({ title: 'Another', sectionId: 'section-1', type: 'EXAM' }),
+    ).rejects.toThrow(/already holds a quiz/);
+    expect(mockQuizGateway.createQuiz).not.toHaveBeenCalled();
+  });
+
+  /** Its place is its section's position, so it carries no order of its own. */
+  it('creates a quiz in a free QUIZ section without an order', async () => {
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'QUIZ',
+    } as never);
+
+    await QuizService.createQuiz({ title: 'Check', sectionId: 'section-1', type: 'EXAM' });
+
+    const written = mockQuizGateway.createQuiz.mock.calls[0][0] as Record<string, unknown>;
+    expect(written).toMatchObject({ sectionId: 'section-1', type: 'EXAM' });
+    expect(written).not.toHaveProperty('order');
+  });
+
+  /** D4: a quiz inside a course goes to that course's Archive, section and all. */
+  it('deletes a course quiz by deleting its section', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture() as never);
+    mockCurriculum.getSectionById.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'QUIZ',
+    } as never);
+    const deleteSection = jest
+      .spyOn(CurriculumService, 'deleteSection')
+      .mockResolvedValue({} as never);
+
+    await QuizService.deleteQuiz('quiz-1');
+
+    expect(deleteSection).toHaveBeenCalledWith('section-1');
+    // The section's own delete takes the quiz with it; nothing is stamped twice.
+    expect(mockQuizGateway.softDeleteQuiz).not.toHaveBeenCalled();
+    deleteSection.mockRestore();
+  });
+
+  /** D4: a standalone quiz belongs to no course and stays in the admin bin. */
+  it('deletes a standalone quiz on its own', async () => {
+    mockQuizGateway.getQuizById.mockResolvedValue(quizFixture({ sectionId: null }) as never);
+    const deleteSection = jest.spyOn(CurriculumService, 'deleteSection');
+
+    await QuizService.deleteQuiz('quiz-1');
+
+    expect(mockQuizGateway.softDeleteQuiz).toHaveBeenCalledWith('quiz-1');
+    expect(deleteSection).not.toHaveBeenCalled();
+    deleteSection.mockRestore();
+  });
+
+  it('restores a course quiz together with its section', async () => {
+    mockQuizGateway.findDeletedQuiz.mockResolvedValue(
+      quizFixture({ deletedAt: new Date() }) as never,
+    );
+    mockCurriculum.findSectionAnyState.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'QUIZ',
+      deletedAt: new Date(),
+    } as never);
+    const restoreSection = jest
+      .spyOn(CurriculumService, 'restoreSection')
+      .mockResolvedValue({} as never);
+
+    await QuizService.restoreQuiz('quiz-1');
+
+    expect(restoreSection).toHaveBeenCalledWith('section-1');
+    expect(mockQuizGateway.restoreQuiz).not.toHaveBeenCalled();
+    restoreSection.mockRestore();
+  });
+
+  it('purges a course quiz together with its deleted section', async () => {
+    mockQuizGateway.findDeletedQuiz.mockResolvedValue(
+      quizFixture({ deletedAt: new Date() }) as never,
+    );
+    mockCurriculum.findSectionAnyState.mockResolvedValue({
+      id: 'section-1',
+      courseId: 'course-1',
+      type: 'QUIZ',
+      deletedAt: new Date(),
+    } as never);
+
+    await QuizService.purgeQuiz('quiz-1');
+
+    expect(mockCurriculum.hardDeleteSection).toHaveBeenCalledWith('section-1');
+    expect(mockQuizGateway.hardDeleteQuiz).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The admin recycle bin lists standalone quizzes only. A quiz inside a course
+ * is in that course's Archive, so the bin's list, its Restore all and its Empty
+ * must none of them reach one.
+ */
+describe('the recycle bin holds standalone quizzes only', () => {
+  it('lists only quizzes that belong to no course', async () => {
+    mockQuizGateway.getDeletedStandaloneQuizzes.mockResolvedValue([
+      { id: 'orphan', title: 'Old exam', deletedAt: new Date() },
+    ] as never);
+
+    const listed = await QuizService.getDeletedQuizzes(true);
+
+    expect(listed.map((entry) => entry.id)).toEqual(['orphan']);
+    expect(mockQuizGateway.getDeletedStandaloneQuizzes).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A standalone quiz has no course to say whose it is, so — like an unowned
+   * course — it stays with the global authors. A contributor has none.
+   */
+  it('shows a contributor no standalone quizzes, and lets them restore or purge none', async () => {
+    expect(await QuizService.getDeletedQuizzes(false)).toEqual([]);
+    expect(await QuizService.restoreAllQuizzes(false)).toBe(0);
+    expect(await QuizService.purgeAllQuizzes(false)).toBe(0);
+
+    expect(mockQuizGateway.getDeletedStandaloneQuizzes).not.toHaveBeenCalled();
+    expect(mockQuizGateway.restoreAllStandaloneQuizzes).not.toHaveBeenCalled();
+    expect(mockQuizGateway.purgeStandaloneQuizzes).not.toHaveBeenCalled();
+  });
+
+  it('restores and empties standalone quizzes only', async () => {
+    mockQuizGateway.restoreAllStandaloneQuizzes.mockResolvedValue({ count: 2 } as never);
+    mockQuizGateway.purgeStandaloneQuizzes.mockResolvedValue({ count: 3 } as never);
+
+    expect(await QuizService.restoreAllQuizzes('all')).toBe(2);
+    expect(await QuizService.purgeAllQuizzes('all')).toBe(3);
   });
 });

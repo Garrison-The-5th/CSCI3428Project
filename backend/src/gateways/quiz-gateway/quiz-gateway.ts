@@ -168,24 +168,59 @@ export default class QuizGateway {
   }
 
   /** Takes a quiz back out of the recycle bin. */
-  static restoreQuiz(id: string) {
-    return prisma.quiz.update({ where: { id }, data: { deletedAt: null } });
+  static restoreQuiz(id: string, db: Db = prisma) {
+    return db.quiz.update({ where: { id }, data: { deletedAt: null } });
   }
 
-  /** The bin lists a quiz under the course it came from, so name that too. */
-  static getDeletedQuizzes(courseIds: string[], includeOrphans: boolean) {
+  /** The quiz of a QUIZ section goes into the bin with its section. */
+  static softDeleteQuizzesInSection(sectionId: string, db: Db = prisma) {
+    return db.quiz.updateMany({
+      where: { sectionId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  /** ...and comes back out with it. */
+  static restoreQuizzesInSection(sectionId: string, db: Db = prisma) {
+    return db.quiz.updateMany({
+      where: { sectionId, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+  }
+
+  /** Whether a section already holds a quiz that is not in the bin. */
+  static async sectionHasQuiz(sectionId: string, exceptQuizId?: string): Promise<boolean> {
+    const found = await prisma.quiz.findFirst({
+      where: { sectionId, deletedAt: null, ...(exceptQuizId ? { id: { not: exceptQuizId } } : {}) },
+      select: { id: true },
+    });
+    return found !== null;
+  }
+
+  /**
+   * The quizzes sitting in a course's deleted sections, for its Archive tab —
+   * which lists a deleted QUIZ section as the quiz it holds.
+   */
+  static getQuizzesInDeletedSections(courseId: string) {
     return prisma.quiz.findMany({
-      where: {
-        deletedAt: { not: null },
-        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
-      },
+      where: { section: { courseId, deletedAt: { not: null } } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, title: true, sectionId: true, deletedAt: true },
+    });
+  }
+
+  /**
+   * The standalone quizzes in the recycle bin: deleted, and in no section.
+   *
+   * Only these. A quiz inside a course is deleted with its section and is found
+   * in that course's Archive tab, never here — the bin is for things that belong
+   * to no live course.
+   */
+  static getDeletedStandaloneQuizzes() {
+    return prisma.quiz.findMany({
+      where: { deletedAt: { not: null }, sectionId: null },
       orderBy: { deletedAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        deletedAt: true,
-        section: { select: { title: true, course: { select: { id: true, title: true } } } },
-      },
+      select: { id: true, title: true, deletedAt: true },
     });
   }
 
@@ -199,25 +234,17 @@ export default class QuizGateway {
     return prisma.quiz.delete({ where: { id } });
   }
 
-  /** "Restore all" for binned quizzes this author may reach. */
-  static restoreAllQuizzes(courseIds: string[], includeOrphans: boolean) {
+  /** "Restore all" for the bin's standalone quizzes. */
+  static restoreAllStandaloneQuizzes() {
     return prisma.quiz.updateMany({
-      where: {
-        deletedAt: { not: null },
-        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
-      },
+      where: { deletedAt: { not: null }, sectionId: null },
       data: { deletedAt: null },
     });
   }
 
-  /** "Empty bin" for binned quizzes this author may reach. */
-  static purgeQuizzes(courseIds: string[], includeOrphans: boolean) {
-    return prisma.quiz.deleteMany({
-      where: {
-        deletedAt: { not: null },
-        ...QuizGateway.quizzesInCourses(courseIds, includeOrphans),
-      },
-    });
+  /** "Empty recycle bin" for the bin's standalone quizzes. */
+  static purgeStandaloneQuizzes() {
+    return prisma.quiz.deleteMany({ where: { deletedAt: { not: null }, sectionId: null } });
   }
 
   /** Recycle-bin expiry: permanently deletes quizzes binned before the cutoff. */

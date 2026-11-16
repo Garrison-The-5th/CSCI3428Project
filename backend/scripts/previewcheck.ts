@@ -35,6 +35,7 @@ import QuizService from '@/services/quiz-service/quiz-service';
 
 import { CourseKind } from '../generated/prisma';
 import { prisma } from '../prisma/prisma-client';
+import { createQuizSection } from './quiz-section';
 
 let failures = 0;
 
@@ -67,12 +68,11 @@ async function main() {
     CourseKind.QUIZ_SET,
     author.id,
   );
-  const [setModule] = await CurriculumGateway.getModules(set!.id);
-  const examSection = await CurriculumService.createSection(set!.id, {
-    moduleId: setModule.id,
+  const [setModel] = await CurriculumGateway.getModels(set!.id);
+  const { section: examSection, quiz: exam } = await createQuizSection(set!.id, {
+    modelId: setModel.id,
     title: 'Safety exam',
   });
-  const exam = await QuizService.createQuiz({ title: 'Safety exam', sectionId: examSection!.id });
   await QuizService.addQuestion(exam.id, {
     prompt: 'Where is the muster point?',
     options: [
@@ -88,16 +88,20 @@ async function main() {
     author.id,
   );
   const courseId = lesson!.id;
-  const [module] = await CurriculumGateway.getModules(courseId);
+  const [model] = await CurriculumGateway.getModels(courseId);
   const intro = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Everyone reads this',
+    type: 'TEXT',
+    textContent: 'welcome',
   });
-  await CurriculumService.createElement(intro!.id, { type: 'TEXT', textContent: 'welcome' });
 
   await CourseMapService.setDirected(courseId, true);
   await CourseMapService.addImport(courseId, set!.id, author.id, false);
 
+  // Mapping is refused until the content written so far has been staged, and
+  // again after every section added later — hence the stage calls below.
+  await CourseMapService.stage(courseId);
   const root = (await CourseMapGateway.getRoot(courseId))!;
   await CourseMapService.setNodeItems(root.id, [intro!.id]);
 
@@ -114,10 +118,12 @@ async function main() {
     exist to catch.
   */
   const other = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Somebody else’s branch',
+    type: 'TEXT',
+    textContent: 'not for you',
   });
-  await CurriculumService.createElement(other!.id, { type: 'TEXT', textContent: 'not for you' });
+  await CourseMapService.stage(courseId);
   const unpickedBranch = await CourseMapService.createNode(courseId, { title: 'Not taken' });
   await CourseMapService.setNodeItems(unpickedBranch.id, [other!.id]);
   await CourseMapService.connect(root.id, unpickedBranch.id);
@@ -169,8 +175,8 @@ async function main() {
     [exam.id],
   );
   check(
-    'the branch is drawn as a module',
-    preview.course.modules.some((m) => m.title === 'Needs the exam'),
+    'the branch is drawn as a model',
+    preview.course.models.some((m) => m.title === 'Needs the exam'),
     true,
   );
 
@@ -242,13 +248,12 @@ async function main() {
   */
   console.log('\ncontent added elsewhere on the map is not announced to them');
   const elsewhere = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Added to the branch they skipped',
-  });
-  await CurriculumService.createElement(elsewhere!.id, {
     type: 'TEXT',
     textContent: 'not for you',
   });
+  await CourseMapService.stage(courseId);
   await CourseMapService.setNodeItems(unpickedBranch.id, [other!.id, elsewhere!.id]);
   await PublicationService.publish(courseId, author.id);
 
@@ -267,10 +272,12 @@ async function main() {
 
   console.log('\nbut content added to their own branch is');
   const forThem = await CurriculumService.createSection(courseId, {
-    moduleId: module.id,
+    modelId: model.id,
     title: 'Added to their branch',
+    type: 'TEXT',
+    textContent: 'for you',
   });
-  await CurriculumService.createElement(forThem!.id, { type: 'TEXT', textContent: 'for you' });
+  await CourseMapService.stage(courseId);
   await CourseMapService.setNodeItems(branch.id, [examSection!.id, forThem!.id]);
   await PublicationService.publish(courseId, author.id);
 

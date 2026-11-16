@@ -1,6 +1,6 @@
 /**
  * File: canvas.ts
- * Description: The shape of a CANVAS element, and the rules that clean one before it is stored.
+ * Description: The shape of a CANVAS section, and the rules that clean one before it is stored.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-10-15
@@ -136,7 +136,7 @@ export interface CanvasData {
   images: Record<string, CanvasImageAsset>;
 }
 
-/** A blank white canvas with no items and no pictures — what a new canvas element starts as. */
+/** A blank white canvas with no items and no pictures — what a new canvas section starts as. */
 export function emptyCanvas(): CanvasData {
   return { version: 1, background: '#ffffff', items: [], images: {} };
 }
@@ -283,7 +283,7 @@ function cleanItem(raw: unknown, images: Record<string, CanvasImageAsset>): Canv
     return {
       ...base,
       kind: 'text',
-      // The same allowlist as a TEXT element: a text box is rendered as markup.
+      // The same allowlist as a TEXT section: a text box is rendered as markup.
       html: withinLimit(sanitizeRichText(html), 'richText', 'text box'),
       background: optionalColor(raw.background),
       padding: num(raw.padding, 8, 0, MAX_PADDING),

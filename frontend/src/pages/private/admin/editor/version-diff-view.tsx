@@ -20,9 +20,16 @@
  */
 import { MinusCircleIcon, PlusCircleIcon } from '@heroicons/react/24/outline';
 
+import { elementSummary } from '@/components/common/element-editor';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DiffStatus, moduleGroups, sectionContent, VersionDiff } from '@/services/curriculum-api';
+import {
+  DiffStatus,
+  modelGroups,
+  quizOf,
+  SECTION_TYPE_LABELS,
+  VersionDiff,
+} from '@/services/curriculum-api';
 
 /**
  * The one place a verdict becomes a colour.
@@ -61,11 +68,11 @@ function StatusMark({ status }: { status: DiffStatus | undefined }) {
 }
 
 /**
- * One archived version laid out by module, marking what is the same as, added to or removed from
+ * One archived version laid out by model, marking what is the same as, added to or removed from
  * the live version.
  */
 const VersionDiffView = ({ diff }: { diff: VersionDiff }) => {
-  const groups = moduleGroups(diff.course);
+  const groups = modelGroups(diff.course);
 
   return (
     <div className="flex flex-col gap-4">
@@ -95,23 +102,23 @@ const VersionDiffView = ({ diff }: { diff: VersionDiff }) => {
       )}
 
       {groups.length === 0 ? (
-        <p className="py-8 text-center text-dark-gray">This version had no modules.</p>
+        <p className="py-8 text-center text-dark-gray">This version had no models.</p>
       ) : (
         groups.map((group) => (
           <Card
-            key={group.module.id}
-            className={`border-2 shadow-sm ${tint(diff.status.modules[group.module.id])}`}
+            key={group.model.id}
+            className={`border-2 shadow-sm ${tint(diff.status.models[group.model.id])}`}
           >
             <CardHeader className="flex-row items-center justify-between gap-3 p-4">
               <CardTitle className="min-w-0 break-words text-base text-dark-gray">
-                {group.module.number}. {group.module.title}
+                {group.model.number}. {group.model.title}
               </CardTitle>
-              <StatusMark status={diff.status.modules[group.module.id]} />
+              <StatusMark status={diff.status.models[group.model.id]} />
             </CardHeader>
 
             <CardContent className="flex flex-col gap-2">
               {group.sections.length === 0 ? (
-                <p className="text-sm text-dark-gray">Nothing in this module.</p>
+                <p className="text-sm text-dark-gray">Nothing in this model.</p>
               ) : (
                 group.sections.map((section) => (
                   <div
@@ -125,54 +132,54 @@ const VersionDiffView = ({ diff }: { diff: VersionDiff }) => {
                       <StatusMark status={diff.status.sections[section.id]} />
                     </div>
 
-                    <ul className="mt-2 flex flex-col gap-1">
-                      {sectionContent(section).map((item) => {
-                        const status =
-                          item.kind === 'quiz'
-                            ? diff.status.quizzes[item.id]
-                            : diff.status.elements[item.id];
+                    {/* A section is its own content, so what it holds is one
+                        line: its type and a summary. Only a quiz section has
+                        anything further down to compare. */}
+                    <p className="mt-2 min-w-0 break-words text-sm text-dark-gray">
+                      <span className="font-semibold">{SECTION_TYPE_LABELS[section.type]}</span>
+                      {section.type !== 'QUIZ' && ` — ${elementSummary(section)}`}
+                    </p>
 
-                        return (
-                          <li key={item.id}>
-                            <div
-                              className={`flex flex-wrap items-center justify-between gap-2
-                                rounded-md border px-3 py-2 text-sm ${tint(status)}`}
-                            >
-                              <span className="min-w-0 break-words text-dark-gray">
-                                {item.kind === 'quiz'
-                                  ? `Quiz — ${item.quiz.title}`
-                                  : (item.element.textContent ??
-                                    item.element.videoUrl ??
-                                    item.element.fileName ??
-                                    item.element.type)}
-                              </span>
-                              <StatusMark status={status} />
-                            </div>
+                    {(() => {
+                      const quiz = quizOf(section);
+                      if (!quiz) return null;
+                      const status = diff.status.quizzes[quiz.id];
 
-                            {/* Questions are diffed too — a version that only
-                                differs by one reworded exam is still a different
-                                course to sit. */}
-                            {item.kind === 'quiz' && item.quiz.questions.length > 0 && (
-                              <ul className="mt-1 ml-6 flex flex-col gap-1">
-                                {item.quiz.questions.map((question) => (
-                                  <li
-                                    key={question.id}
-                                    className={`flex flex-wrap items-center justify-between gap-2
-                                      rounded-md border px-3 py-1 text-xs
-                                      ${tint(diff.status.questions[question.id])}`}
-                                  >
-                                    <span className="min-w-0 break-words text-dark-gray">
-                                      {question.order}. {question.prompt}
-                                    </span>
-                                    <StatusMark status={diff.status.questions[question.id]} />
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
+                      return (
+                        <div className="mt-2">
+                          <div
+                            className={`flex flex-wrap items-center justify-between gap-2
+                              rounded-md border px-3 py-2 text-sm ${tint(status)}`}
+                          >
+                            <span className="min-w-0 break-words text-dark-gray">
+                              Quiz — {quiz.title}
+                            </span>
+                            <StatusMark status={status} />
+                          </div>
+
+                          {/* Questions are diffed too — a version that only
+                              differs by one reworded exam is still a different
+                              course to sit. */}
+                          {quiz.questions.length > 0 && (
+                            <ul className="mt-1 ml-6 flex flex-col gap-1">
+                              {quiz.questions.map((question) => (
+                                <li
+                                  key={question.id}
+                                  className={`flex flex-wrap items-center justify-between gap-2
+                                    rounded-md border px-3 py-1 text-xs
+                                    ${tint(diff.status.questions[question.id])}`}
+                                >
+                                  <span className="min-w-0 break-words text-dark-gray">
+                                    {question.order}. {question.prompt}
+                                  </span>
+                                  <StatusMark status={diff.status.questions[question.id]} />
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))
               )}

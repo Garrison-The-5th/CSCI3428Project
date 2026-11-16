@@ -10,8 +10,7 @@
  *
  * Gathered here because they are one thing to the shell: it holds a `pane` and
  * renders whichever of these matches. Naming each one separately at the top of
- * course-editor.tsx made the shell look like it depended on five unrelated
- * modules when it really depends on one idea — the set of panes.
+ * course-editor.tsx made the shell look like it depended on  * modules when it really depends on one idea — the set of panes.
  */
 export {
   default as ArchivePane,

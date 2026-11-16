@@ -24,7 +24,7 @@ import { Prisma } from '../../../generated/prisma';
 export const TUTORIAL_PLACEHOLDER = {
   title: 'Getting started',
   shortDescription: 'How this platform works — the place to start.',
-  moduleTitle: 'Welcome',
+  modelTitle: 'Welcome',
   sectionTitle: 'Welcome to the platform',
   textContent: '<p>Tutorial content coming soon.</p>',
 };
@@ -71,16 +71,15 @@ export async function ensureDefaultTutorial(): Promise<string | null> {
     const course = await CurriculumGateway.getCourseById(courseId);
     if (course && course.publishedVersion === 0) {
       if (course.sections.length === 0) {
-        const section = await CurriculumService.createSection(courseId, {
+        // One model (made with the course) holding one TEXT section. The text
+        // goes in with the section: a section is the content now, so there is
+        // no second step to add it.
+        await CurriculumService.createSection(courseId, {
           title: TUTORIAL_PLACEHOLDER.sectionTitle,
+          type: 'TEXT',
+          textContent: TUTORIAL_PLACEHOLDER.textContent,
           estimatedMinutes: 1,
         });
-        if (section) {
-          await CurriculumService.createElement(section.id, {
-            type: 'TEXT',
-            textContent: TUTORIAL_PLACEHOLDER.textContent,
-          });
-        }
       }
       await PublicationService.publish(courseId, null);
       logger.info({ courseId }, 'published the default tutorial');

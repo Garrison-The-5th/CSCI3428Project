@@ -1,15 +1,15 @@
 /**
  * File: course-editor.tsx
- * Description: The shell around the three editing modules.
+ * Description: The shell around the three editing models.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-09-22
  */
 /**
- * CourseEditor — the shell around the three editing modules.
+ * CourseEditor — the shell around the three editing models.
  *
  * A sidebar switches between the landing page, the sections, and access. This page
- * owns the course data and the confirm dialog; each module owns its own forms.
+ * owns the course data and the confirm dialog; each model owns its own forms.
  * Reachable only by picking a lesson card.
  */
 import {
@@ -35,6 +35,7 @@ import ToastNotification from '@/components/common/toast-notification';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { effectiveChoice, toggleChoice, useAppSidebar } from '@/contexts/app-sidebar-context';
 import { EditLocksProvider } from '@/contexts/edit-locks-context';
 import {
   ArchivePane,
@@ -56,7 +57,7 @@ type Toast = { show: boolean; message: string; type: 'success' | 'error' };
 type EditorPane =
   'landing' | 'modules' | 'mapping' | 'access' | 'versions' | 'preview-landing' | 'preview-content';
 type PendingDelete = {
-  kind: 'course' | 'module' | 'section' | 'quiz' | 'element';
+  kind: 'course' | 'model' | 'section' | 'quiz';
   id: string;
   label: string;
 } | null;
@@ -77,7 +78,7 @@ function panesFor(
     mode === 'quiz'
       ? { key: 'modules', label: 'Quiz', Icon: QuestionMarkCircleIcon }
       : { key: 'modules', label: 'Modules', Icon: Squares2X2Icon },
-    // Only a lesson has a path through it to direct. A quiz set is one module of
+    // Only a lesson has a path through it to direct. A quiz set is one model of
     // quizzes, which is not a journey anybody can be sent different ways along.
     ...(mode === 'quiz'
       ? []
@@ -171,18 +172,54 @@ const CourseEditor = ({
   const [confirmingTypeLock, setConfirmingTypeLock] = useState(false);
   /** Set while the soft publish to the course map is in flight. */
   const [staging, setStaging] = useState(false);
-  /** Collapsed, the sidebar shows its icons only. */
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  /**
+   * The sidebar: collapsed, it shows its icons only.
+   *
+   * Two values rather than one. `choice` is what the author chose and what is
+   * remembered between visits. `override` is set only while the Modules tab is
+   * open, where the menu starts collapsed to give the outline and the editor
+   * the room — and whatever is done to the menu in there moves the override,
+   * never the saved choice, so leaving the tab shows the menu as the author
+   * last left it.
+   */
+  const [sidebar, setSidebar] = useState<{ choice: boolean; override: boolean | null }>(() => ({
+    choice: readSidebarCollapsed(),
+    override: null,
+  }));
+  const sidebarCollapsed = effectiveChoice(sidebar);
+  const { setFocusMode } = useAppSidebar();
 
-  /** Collapses or expands the sidebar and remembers the choice. */
+  /**
+   * Both menus tuck away on the Modules tab — this one and the app's main
+   * sidebar — and come back as they were on any other tab.
+   *
+   * An effect keyed on the pane rather than a click handler, so every way into
+   * the tab is covered: the menu, the quiz shell opening straight onto it, and
+   * anything that sets the pane in future. The clean-up puts the main sidebar
+   * back when the editor itself is left while the tab is open.
+   */
+  useEffect(() => {
+    const focused = pane === 'modules';
+    setSidebar((prev) => ({ ...prev, override: focused ? true : null }));
+    setFocusMode(focused);
+    return () => setFocusMode(false);
+  }, [pane, setFocusMode]);
+
+  /**
+   * Collapses or expands the sidebar. Outside the Modules tab the choice is
+   * remembered; inside it the menu still opens and closes, but only for now.
+   */
   const toggleSidebar = () =>
-    setSidebarCollapsed((prev) => {
-      try {
-        localStorage.setItem(SIDEBAR_KEY, prev ? '0' : '1');
-      } catch {
-        // Not remembered, which is fine.
+    setSidebar((prev) => {
+      const { choice, override, persist } = toggleChoice(prev);
+      if (persist) {
+        try {
+          localStorage.setItem(SIDEBAR_KEY, choice ? '1' : '0');
+        } catch {
+          // Not remembered, which is fine.
+        }
       }
-      return !prev;
+      return { choice, override };
     });
 
   /** Shows a toast. */
@@ -348,7 +385,7 @@ const CourseEditor = ({
     }
   };
 
-  /** Carries out the delete the author just confirmed — a course, module, section or quiz. */
+  /** Carries out the delete the author just confirmed — a course, model, section or quiz. */
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     const target = pendingDelete;
@@ -361,11 +398,11 @@ const CourseEditor = ({
         'Failed to delete lesson',
       );
       if (ok) goBack();
-    } else if (target.kind === 'module') {
+    } else if (target.kind === 'model') {
       const ok = await run(
-        () => curriculumApi.deleteModule(target.id),
-        'Module moved to the recycle bin',
-        'Failed to delete module',
+        () => curriculumApi.deleteModel(target.id),
+        'Model moved to the Archive tab',
+        'Failed to delete model',
       );
       // Its sections went with it, so whatever was selected may be gone.
       if (ok) setSelectedSectionId(null);
@@ -375,19 +412,20 @@ const CourseEditor = ({
       const ok = await run(
         () => curriculumApi.deleteSection(target.id),
         course?.kind === 'QUIZ_SET'
-          ? 'Quiz moved to the recycle bin'
-          : 'Section moved to the recycle bin',
+          ? 'Quiz moved to the Archive tab'
+          : 'Section moved to the Archive tab',
         course?.kind === 'QUIZ_SET' ? 'Failed to delete quiz' : 'Failed to delete section',
       );
       if (ok) setSelectedSectionId(null);
-    } else if (target.kind === 'quiz') {
-      await run(
+    } else {
+      // A quiz in a course is the whole of its section, so the section goes
+      // with it and both are found in this course's Archive tab.
+      const ok = await run(
         () => quizApi.deleteQuiz(target.id),
-        'Quiz moved to the recycle bin',
+        'Quiz moved to the Archive tab',
         'Failed to delete quiz',
       );
-    } else {
-      await run(() => curriculumApi.deleteElement(target.id), '', 'Failed to delete item');
+      if (ok) setSelectedSectionId(null);
     }
   };
 
@@ -416,8 +454,8 @@ const CourseEditor = ({
 
   const totalMinutes = course.sections.reduce((s, m) => s + m.estimatedMinutes, 0);
   /**
-   * A quiz set has one module nobody sees and a section per quiz, so counting
-   * modules and sections at it would describe the plumbing rather than the
+   * A quiz set has one model nobody sees and a section per quiz, so counting
+   * models and sections at it would describe the plumbing rather than the
    * thing. It gets a quiz count instead.
    */
   const isQuizSet = course.kind === 'QUIZ_SET';
@@ -427,16 +465,15 @@ const CourseEditor = ({
   const hasChanges = publication?.hasUnpublishedChanges ?? false;
   const unpublished = publication?.unpublished;
   const unpublishedCount =
-    (unpublished?.newModuleIds.length ?? 0) +
+    (unpublished?.newModelIds.length ?? 0) +
     (unpublished?.newSectionIds.length ?? 0) +
-    (unpublished?.newElementIds.length ?? 0) +
     (unpublished?.newQuizIds.length ?? 0);
 
   return (
     /*
       Everything inside this editor can be locked by somebody else working in the
       same course, so the provider wraps the whole of it: the structure pane
-      locks modules, the quiz editor locks questions, and neither has to be told
+      locks models, the quiz editor locks questions, and neither has to be told
       about the other.
     */
     <EditLocksProvider courseId={course.id}>
@@ -477,7 +514,7 @@ const CourseEditor = ({
                 </>
               ) : (
                 <>
-                  {course.modules.length} module{course.modules.length === 1 ? '' : 's'} ·{' '}
+                  {course.models.length} model{course.models.length === 1 ? '' : 's'} ·{' '}
                   {course.sections.length} sections · {totalMinutes} min
                 </>
               )}
@@ -595,7 +632,7 @@ const CourseEditor = ({
               : 'md:grid-cols-[14rem_minmax(0,1fr)]'
             }`}
         >
-          {/* ---- Module sidebar ---- */}
+          {/* ---- Model sidebar ---- */}
           <nav className="h-fit md:sticky md:top-20">
             <button
               onClick={toggleSidebar}
@@ -633,7 +670,7 @@ const CourseEditor = ({
             </ul>
           </nav>
 
-          {/* ---- Module content ---- */}
+          {/* ---- Model content ---- */}
           <div className="min-w-0">
             {pane === 'landing' && (
               <LandingPageEditor
@@ -687,6 +724,8 @@ const CourseEditor = ({
               <Card className="bg-light-gray shadow-sm">
                 <CardContent className="p-4">
                   <ArchivePane
+                    courseId={course.id}
+                    onStructureRestored={fetchCourse}
                     versions={publication?.versions ?? []}
                     busy={versionBusy}
                     onAsk={setPendingVersion}
@@ -721,15 +760,13 @@ const CourseEditor = ({
           message={
             <>
               Delete <span className="font-semibold">{pendingDelete?.label}</span>?
-              {pendingDelete?.kind === 'course' && ' Its modules and content go with it.'}
-              {pendingDelete?.kind === 'module' &&
-                ' Every section inside it goes too, and the modules after it move up.'}
-              {pendingDelete?.kind !== 'element' && (
-                <>
-                  <br />
-                  You can restore it from the Admin Dashboard.
-                </>
-              )}
+              {pendingDelete?.kind === 'course' && ' Its models and content go with it.'}
+              {pendingDelete?.kind === 'model' &&
+                ' Every section inside it goes too, and the models after it move up.'}
+              <br />
+              {pendingDelete?.kind === 'course'
+                ? 'You can restore it from the Admin Dashboard.'
+                : "You can restore it from this lesson's Archive tab."}
             </>
           }
           onConfirm={confirmDelete}

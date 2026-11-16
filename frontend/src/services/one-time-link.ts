@@ -11,7 +11,7 @@
  * person for good. The grading half has always existed: the server knows the
  * kind, refuses a second attempt, keeps the paper for the admin dashboard, and
  * hides the quiz from the Quizzes tab even for somebody signed in with the
- * address it went to. This module holds what the authoring half needs.
+ * address it went to. This model holds what the authoring half needs.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHERE ONE MAY LIVE

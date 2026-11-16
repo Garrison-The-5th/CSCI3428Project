@@ -24,7 +24,7 @@ import EmailService, { NewContentItem } from '@/services/email-service/email-ser
 /**
  * How long to wait after telling someone before telling them again.
  *
- * An author building out a module adds five sections in five minutes; without a
+ * An author building out a model adds five sections in five minutes; without a
  * quiet period that is five emails about the same course. One message per course
  * per learner per day, and it names everything added since they finished rather
  * than only the section that triggered it, so nothing is lost by waiting.
@@ -84,8 +84,8 @@ export default class NotificationService {
       CurriculumGateway.getQuizzesAddedSince(courseId, since),
     ]);
 
-    const moduleLabel = (module: { number: number; title: string } | null) =>
-      module ? `${module.number}. ${module.title}` : 'Ungrouped';
+    const modelLabel = (model: { number: number; title: string } | null) =>
+      model ? `${model.number}. ${model.title}` : 'Ungrouped';
 
     const newSectionIds = new Set(sections.map((section) => section.id));
 
@@ -94,7 +94,7 @@ export default class NotificationService {
         kind: 'section',
         number: section.number,
         title: section.title,
-        module: moduleLabel(section.module),
+        model: modelLabel(section.model),
       })),
       // A quiz inside a section that is itself new would be listed twice over —
       // the section line already covers it.
@@ -104,7 +104,7 @@ export default class NotificationService {
           kind: 'quiz',
           number: quiz.section!.number,
           title: quiz.title,
-          module: moduleLabel(quiz.section!.module),
+          model: modelLabel(quiz.section!.model),
         })),
     ];
   }

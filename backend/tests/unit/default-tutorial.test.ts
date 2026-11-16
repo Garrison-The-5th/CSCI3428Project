@@ -177,23 +177,27 @@ describe('ensureDefaultTutorial', () => {
     const createSection = jest
       .spyOn(CurriculumService, 'createSection')
       .mockResolvedValue({ id: 's1' } as never);
-    const createElement = jest
-      .spyOn(CurriculumService, 'createElement')
-      .mockResolvedValue({} as never);
 
     expect(await ensureDefaultTutorial()).toBe(TUTORIAL);
 
     expect(mockCurriculum.createDefaultTutorial).toHaveBeenCalledWith(TUTORIAL_PLACEHOLDER);
-    expect(createSection).toHaveBeenCalledWith(TUTORIAL, expect.any(Object));
-    expect(createElement).toHaveBeenCalledWith('s1', {
+    // One model (made with the course row) holding one TEXT section, whose
+    // text goes in with it — there is no separate element step any more.
+    expect(mockCurriculum.createDefaultTutorial).toHaveBeenCalledWith(
+      expect.objectContaining({ modelTitle: 'Welcome' }),
+    );
+    expect(createSection).toHaveBeenCalledTimes(1);
+    expect(createSection).toHaveBeenCalledWith(TUTORIAL, {
+      title: 'Welcome to the platform',
       type: 'TEXT',
       textContent: TUTORIAL_PLACEHOLDER.textContent,
+      estimatedMinutes: 1,
     });
+    expect(CurriculumService).not.toHaveProperty('createElement');
     // Published through the ordinary path, so learners read a real snapshot.
     expect(mockPublication.publish).toHaveBeenCalledWith(TUTORIAL, null);
 
     createSection.mockRestore();
-    createElement.mockRestore();
   });
 
   /**

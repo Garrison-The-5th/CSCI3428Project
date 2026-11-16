@@ -1,12 +1,15 @@
 /**
  * File: archive-pane.tsx
- * Description: Kept versions, version history, and reading one against the live one.
+ * Description: Kept versions, version history, reading one against the live one, and deleted items.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-09-04
  */
 /**
- * The Archive tab: every version this course has had, in two sections.
+ * The Archive tab: every version this course has had, in two sections, and
+ * under them whatever has been deleted from the course — its models, sections
+ * and quizzes, which live here rather than in the admin recycle bin (see
+ * deleted-items.tsx).
  *
  * Kept versions sit at the top and are never deleted. Below them is the ordinary
  * history: the version learners are reading, and the replaced ones, each with
@@ -32,6 +35,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import DeletedItems from '@/pages/private/admin/editor/deleted-items';
 import VersionDiffView from '@/pages/private/admin/editor/version-diff-view';
 import { CourseVersion, curriculumApi, VersionDiff } from '@/services/curriculum-api';
 import { logger } from '@/utils/logger';
@@ -50,6 +54,10 @@ export type PendingVersion = {
 } | null;
 
 interface Props {
+  /** The course whose Archive this is, so its deleted items can be loaded. */
+  courseId: string;
+  /** Called after a deleted model, section or quiz is restored into the course. */
+  onStructureRestored: () => void | Promise<void>;
   versions: CourseVersion[];
   busy: boolean;
   onAsk: (pending: NonNullable<PendingVersion>) => void;
@@ -69,7 +77,15 @@ function daysLeft(supersededAt: string): number {
  * The course's version history: kept versions, what each one added, and a read-only comparison of
  * any of them against the live one.
  */
-const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
+const ArchivePane = ({
+  courseId,
+  onStructureRestored,
+  versions,
+  busy,
+  onAsk,
+  onNotify,
+  onRefresh,
+}: Props) => {
   /** The version being read, if any. Null is the list. */
   const [openId, setOpenId] = useState<string | null>(null);
   const [diff, setDiff] = useState<VersionDiff | null>(null);
@@ -153,11 +169,7 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
 
   /** One version's entry in the history, with what it added. */
   const card = (entry: CourseVersion) => {
-    const added =
-      entry.newModuleIds.length +
-      entry.newSectionIds.length +
-      entry.newElementIds.length +
-      entry.newQuizIds.length;
+    const added = entry.newModelIds.length + entry.newSectionIds.length + entry.newQuizIds.length;
     const live = entry.supersededAt === null;
     const left = entry.archivedAt || live ? null : daysLeft(entry.supersededAt!);
 
@@ -296,6 +308,11 @@ const ArchivePane = ({ versions, busy, onAsk, onNotify, onRefresh }: Props) => {
           <div className="flex flex-col gap-2">{history.map(card)}</div>
         )}
       </section>
+
+      <hr className="h-px border-t-0 bg-gray-300" />
+
+      {/* What has been deleted from this course, under its versions. */}
+      <DeletedItems courseId={courseId} onNotify={onNotify} onRestored={onStructureRestored} />
     </div>
   );
 };

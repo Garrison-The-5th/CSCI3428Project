@@ -1,6 +1,6 @@
 /**
  * File: structure-editor.tsx
- * Description: The course structure editor — modules, their sections, and the content in them.
+ * Description: The course structure editor — models, and the sections inside them.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
@@ -8,14 +8,18 @@
 /**
  * The course structure editor.
  *
- * Left  : the add-module and add-section forms, a rule, then the course as a
- *         collapsible outline — module headings with their sections underneath.
- *         Numbers are never typed: a section is 2.3 because it is the third section
- *         of the second module, so dragging is what renumbers the course.
- *         Each section's content is listed under it, tabbed in a step further,
- *         and is where a piece of content is picked and dragged to reorder.
- * Right : the selected section's number, title and time, with the content-type
- *         picker and Add beside them, then the one piece of content being edited.
+ * A course is two layers: models, and the sections inside them. A section is
+ * one piece of content — a text, a video, a picture, a PDF, a canvas or a quiz
+ * — and its type is chosen when it is added, so there is no such thing as a
+ * blank section and nothing nested underneath one.
+ *
+ * Left  : the add-model and add-section forms, a rule, then the course as a
+ *         collapsible outline — model headings with their sections underneath,
+ *         one row per section with a badge saying what it is. Numbers are never
+ *         typed: a section is 2.3 because it is the third section of the second
+ *         model, so dragging is what renumbers the course.
+ * Right : the selected section's number, title and time, then its content in
+ *         the editor for its type.
  */
 import {
   Bars3Icon,
@@ -38,20 +42,20 @@ import { Input } from '@/components/ui/input';
 import LockOverlay from '@/components/ui/lock-overlay';
 import { useEditLocks } from '@/contexts/edit-locks-context';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
-import ModuleColorPicker from '@/pages/private/admin/editor/module-color-picker';
+import ModelColorPicker from '@/pages/private/admin/editor/model-color-picker';
 import {
   Course,
   CourseSection,
   curriculumApi,
-  ElementType,
-  ModuleGroup,
-  moduleGroups,
-  moduleTint,
+  ModelGroup,
+  modelGroups,
+  modelTint,
   NewIds,
-  sectionContent,
-  SectionContentItem,
+  quizOf,
+  SECTION_TYPE_LABELS,
+  SECTION_TYPES,
+  SectionType,
 } from '@/services/curriculum-api';
-import { quizApi } from '@/services/quiz-api';
 import { logger } from '@/utils/logger';
 
 interface Props {
@@ -60,11 +64,7 @@ interface Props {
   onSelectSection: (id: string | null) => void;
   onRefresh: () => Promise<void>;
   onNotify: (message: string, type?: 'success' | 'error') => void;
-  onDelete: (target: {
-    kind: 'section' | 'module' | 'quiz' | 'element';
-    id: string;
-    label: string;
-  }) => void;
+  onDelete: (target: { kind: 'section' | 'model' | 'quiz'; id: string; label: string }) => void;
   run: (action: () => Promise<unknown>, success: string, failure: string) => Promise<boolean>;
   setCourse: (updater: (prev: Course | null) => Course | null) => void;
   /** What has been edited but not published, for the New tags. */
@@ -75,33 +75,29 @@ const inputClass = 'bg-white text-dark-gray';
 const primaryBtn = 'bg-navy text-white hover:bg-navy-hover';
 
 /**
- * What the Add-content picker offers.
- *
- * A quiz is its own record rather than an element, but authors think of it as one
- * more thing to drop into a section, so it sits in the same list. PDF is absent
- * deliberately — a PDF is uploaded into an IMAGE block, which becomes one.
+ * What a section's row says under its title: for content, the same one-line
+ * summary the editor heads it with; for a quiz, how many questions it has.
  */
-type NewContentType = Exclude<ElementType, 'PDF'> | 'QUIZ';
-const CONTENT_TYPES: NewContentType[] = ['TEXT', 'YOUTUBE', 'IMAGE', 'CANVAS', 'QUIZ'];
-
-/** The one-line label a piece of content goes by in the course structure. */
-function itemLabel(item: SectionContentItem): { type: string; text: string } {
-  return item.kind === 'element'
-    ? { type: item.element.type, text: elementSummary(item.element) }
-    : { type: 'QUIZ', text: item.quiz.title };
+function sectionSummary(section: CourseSection): string {
+  const quiz = quizOf(section);
+  if (section.type === 'QUIZ') {
+    if (!quiz) return 'No quiz';
+    return `${quiz.questions.length} question${quiz.questions.length === 1 ? '' : 's'}`;
+  }
+  return elementSummary(section);
 }
 
-/** What is being dragged/** What is being dragged, so a section is never dropped onto a module list. */
-type Drag = { kind: 'section'; id: string } | { kind: 'module'; id: string } | null;
+/** What is being dragged, so a section is never dropped onto a model list. */
+type Drag = { kind: 'section'; id: string } | { kind: 'model'; id: string } | null;
 
 /**
- * Whether a module was generated for a course map's layer quiz.
+ * Whether a model was generated for a course map's layer quiz.
  *
  * Recognised by its name, which the generator owns and an author cannot reach —
- * the module is locked below, and a hand-made module of the same name would be
+ * the model is locked below, and a hand-made model of the same name would be
  * locked with it, which is the safe way round to be wrong.
  */
-function isLayerModule(title: string): boolean {
+function isLayerModel(title: string): boolean {
   return /^Directed learning quiz \d+$/.test(title);
 }
 
@@ -116,67 +112,71 @@ const StructureEditor = ({
   setCourse,
   unpublished,
 }: Props) => {
-  /** In-flight latch for addContent, so a double click adds one block, not two. */
+  /** In-flight latch for addSection, so a double click adds one section, not two. */
   const addingRef = useRef(false);
   const [adding, setAdding] = useState(false);
-  /** The module whose title is being edited inline, and the text so far. */
-  const [editingModule, setEditingModule] = useState<{ id: string; title: string } | null>(null);
+  /** The model whose title is being edited inline, and the text so far. */
+  const [editingModel, setEditingModel] = useState<{ id: string; title: string } | null>(null);
 
-  const groups = moduleGroups(course);
+  const groups = modelGroups(course);
   const isNew = newMarkers(unpublished);
 
-  /** Saves an inline module rename, or quietly drops an empty one. */
-  const saveModuleTitle = async () => {
-    const editing = editingModule;
-    setEditingModule(null);
+  /** Saves an inline model rename, or quietly drops an empty one. */
+  const saveModelTitle = async () => {
+    const editing = editingModel;
+    setEditingModel(null);
     if (!editing) return;
 
     const title = editing.title.trim();
-    const current = groups.find((group) => group.module.id === editing.id)?.module.title;
+    const current = groups.find((group) => group.model.id === editing.id)?.model.title;
     if (!title || title === current) return;
 
     await run(
-      () => curriculumApi.updateModule(editing.id, { title }),
-      'Module renamed',
-      'Failed to rename the module',
+      () => curriculumApi.updateModel(editing.id, { title }),
+      'Model renamed',
+      'Failed to rename the model',
     );
   };
 
-  const [newModule, setNewModule] = useState({ title: '' });
-  const [newSection, setNewSection] = useState({ title: '', estimatedMinutes: '', moduleId: '' });
-  const [newType, setNewType] = useState<NewContentType>('TEXT');
-  const [drag, setDrag] = useState<Drag>(null);
-  const [contentDrag, setContentDrag] = useState<{ sectionId: string; id: string } | null>(null);
-  /** The piece of content open in the main editor — an element or a quiz. */
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  /** Collapsed rather than expanded, so reopening the editor looks unchanged. */
-  const [collapsedModuleIds, setCollapsedModuleIds] = useState<Set<string>>(new Set());
-  /** Sections folded down to their row, hiding the content listed under them. */
-  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
-
+  const [newModel, setNewModel] = useState({ title: '' });
   /**
-   * Modules somebody else has open, and how this pane says which one is ours.
-   *
-   * A module is claimed whole rather than section by section because editing one
-   * really means editing the sections and elements inside it — there is no
-   * smaller unit an author actually works in, and locking at a finer grain would
-   * let two people rearrange the same module's contents against each other.
+   * The section about to be added. `type` comes first in the form and has no
+   * empty option: a section is one piece of content, so what kind it is has to
+   * be settled before it exists.
    */
-  const { lockedModules, claim, marks } = useEditLocks();
+  const [newSection, setNewSection] = useState<{
+    type: SectionType;
+    title: string;
+    estimatedMinutes: string;
+    modelId: string;
+  }>({ type: 'TEXT', title: '', estimatedMinutes: '', modelId: '' });
+  const [drag, setDrag] = useState<Drag>(null);
+  /** Collapsed rather than expanded, so reopening the editor looks unchanged. */
+  const [collapsedModelIds, setCollapsedModelIds] = useState<Set<string>>(new Set());
 
   /**
-   * Whichever module is expanded is the one being worked in, so that is the
+   * Models somebody else has open, and how this pane says which one is ours.
+   *
+   * A model is claimed whole rather than section by section because editing one
+   * really means editing the sections inside it — there is no
+   * smaller unit an author actually works in, and locking at a finer grain would
+   * let two people rearrange the same model's contents against each other.
+   */
+  const { lockedModels, claim, marks } = useEditLocks();
+
+  /**
+   * Whichever model is expanded is the one being worked in, so that is the
    * claim. Collapsing them all gives it up — an author looking at a course
    * outline is not editing any of it.
    */
-  const openModuleId = useMemo(
-    () => groups.find((group) => !collapsedModuleIds.has(group.module.id))?.module.id ?? null,
-    [groups, collapsedModuleIds],
+  const openModelId = useMemo(
+    () => groups.find((group) => !collapsedModelIds.has(group.model.id))?.model.id ?? null,
+    [groups, collapsedModelIds],
   );
 
   useEffect(() => {
-    claim('MODULE', openModuleId);
-  }, [openModuleId, claim]);
+    claim('MODEL', openModelId);
+  }, [openModelId, claim]);
 
   const selectedSection = course.sections.find((m) => m.id === selectedSectionId) ?? null;
   /**
@@ -186,18 +186,8 @@ const StructureEditor = ({
    */
   const layerSection = selectedSection?.quizzes.some((quiz) => quiz.type === 'DIRECTED') ?? false;
 
-  const selectedItems = selectedSection ? sectionContent(selectedSection) : [];
-  const selectedItem = selectedItems.find((item) => item.id === selectedItemId) ?? null;
-
-  /*
-   * Something is always open while the section has content: arriving at a
-   * section opens its first piece, and deleting the open one falls back to the
-   * first of what is left.
-   */
-  useEffect(() => {
-    if (selectedItem) return;
-    setSelectedItemId(selectedItems[0]?.id ?? null);
-  }, [selectedSection?.id, selectedItem, selectedItems[0]?.id]);
+  /** The quiz of the selected section, when it is a quiz section. */
+  const selectedQuiz = selectedSection ? quizOf(selectedSection) : null;
 
   const [sectionDraft, setSectionDraft] = useState({ title: '', estimatedMinutes: '' });
 
@@ -235,117 +225,80 @@ const StructureEditor = ({
     { enabled: Boolean(selectedSection), resetKey: selectedSection?.id ?? null },
   );
 
-  /** Collapses or expands a module. */
-  const toggleModule = (moduleId: string) =>
-    setCollapsedModuleIds((prev) => {
+  /** Collapses or expands a model. */
+  const toggleModel = (modelId: string) =>
+    setCollapsedModelIds((prev) => {
       const next = new Set(prev);
-      if (next.has(moduleId)) next.delete(moduleId);
-      else next.add(moduleId);
-      return next;
-    });
-
-  /** Collapses or expands a section. */
-  const toggleSection = (sectionId: string) =>
-    setCollapsedSectionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sectionId)) next.delete(sectionId);
-      else next.add(sectionId);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
       return next;
     });
 
   /** Lands at the end of the course; drag it from the outline to move it. */
-  const addModule = async () => {
-    if (!newModule.title.trim()) return onNotify('Give the module a title', 'error');
+  const addModel = async () => {
+    if (!newModel.title.trim()) return onNotify('Give the model a title', 'error');
 
     const ok = await run(
       () =>
-        curriculumApi.createModule(course.id, {
-          title: newModule.title.trim(),
+        curriculumApi.createModel(course.id, {
+          title: newModel.title.trim(),
           number: groups.length + 1,
         }),
-      `Module added`,
-      'Failed to add module',
+      `Model added`,
+      'Failed to add model',
     );
-    if (ok) setNewModule({ title: '' });
+    if (ok) setNewModel({ title: '' });
   };
 
   /**
-   * The modules a new section may go into: every one but the map's generated
-   * quiz modules, which hold their own quiz and nothing else. Those are appended
-   * at the end of the course, so defaulting to "the last module" used to put new
+   * The models a new section may go into: every one but the map's generated
+   * quiz models, which hold their own quiz and nothing else. Those are appended
+   * at the end of the course, so defaulting to "the last model" used to put new
    * sections straight into one.
    */
-  const sectionHomes = groups.filter((group) => !isLayerModule(group.module.title));
-  const defaultHome = sectionHomes[sectionHomes.length - 1]?.module.id ?? '';
-  const chosenHome = sectionHomes.some((group) => group.module.id === newSection.moduleId)
-    ? newSection.moduleId
+  const sectionHomes = groups.filter((group) => !isLayerModel(group.model.title));
+  const defaultHome = sectionHomes[sectionHomes.length - 1]?.model.id ?? '';
+  const chosenHome = sectionHomes.some((group) => group.model.id === newSection.modelId)
+    ? newSection.modelId
     : defaultHome;
 
-  /** Lands at the end of the chosen module and takes the next number there. */
+  /**
+   * Adds a section of the chosen type to the end of the chosen model, and opens
+   * it — so the author fills it in where it will live. The type goes with the
+   * request; the server refuses a section without one.
+   */
   const addSection = async () => {
+    if (addingRef.current) return;
     if (!newSection.title.trim()) return onNotify('Give the section a title', 'error');
     if (sectionHomes.length === 0) {
-      return onNotify('Add a module first — sections live inside one', 'error');
+      return onNotify('Add a model first — sections live inside one', 'error');
     }
 
-    const moduleId = chosenHome;
-    const ok = await run(
-      () =>
-        curriculumApi.createSection(course.id, {
-          moduleId,
-          title: newSection.title.trim(),
-          estimatedMinutes: Number(newSection.estimatedMinutes) || 0,
-        }),
-      'Section added',
-      'Failed to add section',
-    );
-    if (ok) setNewSection({ title: '', estimatedMinutes: '', moduleId });
-  };
-
-  /** Opens a piece of content, along with the section it sits in. */
-  const selectItem = (sectionId: string, itemId: string) => {
-    onSelectSection(sectionId);
-    setSelectedItemId(itemId);
-  };
-
-  /**
-   * Adds a blank block of the picked type to the end of the section and opens
-   * it, so the author fills it in where it will live rather than in a staging
-   * box above. A quiz gets a placeholder title, renamed in its own settings.
-   */
-  const addContent = async () => {
-    if (!selectedSection || addingRef.current) return;
     addingRef.current = true;
     setAdding(true);
-    const sectionId = selectedSection.id;
+    const modelId = chosenHome;
     try {
-      const response =
-        newType === 'QUIZ'
-          ? await quizApi.createQuiz({ title: 'New quiz', sectionId })
-          : await curriculumApi.createElement(sectionId, { type: newType });
+      const response = await curriculumApi.createSection(course.id, {
+        type: newSection.type,
+        modelId,
+        title: newSection.title.trim(),
+        estimatedMinutes: Number(newSection.estimatedMinutes) || 0,
+      });
       await onRefresh();
-      const createdId: string | undefined = response?.quiz?.id ?? response?.element?.id;
-      if (createdId) setSelectedItemId(createdId);
-      // The new block is highlighted in the outline, so its module has to be open.
-      if (selectedSection.moduleId) {
-        setCollapsedModuleIds((prev) => {
-          if (!prev.has(selectedSection.moduleId!)) return prev;
-          const next = new Set(prev);
-          next.delete(selectedSection.moduleId!);
-          return next;
-        });
-      }
-      // And so does its section.
-      setCollapsedSectionIds((prev) => {
-        if (!prev.has(sectionId)) return prev;
+      onNotify('Section added');
+      setNewSection({ type: newSection.type, title: '', estimatedMinutes: '', modelId });
+      if (response?.section?.id) onSelectSection(response.section.id);
+      // The new section is highlighted in the outline, so its model has to be open.
+      setCollapsedModelIds((prev) => {
+        if (!prev.has(modelId)) return prev;
         const next = new Set(prev);
-        next.delete(sectionId);
+        next.delete(modelId);
         return next;
       });
     } catch (err) {
-      logger.error('Failed to add content:', err);
+      logger.error('Failed to add section:', err);
       onNotify(
-        err instanceof Error && err.message ? err.message : 'Failed to add content',
+        err instanceof Error && err.message ? err.message : 'Failed to add section',
         'error',
       );
     } finally {
@@ -354,51 +307,25 @@ const StructureEditor = ({
     }
   };
 
-  /** Dragging content renumbers the section's whole sequence, quizzes included. */
-  const handleContentDrop = async (section: CourseSection, targetId: string) => {
-    const dragged = contentDrag;
-    setContentDrag(null);
-    // Content moves within its own section only.
-    if (!dragged || dragged.sectionId !== section.id || dragged.id === targetId) return;
-    const ordered = sectionContent(section);
-    const from = ordered.findIndex((i) => i.id === dragged.id);
-    const to = ordered.findIndex((i) => i.id === targetId);
-    if (from < 0 || to < 0) return;
-
-    const next = [...ordered];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-
-    await run(
-      () =>
-        curriculumApi.reorderSectionContent(
-          section.id,
-          next.map((i) => ({ kind: i.kind, id: i.id })),
-        ),
-      '',
-      'Failed to reorder content',
-    );
-  };
-
   /**
    * Sends the grid as it now stands and renumbers optimistically so the new
    * numbers appear under the cursor rather than a round trip later. The previous
    * course is kept so a failed save can put it back exactly as it was.
    */
-  const applyStructure = async (next: ModuleGroup[]) => {
+  const applyStructure = async (next: ModelGroup[]) => {
     const previous = course;
 
     setCourse((prev) =>
       prev
         ? {
             ...prev,
-            modules: next.map((group, index) => ({ ...group.module, number: index + 1 })),
-            sections: next.flatMap((group, moduleIndex) =>
+            models: next.map((group, index) => ({ ...group.model, number: index + 1 })),
+            sections: next.flatMap((group, modelIndex) =>
               group.sections.map((section, sectionIndex) => ({
                 ...section,
-                moduleId: group.module.id,
+                modelId: group.model.id,
                 position: sectionIndex + 1,
-                number: `${moduleIndex + 1}.${sectionIndex + 1}`,
+                number: `${modelIndex + 1}.${sectionIndex + 1}`,
               })),
             ),
           }
@@ -409,7 +336,7 @@ const StructureEditor = ({
       await curriculumApi.reorderStructure(
         course.id,
         next.map((group) => ({
-          id: group.module.id,
+          id: group.model.id,
           sectionIds: group.sections.map((section) => section.id),
         })),
       );
@@ -421,20 +348,20 @@ const StructureEditor = ({
     }
   };
 
-  /** Drops a section before `targetSectionId`, or on the end of a module. */
-  const handleSectionDrop = async (moduleId: string, targetSectionId: string | null) => {
+  /** Drops a section before `targetSectionId`, or on the end of a model. */
+  const handleSectionDrop = async (modelId: string, targetSectionId: string | null) => {
     const dragged = drag;
     setDrag(null);
     if (dragged?.kind !== 'section' || dragged.id === targetSectionId) return;
-    // A layer quiz's module holds its own section and nothing else, and its
+    // A layer quiz's model holds its own section and nothing else, and its
     // section stays where the map put it.
-    const into = groups.find((group) => group.module.id === moduleId);
+    const into = groups.find((group) => group.model.id === modelId);
     const from = groups.find((group) =>
       group.sections.some((section) => section.id === dragged.id),
     );
-    if (into !== from && [into, from].some((group) => group && isLayerModule(group.module.title))) {
+    if (into !== from && [into, from].some((group) => group && isLayerModel(group.model.title))) {
       return onNotify(
-        'Directed learning quiz modules are built by the course map and cannot hold other sections',
+        'Directed learning quiz models are built by the course map and cannot hold other sections',
         'error',
       );
     }
@@ -445,7 +372,7 @@ const StructureEditor = ({
     }));
 
     const moved = course.sections.find((section) => section.id === dragged.id);
-    const target = next.find((group) => group.module.id === moduleId);
+    const target = next.find((group) => group.model.id === modelId);
     if (!moved || !target) return;
 
     const at = targetSectionId
@@ -457,23 +384,23 @@ const StructureEditor = ({
   };
 
   /**
-   * Dragging a module heading moves it and everything inside it.
+   * Dragging a model heading moves it and everything inside it.
    *
-   * A *section* dropped on a heading goes on the end of that module. The heading
-   * is where an author naturally aims, and for an empty module it is most of
-   * what there is to aim at — ignoring the drop there made empty modules look as
+   * A *section* dropped on a heading goes on the end of that model. The heading
+   * is where an author naturally aims, and for an empty model it is most of
+   * what there is to aim at — ignoring the drop there made empty models look as
    * though they refused sections altogether.
    */
-  const handleModuleDrop = async (targetModuleId: string) => {
-    if (drag?.kind === 'section') return handleSectionDrop(targetModuleId, null);
+  const handleModelDrop = async (targetModelId: string) => {
+    if (drag?.kind === 'section') return handleSectionDrop(targetModelId, null);
 
     const dragged = drag;
     setDrag(null);
-    if (dragged?.kind !== 'module' || dragged.id === targetModuleId) return;
+    if (dragged?.kind !== 'model' || dragged.id === targetModelId) return;
 
     const next = [...groups];
-    const from = next.findIndex((group) => group.module.id === dragged.id);
-    const to = next.findIndex((group) => group.module.id === targetModuleId);
+    const from = next.findIndex((group) => group.model.id === dragged.id);
+    const to = next.findIndex((group) => group.model.id === targetModelId);
     if (from < 0 || to < 0) return;
 
     const [moved] = next.splice(from, 1);
@@ -491,40 +418,61 @@ const StructureEditor = ({
         </CardHeader>
 
         <CardContent className="flex flex-col gap-3">
-          {/* New module */}
+          {/* New model */}
           <div className="flex flex-col gap-2 rounded-lg border border-navy/30 bg-white/60 p-3">
-            <p className="text-sm font-semibold text-dark-gray">New module</p>
+            <p className="text-sm font-semibold text-dark-gray">New model</p>
             {/* Only a name. The number was asked for here and it was the wrong
-                question at the wrong time: a module that does not exist yet has
+                question at the wrong time: a model that does not exist yet has
                 no place in the course to state, and the answer was overwritten
                 by the first drag anyway. It lands at the end and shows its
-                number in the outline below, once it is a real module. */}
+                number in the outline below, once it is a real model. */}
             <Input
-              value={newModule.title}
-              onChange={(e) => setNewModule({ ...newModule, title: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && addModule()}
-              placeholder="Module title"
+              value={newModel.title}
+              onChange={(e) => setNewModel({ ...newModel, title: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && addModel()}
+              placeholder="Model title"
               className={inputClass}
             />
-            <Button onClick={addModule} className={primaryBtn}>
-              <FolderPlusIcon className="w-5 h-5 stroke-2" /> Add module
+            <Button onClick={addModel} className={primaryBtn}>
+              <FolderPlusIcon className="w-5 h-5 stroke-2" /> Add model
             </Button>
           </div>
 
           {/* New section */}
           <div className="flex flex-col gap-2 rounded-lg border border-navy/30 bg-white/60 p-3">
             <p className="text-sm font-semibold text-dark-gray">New section</p>
+            {/* The type first, and no blank choice: a section is one piece of
+                content, so what it is gets decided before it is made. */}
+            <label className="flex flex-col gap-1 text-xs font-medium text-dark-gray">
+              Type
+              <select
+                value={newSection.type}
+                onChange={(e) =>
+                  setNewSection({ ...newSection, type: e.target.value as SectionType })
+                }
+                aria-label="Section type"
+                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm font-normal
+                  text-dark-gray"
+              >
+                {SECTION_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {SECTION_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="flex gap-2">
               <select
                 value={chosenHome}
-                onChange={(e) => setNewSection({ ...newSection, moduleId: e.target.value })}
+                onChange={(e) => setNewSection({ ...newSection, modelId: e.target.value })}
                 disabled={sectionHomes.length === 0}
+                aria-label="Model to add the section to"
                 className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2
                   text-sm text-dark-gray"
               >
                 {sectionHomes.map((group) => (
-                  <option key={group.module.id} value={group.module.id}>
-                    {group.module.title}
+                  <option key={group.model.id} value={group.model.id}>
+                    {group.model.title}
                   </option>
                 ))}
               </select>
@@ -545,47 +493,47 @@ const StructureEditor = ({
             <Button
               onClick={addSection}
               className={primaryBtn}
-              disabled={sectionHomes.length === 0}
+              disabled={sectionHomes.length === 0 || adding}
             >
-              <PlusIcon className="w-5 h-5 stroke-2" /> Add section
+              <PlusIcon className="w-5 h-5 stroke-2" /> {adding ? 'Adding…' : 'Add section'}
             </Button>
           </div>
 
           <hr className="h-px border-t-0 bg-gray-300" />
 
           {groups.length === 0 ? (
-            <p className="text-sm text-dark-gray">No modules yet.</p>
+            <p className="text-sm text-dark-gray">No models yet.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {groups.map((group) => {
-                const collapsed = collapsedModuleIds.has(group.module.id);
+                const collapsed = collapsedModelIds.has(group.model.id);
                 const minutes = group.sections.reduce((sum, m) => sum + m.estimatedMinutes, 0);
 
-                const lockedBy = lockedModules[group.module.id];
+                const lockedBy = lockedModels[group.model.id];
                 /*
-                  A layer quiz's module is written by the course map, not by
+                  A layer quiz's model is written by the course map, not by
                   hand: its name, its place and its section are regenerated
                   whenever a node moves, so the heading goes under the same sheet
                   somebody else's edit lease uses. The quiz inside is still
                   reachable — its wording is the author's to change, and the quiz
                   editor keeps everything else fixed.
                 */
-                const generated = isLayerModule(group.module.title);
+                const generated = isLayerModel(group.model.title);
 
                 return (
                   /*
-                    Somebody else is in this module, so the whole group goes
+                    Somebody else is in this model, so the whole group goes
                     under the sheet — heading, sections and all. Locking only the
                     heading would leave every section inside it editable, which
                     is the content the lock exists to protect.
                   */
                   <LockOverlay
-                    key={group.module.id}
+                    key={group.model.id}
                     locked={Boolean(lockedBy)}
-                    reason={lockedBy ? `${lockedBy} is editing this module` : undefined}
+                    reason={lockedBy ? `${lockedBy} is editing this model` : undefined}
                   >
                     <div className="flex flex-col gap-1">
-                      {/* Module heading — drag it to move the whole module */}
+                      {/* Model heading — drag it to move the whole model */}
                       <LockOverlay
                         locked={generated}
                         compact
@@ -593,39 +541,39 @@ const StructureEditor = ({
                       >
                         <div
                           draggable
-                          onDragStart={() => setDrag({ kind: 'module', id: group.module.id })}
+                          onDragStart={() => setDrag({ kind: 'model', id: group.model.id })}
                           onDragOver={(e) => e.preventDefault()}
-                          onDrop={() => handleModuleDrop(group.module.id)}
+                          onDrop={() => handleModelDrop(group.model.id)}
                           onDragEnd={() => setDrag(null)}
                           className={`flex cursor-grab items-center gap-1 rounded-md border px-2
-                            py-2 ${group.module.color ? '' : 'border-navy/40 bg-navy/5'}
-                            ${drag?.kind === 'module' && drag.id === group.module.id ? 'opacity-50' : ''}`}
+                            py-2 ${group.model.color ? '' : 'border-navy/40 bg-navy/5'}
+                            ${drag?.kind === 'model' && drag.id === group.model.id ? 'opacity-50' : ''}`}
                           // The tint the learner will see, previewed where it is set.
-                          style={moduleTint(group.module.color)}
+                          style={modelTint(group.model.color)}
                         >
                           <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
 
-                          {editingModule?.id === group.module.id ? (
+                          {editingModel?.id === group.model.id ? (
                             // Renaming takes over the row: the drag handle and the
                             // collapse toggle would both fight a text field.
                             <Input
                               autoFocus
-                              value={editingModule.title}
+                              value={editingModel.title}
                               onChange={(e) =>
-                                setEditingModule({ id: group.module.id, title: e.target.value })
+                                setEditingModel({ id: group.model.id, title: e.target.value })
                               }
-                              onBlur={saveModuleTitle}
+                              onBlur={saveModelTitle}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') saveModuleTitle();
-                                if (e.key === 'Escape') setEditingModule(null);
+                                if (e.key === 'Enter') saveModelTitle();
+                                if (e.key === 'Escape') setEditingModel(null);
                               }}
                               onClick={(e) => e.stopPropagation()}
-                              aria-label="Module title"
+                              aria-label="Model title"
                               className={`${inputClass} h-8 min-w-0 flex-1`}
                             />
                           ) : (
                             <button
-                              onClick={() => toggleModule(group.module.id)}
+                              onClick={() => toggleModel(group.model.id)}
                               aria-expanded={!collapsed}
                               className="flex min-w-0 flex-1 items-center gap-2 text-left"
                             >
@@ -636,10 +584,10 @@ const StructureEditor = ({
                               <span className="min-w-0 flex-1 text-sm text-dark-gray">
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="break-words font-semibold">
-                                    {group.module.number}. {group.module.title}
+                                    {group.model.number}. {group.model.title}
                                   </span>
-                                  {isNew.module(group.module.id) && <NewBadge />}
-                                  <EditedTag mark={marks.modules[group.module.id]} />
+                                  {isNew.model(group.model.id) && <NewBadge />}
+                                  <EditedTag mark={marks.models[group.model.id]} />
                                 </span>
                                 <span className="block text-xs">
                                   {group.sections.length} section
@@ -650,46 +598,46 @@ const StructureEditor = ({
                             </button>
                           )}
 
-                          {group.module.id !== 'unmoduleed' && (
+                          {group.model.id !== 'ungrouped' && (
                             <>
-                              <ModuleColorPicker
-                                color={group.module.color}
-                                label={group.module.title}
+                              <ModelColorPicker
+                                color={group.model.color}
+                                label={group.model.title}
                                 onSelect={(color) =>
                                   run(
-                                    () => curriculumApi.updateModule(group.module.id, { color }),
-                                    color ? 'Module colour set' : 'Module colour cleared',
-                                    'Failed to change the module colour',
+                                    () => curriculumApi.updateModel(group.model.id, { color }),
+                                    color ? 'Model colour set' : 'Model colour cleared',
+                                    'Failed to change the model colour',
                                   )
                                 }
                               />
                               <Button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditingModule({
-                                    id: group.module.id,
-                                    title: group.module.title,
+                                  setEditingModel({
+                                    id: group.model.id,
+                                    title: group.model.title,
                                   });
                                 }}
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 shrink-0 hover:text-green-hover"
-                                title="Rename module"
+                                title="Rename model"
                               >
                                 <PencilSquareIcon className="w-4 h-4" />
                               </Button>
                               <Button
                                 onClick={() =>
                                   onDelete({
-                                    kind: 'module',
-                                    id: group.module.id,
-                                    label: `${group.module.number}. ${group.module.title}`,
+                                    kind: 'model',
+                                    id: group.model.id,
+                                    label: `${group.model.number}. ${group.model.title}`,
                                   })
                                 }
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 shrink-0 hover:text-danger-hover"
-                                title="Delete module"
+                                title="Delete model"
                               >
                                 <TrashIcon className="w-4 h-4" />
                               </Button>
@@ -702,9 +650,9 @@ const StructureEditor = ({
                         <div
                           className="flex flex-col gap-1 pl-4"
                           // Dropping in the gap under the last section appends here,
-                          // which is the only way into an empty module.
+                          // which is the only way into an empty model.
                           onDragOver={(e) => e.preventDefault()}
-                          onDrop={() => handleSectionDrop(group.module.id, null)}
+                          onDrop={() => handleSectionDrop(group.model.id, null)}
                         >
                           {group.sections.length === 0 ? (
                             <p
@@ -723,47 +671,30 @@ const StructureEditor = ({
                                   onDragOver={(e) => e.preventDefault()}
                                   onDrop={(e) => {
                                     e.stopPropagation();
-                                    handleSectionDrop(group.module.id, section.id);
+                                    handleSectionDrop(group.model.id, section.id);
                                   }}
                                   onDragEnd={() => setDrag(null)}
                                   className={`flex cursor-grab items-center gap-2 rounded-md border
                                     px-3 py-2
                                     ${section.id === selectedSectionId ? 'border-navy bg-white' : 'border-gray-300 bg-white/60'}
                                     ${drag?.kind === 'section' && drag.id === section.id ? 'opacity-50' : ''}`}
-                                  // The colour is the module's, so its sections read
+                                  // The colour is the model's, so its sections read
                                   // as belonging together down the whole outline.
                                   style={
-                                    group.module.color
+                                    group.model.color
                                       ? {
                                           borderLeftWidth: '4px',
-                                          borderLeftColor: group.module.color,
+                                          borderLeftColor: group.model.color,
                                         }
                                       : undefined
                                   }
                                 >
                                   <Bars3Icon className="w-4 h-4 shrink-0 text-dark-gray" />
-                                  {sectionContent(section).length > 0 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleSection(section.id)}
-                                      aria-expanded={!collapsedSectionIds.has(section.id)}
-                                      aria-controls={`section-content-${section.id}`}
-                                      aria-label={
-                                        collapsedSectionIds.has(section.id)
-                                          ? `Show ${section.title} content`
-                                          : `Hide ${section.title} content`
-                                      }
-                                      className="shrink-0 rounded p-0.5 text-dark-gray
-                                        hover:bg-light-gray"
-                                    >
-                                      <ChevronDownIcon
-                                        className={`w-4 h-4 transition-transform duration-200
-                                          ${collapsedSectionIds.has(section.id) ? '-rotate-90' : ''}`}
-                                      />
-                                    </button>
-                                  )}
                                   <button
                                     onClick={() => onSelectSection(section.id)}
+                                    aria-current={
+                                      section.id === selectedSectionId ? 'true' : undefined
+                                    }
                                     className="min-w-0 flex-1 text-left text-sm text-dark-gray"
                                   >
                                     <span className="flex flex-wrap items-center gap-2">
@@ -771,84 +702,24 @@ const StructureEditor = ({
                                         <span className="font-semibold">{section.number}</span>{' '}
                                         {section.title}
                                       </span>
-                                      {isNew.section(section.id, section.moduleId) && <NewBadge />}
+                                      {/* What the section is: one row, one
+                                          piece of content, one badge. */}
+                                      <span
+                                        className="rounded bg-navy/10 px-1.5 py-0.5 text-[0.6875rem]
+                                          font-semibold uppercase tracking-wide text-navy"
+                                      >
+                                        {SECTION_TYPE_LABELS[section.type]}
+                                      </span>
+                                      {isNew.section(section.id, section.modelId) && <NewBadge />}
                                       <EditedTag mark={marks.sections[section.id]} />
                                     </span>
-                                    <span className="block text-xs">
-                                      {section.elements.length} items
-                                      {section.quizzes.length > 0 &&
-                                        ` · ${section.quizzes.length} quiz`}
+                                    <span className="block truncate text-xs">
+                                      {sectionSummary(section)}
                                       {section.estimatedMinutes > 0 &&
                                         ` · ${section.estimatedMinutes} min`}
                                     </span>
                                   </button>
                                 </div>
-
-                                {/* The section's content, a step further in — the
-                                  same way sections sit under their module. */}
-                                {sectionContent(section).length > 0 &&
-                                  !collapsedSectionIds.has(section.id) && (
-                                    <ul
-                                      id={`section-content-${section.id}`}
-                                      className="flex flex-col gap-1 pl-4"
-                                    >
-                                      {sectionContent(section).map((item) => {
-                                        const { type, text } = itemLabel(item);
-                                        const active =
-                                          section.id === selectedSectionId &&
-                                          item.id === selectedItemId;
-                                        // A layer quiz stays where the map put it.
-                                        const movable = !generated;
-                                        return (
-                                          <li
-                                            key={item.id}
-                                            draggable={movable}
-                                            onDragStart={(e) => {
-                                              // Not a section drag as well.
-                                              e.stopPropagation();
-                                              setContentDrag({
-                                                sectionId: section.id,
-                                                id: item.id,
-                                              });
-                                            }}
-                                            onDragOver={(e) => e.preventDefault()}
-                                            onDrop={(e) => {
-                                              if (!contentDrag) return;
-                                              e.stopPropagation();
-                                              handleContentDrop(section, item.id);
-                                            }}
-                                            onDragEnd={() => setContentDrag(null)}
-                                            className={`flex items-center gap-2 rounded-md border
-                                              px-2 py-1.5 ${movable ? 'cursor-grab' : ''} ${
-                                                active
-                                                  ? 'border-navy bg-navy text-white'
-                                                  : `border-gray-300 bg-white/60 text-dark-gray
-                                                    hover:bg-white`
-                                              } ${contentDrag?.id === item.id ? 'opacity-50' : ''}`}
-                                          >
-                                            {movable && (
-                                              <Bars3Icon className="w-3.5 h-3.5 shrink-0" />
-                                            )}
-                                            <button
-                                              onClick={() => selectItem(section.id, item.id)}
-                                              aria-current={active ? 'true' : undefined}
-                                              className="flex min-w-0 flex-1 items-center gap-2
-                                                text-left text-xs"
-                                            >
-                                              <span className="min-w-0 flex-1 truncate">
-                                                <span className="font-semibold">{type}</span> {text}
-                                              </span>
-                                              {isNew.item(
-                                                item.id,
-                                                section.id,
-                                                section.moduleId,
-                                              ) && <NewBadge />}
-                                            </button>
-                                          </li>
-                                        );
-                                      })}
-                                    </ul>
-                                  )}
                               </div>
                             ))
                           )}
@@ -880,7 +751,7 @@ const StructureEditor = ({
                   <span
                     className="flex h-9 items-center rounded-md border border-gray-300 bg-gray-100
                       px-3 font-semibold"
-                    title="Set by the section's place in its module — drag to change it"
+                    title="Set by the section's place in its model — drag to change it"
                   >
                     {selectedSection.number}
                   </span>
@@ -909,31 +780,18 @@ const StructureEditor = ({
                   />
                 </label>
 
-                {/* Adding content. A layer quiz's section holds its quiz and
-                    nothing else, so it has none to offer. */}
-                {!layerSection && (
-                  <div className="flex items-end gap-2">
-                    <label className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
-                      Content
-                      <select
-                        value={newType}
-                        onChange={(e) => setNewType(e.target.value as NewContentType)}
-                        aria-label="Content type to add"
-                        className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm
-                          font-normal text-dark-gray"
-                      >
-                        {CONTENT_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <Button onClick={addContent} disabled={adding} className={primaryBtn}>
-                      <PlusIcon className="w-5 h-5 stroke-2" /> {adding ? 'Adding…' : 'Add'}
-                    </Button>
-                  </div>
-                )}
+                <div className="flex flex-col gap-1 text-sm font-medium text-dark-gray">
+                  Type
+                  {/* Read-only: chosen when the section was added. Different
+                      content is a different section. */}
+                  <span
+                    className="flex h-9 items-center rounded-md border border-gray-300 bg-gray-100
+                      px-3 font-semibold"
+                    title="Chosen when the section was added — add a new section for different content"
+                  >
+                    {SECTION_TYPE_LABELS[selectedSection.type]}
+                  </span>
+                </div>
               </div>
 
               <div className="flex shrink-0 items-center gap-3">
@@ -973,52 +831,54 @@ const StructureEditor = ({
             <CardContent className="flex flex-col gap-4">
               <hr className="h-px border-t-0 bg-gray-300" />
 
-              {/* Only the content being worked on. Everything else in the
-                  section is listed in the course structure, and picked there. */}
-              {!selectedItem ? (
-                <p className="text-sm text-dark-gray">Nothing in this section yet.</p>
-              ) : selectedItem.kind === 'element' ? (
+              {/* The section's content, in the editor for its type. */}
+              {selectedSection.type !== 'QUIZ' ? (
                 <ElementEditor
-                  key={selectedItem.id}
-                  element={selectedItem.element}
-                  editedMark={marks.elements[selectedItem.id]}
+                  key={selectedSection.id}
+                  section={selectedSection}
+                  editedMark={marks.sections[selectedSection.id]}
                   onDelete={() =>
                     onDelete({
-                      kind: 'element',
-                      id: selectedItem.id,
-                      label: selectedItem.element.type,
+                      kind: 'section',
+                      id: selectedSection.id,
+                      label: `${selectedSection.number} ${selectedSection.title}`,
                     })
                   }
                   onSaved={onRefresh}
                   onNotify={onNotify}
                 />
+              ) : !selectedQuiz ? (
+                <p className="text-sm text-dark-gray">
+                  This quiz section has no quiz in it. Delete it and add a new quiz section.
+                </p>
               ) : (
-                <div key={selectedItem.id} className="rounded-lg border border-navy/40 bg-navy/5">
+                <div key={selectedQuiz.id} className="rounded-lg border border-navy/40 bg-navy/5">
                   <div className="flex items-center gap-2 px-3 py-2">
                     {/* Tag underneath, so a long name cannot push the bin on the
                         right out of the row. */}
                     <span className="flex min-h-10 min-w-0 flex-1 flex-col justify-center gap-1">
                       <span className="w-full truncate text-sm text-dark-gray">
-                        <span className="font-semibold">QUIZ</span> {selectedItem.quiz.title} ·{' '}
-                        {selectedItem.quiz.questions.length} question
-                        {selectedItem.quiz.questions.length === 1 ? '' : 's'}
-                        {selectedItem.quiz.timeLimitMinutes !== null &&
-                          ` · ${selectedItem.quiz.timeLimitMinutes} min`}
-                        {!selectedItem.quiz.published && ' · draft'}
+                        <span className="font-semibold">QUIZ</span> {selectedQuiz.title} ·{' '}
+                        {selectedQuiz.questions.length} question
+                        {selectedQuiz.questions.length === 1 ? '' : 's'}
+                        {selectedQuiz.timeLimitMinutes !== null &&
+                          ` · ${selectedQuiz.timeLimitMinutes} min`}
+                        {!selectedQuiz.published && ' · draft'}
                       </span>
-                      <EditedTag mark={marks.quizzes[selectedItem.id]} />
+                      <EditedTag mark={marks.quizzes[selectedQuiz.id]} />
                     </span>
 
                     {/* Deleting the quiz lives on its row rather than inside the
                         editor: it belongs with the other things done *to* a
-                        quiz, not among the fields that describe one. */}
-                    {selectedItem.quiz.type !== 'DIRECTED' && (
+                        quiz, not among the fields that describe one. It takes
+                        the section with it — the two are one thing. */}
+                    {selectedQuiz.type !== 'DIRECTED' && (
                       <Button
                         onClick={() =>
                           onDelete({
                             kind: 'quiz',
-                            id: selectedItem.quiz.id,
-                            label: selectedItem.quiz.title,
+                            id: selectedQuiz.id,
+                            label: selectedQuiz.title,
                           })
                         }
                         variant="ghost"
@@ -1032,11 +892,7 @@ const StructureEditor = ({
                   </div>
 
                   <div className="border-t border-navy/30 bg-light-gray p-4">
-                    <QuizEditor
-                      quiz={selectedItem.quiz}
-                      onChanged={onRefresh}
-                      onNotify={onNotify}
-                    />
+                    <QuizEditor quiz={selectedQuiz} onChanged={onRefresh} onNotify={onNotify} />
                   </div>
                 </div>
               )}

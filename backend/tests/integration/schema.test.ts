@@ -61,15 +61,13 @@ describeWithDatabase('schema validation', () => {
       'User',
       'Course',
       'CoursePublication',
-      'Module',
+      'Model',
       'Section',
-      'Element',
       'Quiz',
       'Question',
       'Option',
       'Assignment',
       'SectionProgress',
-      'ElementProgress',
       'QuizAttempt',
       'QuizSession',
       'CourseCompletion',
@@ -82,23 +80,24 @@ describeWithDatabase('schema validation', () => {
 
   it('enforces the uniqueness the numbering grid depends on', async () => {
     const course = await prisma.course.create({ data: { title: 'Unique test' } });
-    const module = await prisma.module.create({
+    const model = await prisma.model.create({
       data: { courseId: course.id, number: 1, title: 'One' },
     });
 
-    // Two modules cannot share a number within one course.
+    // Two models cannot share a number within one course.
     await expect(
-      prisma.module.create({ data: { courseId: course.id, number: 1, title: 'Clash' } }),
+      prisma.model.create({ data: { courseId: course.id, number: 1, title: 'Clash' } }),
     ).rejects.toThrow();
 
     await prisma.section.create({
       data: {
         courseId: course.id,
-        moduleId: module.id,
+        modelId: model.id,
         position: 1,
         number: '1.1',
         sortKey: '000001.000001',
         title: 'M',
+        type: 'TEXT',
       },
     });
 
@@ -107,11 +106,12 @@ describeWithDatabase('schema validation', () => {
       prisma.section.create({
         data: {
           courseId: course.id,
-          moduleId: module.id,
+          modelId: model.id,
           position: 2,
           number: '1.1',
           sortKey: '000001.000002',
           title: 'Clash',
+          type: 'TEXT',
         },
       }),
     ).rejects.toThrow();
@@ -146,6 +146,117 @@ describeWithDatabase('schema validation', () => {
   });
 });
 
+/**
+ * The course structure is two layers: models, and the sections inside them,
+ * where a section is one typed piece of content. These pin the parts of that
+ * the database itself enforces.
+ */
+describeWithDatabase('the two-layer course structure', () => {
+  it('has a Model table and no Module, Element or ElementProgress table', async () => {
+    const rows = await prisma.$queryRaw<Array<{ table_name: string }>>`
+      SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()`;
+    const tables = new Set(rows.map((row) => row.table_name));
+
+    expect(tables.has('Model')).toBe(true);
+    expect(tables.has('Section')).toBe(true);
+    expect(tables.has('Module')).toBe(false);
+    expect(tables.has('Element')).toBe(false);
+    expect(tables.has('ElementProgress')).toBe(false);
+  });
+
+  /**
+   * "type is required on creation": the column is NOT NULL with no default, so
+   * a section that does not say what it holds is refused by the database even
+   * if something got past the service.
+   */
+  it('refuses a section with no type', async () => {
+    const course = await prisma.course.create({ data: { title: 'Type test' } });
+    const model = await prisma.model.create({
+      data: { courseId: course.id, number: 1, title: 'One' },
+    });
+
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO "Section" (id, "courseId", "modelId", position, number, "sortKey", title)
+        VALUES ('no-type', ${course.id}, ${model.id}, 1, '1.1', '000001.000001', 'Blank')`,
+    ).rejects.toThrow(/null value in column "type"/);
+  });
+
+  it('accepts each of the six section types and nothing else', async () => {
+    const course = await prisma.course.create({ data: { title: 'Types' } });
+    const model = await prisma.model.create({
+      data: { courseId: course.id, number: 1, title: 'One' },
+    });
+
+    const types = ['TEXT', 'YOUTUBE', 'IMAGE', 'PDF', 'CANVAS', 'QUIZ'] as const;
+    for (const [index, type] of types.entries()) {
+      await prisma.section.create({
+        data: {
+          courseId: course.id,
+          modelId: model.id,
+          position: index + 1,
+          number: `1.${index + 1}`,
+          sortKey: `000001.00000${index + 1}`,
+          title: type,
+          type,
+        },
+      });
+    }
+    expect(await prisma.section.count({ where: { courseId: course.id } })).toBe(6);
+
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO "Section" (id, "courseId", "modelId", position, number, "sortKey", title, type)
+        VALUES ('bad-type', ${course.id}, ${model.id}, 9, '1.9', '000001.000009', 'Bad', 'AUDIO')`,
+    ).rejects.toThrow();
+  });
+
+  it('keeps a quiz hanging off its section, and takes it when the section goes', async () => {
+    const course = await prisma.course.create({ data: { title: 'Quiz section' } });
+    const model = await prisma.model.create({
+      data: { courseId: course.id, number: 1, title: 'One' },
+    });
+    const section = await prisma.section.create({
+      data: {
+        courseId: course.id,
+        modelId: model.id,
+        position: 1,
+        number: '1.1',
+        sortKey: '000001.000001',
+        title: 'Check',
+        type: 'QUIZ',
+      },
+    });
+    const quiz = await prisma.quiz.create({ data: { title: 'Check', sectionId: section.id } });
+
+    await prisma.section.delete({ where: { id: section.id } });
+
+    expect(await prisma.quiz.findUnique({ where: { id: quiz.id } })).toBeNull();
+  });
+
+  it('cascades a model delete to its sections', async () => {
+    const course = await prisma.course.create({ data: { title: 'Model cascade' } });
+    const model = await prisma.model.create({
+      data: { courseId: course.id, number: 1, title: 'One' },
+    });
+    const section = await prisma.section.create({
+      data: {
+        courseId: course.id,
+        modelId: model.id,
+        position: 1,
+        number: '1.1',
+        sortKey: '000001.000001',
+        title: 'S',
+        type: 'TEXT',
+      },
+    });
+
+    await prisma.model.delete({ where: { id: model.id } });
+
+    expect(await prisma.section.findUnique({ where: { id: section.id } })).toBeNull();
+  });
+});
+
 describeWithDatabase('foreign key integrity', () => {
   it('refuses a section pointing at a course that does not exist', async () => {
     await expect(
@@ -156,6 +267,7 @@ describeWithDatabase('foreign key integrity', () => {
           number: '1.1',
           sortKey: '000001.000001',
           title: 'Orphan',
+          type: 'TEXT',
         },
       }),
     ).rejects.toThrow();
@@ -170,6 +282,7 @@ describeWithDatabase('foreign key integrity', () => {
         number: '1.1',
         sortKey: '000001.000001',
         title: 'M',
+        type: 'TEXT',
       },
     });
 
@@ -180,26 +293,36 @@ describeWithDatabase('foreign key integrity', () => {
 
   /**
    * Deleting a course must take its whole tree. Without the cascade, purging
-   * the recycle bin would leave orphaned sections and elements behind — and the
-   * elements carry base64 media, so the leak would be measured in megabytes.
+   * the recycle bin would leave orphaned sections behind — and sections carry
+   * base64 media, so the leak would be measured in megabytes.
    */
-  it('cascades a course delete through modules, sections, elements and quizzes', async () => {
+  it('cascades a course delete through models, sections and quizzes', async () => {
     const course = await prisma.course.create({ data: { title: 'Cascade test' } });
-    const module = await prisma.module.create({
+    const model = await prisma.model.create({
       data: { courseId: course.id, number: 1, title: 'S' },
     });
     const section = await prisma.section.create({
       data: {
         courseId: course.id,
-        moduleId: module.id,
+        modelId: model.id,
         position: 1,
         number: '1.1',
         sortKey: '000001.000001',
         title: 'M',
+        type: 'QUIZ',
       },
     });
-    const element = await prisma.element.create({
-      data: { sectionId: section.id, order: 1, type: 'TEXT', textContent: 'hello' },
+    const text = await prisma.section.create({
+      data: {
+        courseId: course.id,
+        modelId: model.id,
+        position: 2,
+        number: '1.2',
+        sortKey: '000001.000002',
+        title: 'T',
+        type: 'TEXT',
+        textContent: 'hello',
+      },
     });
     const quiz = await prisma.quiz.create({ data: { title: 'Q', sectionId: section.id } });
     const question = await prisma.question.create({
@@ -211,9 +334,9 @@ describeWithDatabase('foreign key integrity', () => {
 
     await prisma.course.delete({ where: { id: course.id } });
 
-    expect(await prisma.module.findUnique({ where: { id: module.id } })).toBeNull();
+    expect(await prisma.model.findUnique({ where: { id: model.id } })).toBeNull();
     expect(await prisma.section.findUnique({ where: { id: section.id } })).toBeNull();
-    expect(await prisma.element.findUnique({ where: { id: element.id } })).toBeNull();
+    expect(await prisma.section.findUnique({ where: { id: text.id } })).toBeNull();
     expect(await prisma.quiz.findUnique({ where: { id: quiz.id } })).toBeNull();
     expect(await prisma.question.findUnique({ where: { id: question.id } })).toBeNull();
     expect(await prisma.option.count({ where: { questionId: question.id } })).toBe(0);
@@ -229,6 +352,7 @@ describeWithDatabase('foreign key integrity', () => {
         number: '1.1',
         sortKey: '000001.000001',
         title: 'M',
+        type: 'TEXT',
       },
     });
 

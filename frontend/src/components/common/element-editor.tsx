@@ -1,12 +1,17 @@
 /**
  * File: element-editor.tsx
- * Description: One editable piece of section content.
+ * Description: The editor for one section's content.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * One editable piece of section content.
+ * The editor for one section's content.
+ *
+ * A section is one piece of content — a text, a video, a picture, a PDF or a
+ * canvas — so this edits the section itself; the name is kept from when that
+ * content was a separate element inside it. A QUIZ section is edited in the
+ * quiz pane instead.
  *
  * Edits save themselves a moment after typing stops. There is a Save button as
  * well, which does the same write without the pause — not because auto-save is
@@ -36,16 +41,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Spinner from '@/components/ui/spinner';
 import { saveStatus, useAutoSave } from '@/hooks/use-auto-save';
-import { curriculumApi, EditMark, SectionElement, UPLOAD_ACCEPT } from '@/services/curriculum-api';
+import { curriculumApi, EditMark, SectionContent, UPLOAD_ACCEPT } from '@/services/curriculum-api';
 
 interface ElementEditorProps {
-  element: SectionElement;
+  section: SectionContent;
   onDelete: () => void;
   /** Refresh the parent once a save lands, so counts and previews stay true. */
   onSaved: () => void | Promise<void>;
   onNotify?: (message: string, type?: 'success' | 'error') => void;
   /**
-   * Set when this element has been changed since the last publish, naming who
+   * Set when this section has been changed since the last publish, naming who
    * changed it. Absent is the common case and draws nothing.
    */
   editedMark?: EditMark;
@@ -71,12 +76,14 @@ function canvasSummary(items: Array<{ kind: string }>): string {
 }
 
 /** What a block says about itself while it holds nothing yet. */
-const EMPTY_SUMMARY: Record<SectionElement['type'], string> = {
+const EMPTY_SUMMARY: Record<SectionContent['type'], string> = {
   TEXT: 'Empty text',
   YOUTUBE: 'No link yet',
   IMAGE: 'No image yet',
   CANVAS: 'Empty canvas',
   PDF: 'Uploaded PDF',
+  // A quiz section is edited in the quiz pane, not here; listed for the summary.
+  QUIZ: 'Quiz',
 };
 
 /**
@@ -84,7 +91,7 @@ const EMPTY_SUMMARY: Record<SectionElement['type'], string> = {
  * it, and the editor heads the open block with it.
  */
 export function elementSummary(
-  element: SectionElement,
+  section: SectionContent,
   draft?: {
     textContent: string;
     videoUrl: string;
@@ -92,25 +99,27 @@ export function elementSummary(
     canvas?: { items: Array<{ kind: string }> };
   },
 ): string {
-  const text = draft?.textContent ?? element.textContent ?? '';
-  const video = draft?.videoUrl ?? element.videoUrl ?? '';
-  const image = draft?.imageUrl ?? element.imageUrl ?? '';
-  switch (element.type) {
+  const text = draft?.textContent ?? section.textContent ?? '';
+  const video = draft?.videoUrl ?? section.videoUrl ?? '';
+  const image = draft?.imageUrl ?? section.imageUrl ?? '';
+  switch (section.type) {
+    case 'QUIZ':
+      return EMPTY_SUMMARY.QUIZ;
     case 'TEXT':
       return plainPreview(text) || EMPTY_SUMMARY.TEXT;
     case 'YOUTUBE':
       return video || EMPTY_SUMMARY.YOUTUBE;
     case 'CANVAS':
-      return canvasSummary(draft?.canvas?.items ?? layoutOf(element.canvasData).items);
+      return canvasSummary(draft?.canvas?.items ?? layoutOf(section.canvasData).items);
     case 'PDF':
-      return element.fileName ?? EMPTY_SUMMARY.PDF;
+      return section.fileName ?? EMPTY_SUMMARY.PDF;
     default:
-      return element.fileName ?? (image || EMPTY_SUMMARY.IMAGE);
+      return section.fileName ?? (image || EMPTY_SUMMARY.IMAGE);
   }
 }
 
 const ElementEditor = ({
-  element,
+  section,
   onDelete,
   onSaved,
   onNotify,
@@ -121,24 +130,24 @@ const ElementEditor = ({
 
   /** What is actually stored, in the shape the form holds it. */
   const stored = {
-    textContent: element.textContent ?? '',
-    videoUrl: element.videoUrl ?? '',
-    imageUrl: element.imageUrl ?? '',
-    durationMinutes: element.durationMinutes?.toString() ?? '',
+    textContent: section.textContent ?? '',
+    videoUrl: section.videoUrl ?? '',
+    imageUrl: section.imageUrl ?? '',
+    durationMinutes: section.durationMinutes?.toString() ?? '',
     // Only the layout: a canvas's pictures are uploaded on their own and never
     // ride along with an auto-save.
-    canvas: layoutOf(element.canvasData),
+    canvas: layoutOf(section.canvasData),
   };
 
   const [draft, setDraft] = useState(stored);
 
   /**
-   * Pictures uploaded onto a canvas since the element was last fetched. The
+   * Pictures uploaded onto a canvas since the section was last fetched. The
    * server has them already; holding them here means they show the moment the
    * upload lands rather than after the next refresh.
    */
   const [uploaded, setUploaded] = useState<Record<string, CanvasImageAsset>>({});
-  const canvasImages = { ...element.canvasData?.images, ...uploaded };
+  const canvasImages = { ...section.canvasData?.images, ...uploaded };
 
   /**
    * The items every new canvas in this course starts with — null while they
@@ -146,67 +155,67 @@ const ElementEditor = ({
    */
   const [canvasDefaults, setCanvasDefaults] = useState<CanvasItem[] | null>(null);
   useEffect(() => {
-    if (element.type !== 'CANVAS') return;
+    if (section.type !== 'CANVAS') return;
     let live = true;
     setCanvasDefaults(null);
     curriculumApi
-      .getCanvasTemplate(element.id)
+      .getCanvasTemplate(section.id)
       .then((items) => live && setCanvasDefaults(items))
       .catch(() => live && setCanvasDefaults([]));
     return () => {
       live = false;
     };
-  }, [element.id, element.type]);
+  }, [section.id, section.type]);
 
   // Pull in changes that came from elsewhere (a reorder, another tab).
   useEffect(() => {
     setDraft({
-      textContent: element.textContent ?? '',
-      videoUrl: element.videoUrl ?? '',
-      imageUrl: element.imageUrl ?? '',
-      durationMinutes: element.durationMinutes?.toString() ?? '',
-      canvas: layoutOf(element.canvasData),
+      textContent: section.textContent ?? '',
+      videoUrl: section.videoUrl ?? '',
+      imageUrl: section.imageUrl ?? '',
+      durationMinutes: section.durationMinutes?.toString() ?? '',
+      canvas: layoutOf(section.canvasData),
     });
     setUploaded({});
-  }, [element.id]);
+  }, [section.id]);
 
   /**
    * Whether the form has moved on from the record.
    *
-   * Compared against the element rather than tracked as a flag, so it is right
+   * Compared against the section rather than tracked as a flag, so it is right
    * after a save lands from anywhere — the parent refetches on every write, and
    * a flag would have to be told about that.
    */
   const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
 
   const { state, saveNow } = useAutoSave(draft, async (value) => {
-    await curriculumApi.updateElement(element.id, {
-      textContent: element.type === 'TEXT' ? value.textContent : undefined,
-      videoUrl: element.type === 'YOUTUBE' ? value.videoUrl : undefined,
+    await curriculumApi.updateSection(section.id, {
+      textContent: section.type === 'TEXT' ? value.textContent : undefined,
+      videoUrl: section.type === 'YOUTUBE' ? value.videoUrl : undefined,
       // An uploaded image has its own data; only linked ones use the URL field.
-      imageUrl: element.type === 'IMAGE' && !element.imageData ? value.imageUrl : undefined,
-      durationMinutes: element.type === 'YOUTUBE' ? Number(value.durationMinutes) || 0 : undefined,
-      canvas: element.type === 'CANVAS' ? value.canvas : undefined,
+      imageUrl: section.type === 'IMAGE' && !section.imageData ? value.imageUrl : undefined,
+      durationMinutes: section.type === 'YOUTUBE' ? Number(value.durationMinutes) || 0 : undefined,
+      canvas: section.type === 'CANVAS' ? value.canvas : undefined,
     });
     onSaved();
   });
 
   /** What the preview should render — the draft, not the last saved copy. */
-  const previewElement: SectionElement = {
-    ...element,
+  const previewElement: SectionContent = {
+    ...section,
     textContent: draft.textContent,
     videoUrl: draft.videoUrl,
     imageUrl: draft.imageUrl,
     durationMinutes: Number(draft.durationMinutes) || null,
   };
 
-  const summary = elementSummary(element, draft);
+  const summary = elementSummary(section, draft);
 
   /** Puts a file from the author's computer into this block, replacing what it held. */
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      await curriculumApi.uploadElementFile(element.id, file);
+      await curriculumApi.uploadSectionFile(section.id, file);
       await onSaved();
       onNotify?.('File added');
     } catch (err) {
@@ -216,7 +225,7 @@ const ElementEditor = ({
     }
   };
 
-  const takesUpload = element.type === 'IMAGE' || element.type === 'PDF';
+  const takesUpload = section.type === 'IMAGE' || section.type === 'PDF';
   const uploadButton = takesUpload && (
     <>
       <input
@@ -253,12 +262,12 @@ const ElementEditor = ({
   return (
     <div
       className={`rounded-lg border bg-white
-        ${element.type === 'PDF' ? 'border-navy/30' : 'border-gray-300'}`}
+        ${section.type === 'PDF' ? 'border-navy/30' : 'border-gray-300'}`}
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <span className="flex min-h-10 min-w-0 flex-1 flex-col justify-center gap-1">
           <span className="w-full truncate text-sm text-dark-gray">
-            <span className="font-semibold">{element.type}</span> {summary}
+            <span className="font-semibold">{section.type}</span> {summary}
           </span>
           <EditedTag mark={editedMark} />
         </span>
@@ -288,7 +297,7 @@ const ElementEditor = ({
       </div>
 
       <div className="flex flex-col gap-4 border-t border-gray-300 p-4">
-        {element.type === 'TEXT' && (
+        {section.type === 'TEXT' && (
           <RichTextEditor
             value={draft.textContent}
             onChange={(html) => setDraft({ ...draft, textContent: html })}
@@ -296,7 +305,7 @@ const ElementEditor = ({
           />
         )}
 
-        {element.type === 'YOUTUBE' && (
+        {section.type === 'YOUTUBE' && (
           <div className="flex flex-wrap gap-3">
             <Input
               value={draft.videoUrl}
@@ -313,7 +322,7 @@ const ElementEditor = ({
           </div>
         )}
 
-        {element.type === 'IMAGE' && !element.imageData && (
+        {section.type === 'IMAGE' && !section.imageData && (
           <div className="flex flex-wrap gap-3">
             <Input
               value={draft.imageUrl}
@@ -325,29 +334,29 @@ const ElementEditor = ({
           </div>
         )}
 
-        {element.type === 'IMAGE' && element.imageData && (
+        {section.type === 'IMAGE' && section.imageData && (
           <div className="flex flex-wrap items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-dark-gray">
-              {element.fileName ?? 'Uploaded image'}
+              {section.fileName ?? 'Uploaded image'}
             </p>
             {uploadButton}
           </div>
         )}
 
-        {element.type === 'CANVAS' && (
+        {section.type === 'CANVAS' && (
           <CanvasEditor
             layout={draft.canvas}
             onChange={(canvas) => setDraft((prev) => ({ ...prev, canvas }))}
             images={canvasImages}
             onUpload={async (file) => {
-              const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(element.id, file);
+              const { imageId, ...asset } = await curriculumApi.uploadCanvasImage(section.id, file);
               setUploaded((prev) => ({ ...prev, [imageId]: asset }));
               return { imageId, asset };
             }}
             defaults={canvasDefaults}
             onToggleDefault={async (item, include) => {
               setCanvasDefaults(
-                await curriculumApi.setCanvasTemplateItem(element.id, item, include),
+                await curriculumApi.setCanvasTemplateItem(section.id, item, include),
               );
               onNotify?.(
                 include
@@ -358,10 +367,10 @@ const ElementEditor = ({
           />
         )}
 
-        {element.type === 'PDF' && (
+        {section.type === 'PDF' && (
           <div className="flex flex-wrap items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-dark-gray">
-              {element.fileName ?? 'Uploaded PDF'}
+              {section.fileName ?? 'Uploaded PDF'}
             </p>
             {uploadButton}
           </div>
@@ -370,15 +379,15 @@ const ElementEditor = ({
         {/* A canvas is built on the slide itself and the text editor already
             shows text as it will look, so a second copy underneath would only
             repeat them. A block with nothing in it has nothing to show. */}
-        {element.type !== 'CANVAS' &&
-          element.type !== 'TEXT' &&
-          summary !== EMPTY_SUMMARY[element.type] && (
+        {section.type !== 'CANVAS' &&
+          section.type !== 'TEXT' &&
+          summary !== EMPTY_SUMMARY[section.type] && (
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-dark-gray">
                 Preview
               </p>
               <div className="rounded-lg border border-gray-300 bg-light-gray p-4">
-                <ElementView element={previewElement} preview />
+                <ElementView section={previewElement} preview />
               </div>
             </div>
           )}

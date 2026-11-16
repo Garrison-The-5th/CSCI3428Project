@@ -11,7 +11,7 @@
  * Three depths, each a step narrower:
  *   list   : every learner, with a short bar per course under their name
  *   learner: one person, their courses as cards
- *   course : one person on one course — modules done, quizzes, marks, last seen
+ *   course : one person on one course — models done, quizzes, marks, last seen
  *
  * Which one is showing lives in this component's state rather than the URL. The
  * dashboard already owns the ?tab= parameter, and nesting a second router-driven

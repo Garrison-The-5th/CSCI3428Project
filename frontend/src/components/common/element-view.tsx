@@ -20,7 +20,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import CanvasView from '@/components/canvas/canvas-view';
-import { imageSrc, SectionElement } from '@/services/curriculum-api';
+import { imageSrc, SectionContent } from '@/services/curriculum-api';
 
 /** Accepts watch/share/embed YouTube links and returns the embeddable form. */
 export function toYouTubeEmbedUrl(url: string): string | null {
@@ -265,7 +265,7 @@ const ZoomableImage = ({ src, fill }: { src: string; fill: boolean }) => {
 };
 
 interface ElementViewProps {
-  element: SectionElement;
+  section: SectionContent;
   /** Preview mode explains empty/invalid content instead of rendering nothing. */
   preview?: boolean;
   /**
@@ -300,7 +300,7 @@ function openLinksInNewTab(event: React.MouseEvent<HTMLElement>) {
  * Renders one piece of course content — video, picture, PDF, text or canvas — for a learner. With
  * `preview`, missing content shows a placeholder note for the author instead of nothing.
  */
-const ElementView = ({ element, preview = false, fill = false }: ElementViewProps) => {
+const ElementView = ({ section, preview = false, fill = false }: ElementViewProps) => {
   /**
    * The author-only placeholder for content that has not been filled in yet; renders nothing for
    * learners.
@@ -312,8 +312,11 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
       </p>
     ) : null;
 
-  if (element.type === 'TEXT') {
-    if (!element.textContent?.trim()) return missing('Empty text block');
+  // A quiz section's content is its quiz, which the quiz runner draws.
+  if (section.type === 'QUIZ') return null;
+
+  if (section.type === 'TEXT') {
+    if (!section.textContent?.trim()) return missing('Empty text block');
 
     // Safe to inject: the server sanitises lesson text on write against a strict
     // allowlist, so what is stored can only be the tags the editor produces.
@@ -322,15 +325,15 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
         className={`rich-text break-words text-dark-gray ${fill ? 'h-full overflow-y-auto' : ''}`}
         onClick={openLinksInNewTab}
         // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
-        dangerouslySetInnerHTML={{ __html: element.textContent }}
+        dangerouslySetInnerHTML={{ __html: section.textContent }}
       />
     );
   }
 
-  if (element.type === 'PDF') {
-    const src = imageSrc(element.imageData, element.imageType);
+  if (section.type === 'PDF') {
+    const src = imageSrc(section.imageData, section.imageType);
     if (!src) return missing('No file attached');
-    const name = element.fileName || 'document.pdf';
+    const name = section.fileName || 'document.pdf';
 
     return (
       <figure className={`mx-auto flex w-full max-w-3xl flex-col ${fill ? 'h-full' : ''}`}>
@@ -357,21 +360,21 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
     );
   }
 
-  if (element.type === 'CANVAS') {
-    if (!element.canvasData?.items?.length) return missing('Empty canvas');
-    return <CanvasView data={element.canvasData} fill={fill} onTextClick={openLinksInNewTab} />;
+  if (section.type === 'CANVAS') {
+    if (!section.canvasData?.items?.length) return missing('Empty canvas');
+    return <CanvasView data={section.canvasData} fill={fill} onTextClick={openLinksInNewTab} />;
   }
 
-  if (element.type === 'IMAGE') {
-    const src = imageSrc(element.imageData, element.imageType, element.imageUrl);
+  if (section.type === 'IMAGE') {
+    const src = imageSrc(section.imageData, section.imageType, section.imageUrl);
     if (!src) return missing('No image yet — paste a URL or upload a file');
     return <ZoomableImage src={src} fill={fill} />;
   }
 
   // YOUTUBE
-  if (!element.videoUrl?.trim()) return missing('No video link yet');
+  if (!section.videoUrl?.trim()) return missing('No video link yet');
 
-  const embedUrl = toYouTubeEmbedUrl(element.videoUrl);
+  const embedUrl = toYouTubeEmbedUrl(section.videoUrl);
   if (!embedUrl) {
     return preview ? (
       <p className="rounded border border-dashed border-danger p-3 text-sm text-dark-gray">
@@ -379,12 +382,12 @@ const ElementView = ({ element, preview = false, fill = false }: ElementViewProp
       </p>
     ) : (
       <a
-        href={element.videoUrl}
+        href={section.videoUrl}
         target="_blank"
         rel="noreferrer"
         className="break-words text-green underline"
       >
-        {element.videoUrl}
+        {section.videoUrl}
       </a>
     );
   }

@@ -197,7 +197,7 @@ const AdminQuizzes = () => {
     );
   }
 
-  // ---- Detail: the Create a Lesson shell, with Quiz in place of Modules ----
+  // ---- Detail: the Create a Lesson shell, with Quiz in place of Models ----
   if (openCourseId) {
     return (
       <>

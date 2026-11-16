@@ -1,14 +1,14 @@
 /**
- * File: module-color-picker.tsx
- * Description: The swatch beside a module's delete button.
+ * File: model-color-picker.tsx
+ * Description: The swatch beside a model's delete button.
  * Author: Jacob Matthews <Jacob.Matthews@ttgteams.com>
  * Modified by: Jacob Matthews
  * Date: 2026-08-10
  */
 /**
- * The swatch beside a module's delete button.
+ * The swatch beside a model's delete button.
  *
- * Shows the module's current tint as a circle; clicking opens the palette. The
+ * Shows the model's current tint as a circle; clicking opens the palette. The
  * palette is a closed set rather than a colour wheel because the tint sits
  * behind section titles — anything saturated would fight the text it exists to
  * group — and because a fixed set can be restyled later without unpicking
@@ -16,20 +16,20 @@
  */
 import { useEffect, useRef, useState } from 'react';
 
-import { MODULE_COLORS } from '@/services/curriculum-api';
+import { MODEL_COLORS } from '@/services/curriculum-api';
 
-interface ModuleColorPickerProps {
+interface ModelColorPickerProps {
   color?: string | null;
   onSelect: (color: string | null) => void;
-  /** Module title, so the control says which module it belongs to. */
+  /** Model title, so the control says which model it belongs to. */
   label: string;
 }
 
 /**
- * The swatch beside a module or section: opens the fixed module palette, plus a choice to clear the
+ * The swatch beside a model or section: opens the fixed model palette, plus a choice to clear the
  * colour.
  */
-const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) => {
+const ModelColorPicker = ({ color, onSelect, label }: ModelColorPickerProps) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -69,14 +69,14 @@ const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) =
       <button
         type="button"
         onClick={(event) => {
-          // The heading around this is draggable and toggles the module;
+          // The heading around this is draggable and toggles the model;
           // neither should happen because a colour was picked.
           event.stopPropagation();
           setOpen((prev) => !prev);
         }}
         aria-expanded={open}
-        aria-label={`Module colour for ${label}`}
-        title="Module colour"
+        aria-label={`Model colour for ${label}`}
+        title="Model colour"
         className="flex h-7 w-7 items-center justify-center rounded-full transition-colors
           hover:bg-white/70"
       >
@@ -111,7 +111,7 @@ const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) =
           onDragStart={(event) => event.preventDefault()}
         >
           <div className="grid grid-cols-4 gap-2">
-            {MODULE_COLORS.map((swatch) => (
+            {MODEL_COLORS.map((swatch) => (
               <button
                 key={swatch}
                 type="button"
@@ -139,4 +139,4 @@ const ModuleColorPicker = ({ color, onSelect, label }: ModuleColorPickerProps) =
   );
 };
 
-export default ModuleColorPicker;
+export default ModelColorPicker;

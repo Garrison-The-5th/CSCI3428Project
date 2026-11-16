@@ -9,7 +9,7 @@
  * Who else has a piece of this course open right now.
  *
  * A context rather than props because the things that need the answer are four
- * levels down and unrelated to each other — a module heading in the structure
+ * levels down and unrelated to each other — a model heading in the structure
  * editor, a question row in the quiz editor — and threading two props through
  * every pane between here and there would put the plumbing in files that have
  * no other interest in it.
@@ -38,22 +38,21 @@ import { logger } from '@/utils/logger';
  * How often claims are renewed and the list refreshed.
  *
  * The server holds a claim for three beats, so one missed round trip does not
- * hand somebody's module away. Fast enough that walking into a module somebody
+ * hand somebody's model away. Fast enough that walking into a model somebody
  * has just left is a wait of seconds, not a puzzle.
  */
 const HEARTBEAT_MS = 15_000;
 
 const NO_MARKS: EditMarks = {
-  modules: {},
+  models: {},
   sections: {},
-  elements: {},
   quizzes: {},
   questions: {},
 };
 
 interface EditLocks {
-  /** Module id to the first name of whoever holds it. Excludes your own claims. */
-  lockedModules: Record<string, string>;
+  /** Model id to the first name of whoever holds it. Excludes your own claims. */
+  lockedModels: Record<string, string>;
   /** Question id to the first name of whoever holds it. Excludes your own. */
   lockedQuestions: Record<string, string>;
   /** Claim something, or give it up by passing null. One claim per scope at a time. */
@@ -70,7 +69,7 @@ interface EditLocks {
 }
 
 const NOTHING_LOCKED: EditLocks = {
-  lockedModules: {},
+  lockedModels: {},
   lockedQuestions: {},
   claim: () => {},
   marks: NO_MARKS,
@@ -89,7 +88,7 @@ interface ProviderProps {
 }
 
 /**
- * Tracks who else is editing this course and which modules and questions that locks, renewing this
+ * Tracks who else is editing this course and which models and questions that locks, renewing this
  * person's own claims while they edit.
  */
 export const EditLocksProvider = ({ courseId, children }: ProviderProps) => {
@@ -99,7 +98,7 @@ export const EditLocksProvider = ({ courseId, children }: ProviderProps) => {
   /**
    * What this tab currently claims, by scope.
    *
-   * One target per scope on purpose: a person is in one module and writing one
+   * One target per scope on purpose: a person is in one model and writing one
    * question, and letting a tab accumulate claims would have somebody's closed
    * panes locking content they walked away from ten minutes ago.
    */
@@ -192,7 +191,7 @@ export const EditLocksProvider = ({ courseId, children }: ProviderProps) => {
   return (
     <EditLocksContext.Provider
       value={{
-        lockedModules: byScope('MODULE'),
+        lockedModels: byScope('MODEL'),
         lockedQuestions: byScope('QUESTION'),
         claim,
         marks,

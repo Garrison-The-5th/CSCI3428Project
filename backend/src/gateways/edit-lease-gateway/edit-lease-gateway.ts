@@ -27,7 +27,7 @@ export default class EditLeaseGateway {
     });
   }
 
-  /** The current claim on one module or question, with who holds it, or null. */
+  /** The current claim on one model or question, with who holds it, or null. */
   static find(scope: EditScope, targetId: string) {
     return prisma.editLease.findUnique({
       where: { scope_targetId: { scope, targetId } },
@@ -40,7 +40,7 @@ export default class EditLeaseGateway {
    *
    * Written as a conditional `updateMany` followed by a create so the whole
    * thing is decided by the database rather than by a read the caller acted on
-   * a moment later. Two authors clicking into the same module at the same
+   * a moment later. Two authors clicking into the same model at the same
    * instant both pass a prior `find`; only one of them passes this.
    */
   static async claim(

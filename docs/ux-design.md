@@ -177,7 +177,9 @@ recognition cue and a list wastes them.
 ### Course player
 
 Fixed-height stage on the left, content rail on the right, prev/next plus arrow
-keys.
+keys. The rail is two layers — models, and one row per section — because a
+section is one piece of content: picking a row shows that section, and there is
+nothing folded underneath it. A model folds from its heading.
 
 *Justification.* Every item plays in a stage of the same height so moving
 between a paragraph, an image and a video never resizes the page or pushes the
@@ -203,11 +205,53 @@ drift from what ships.
 thirty fields makes save-state a constant background worry. A separate preview
 route — rejected, it lost the author's place in the editor.
 
+**Both menus tuck away on the Modules tab.** Opening the Modules tab collapses
+the editor's own menu to its icons and closes the app's main sidebar; leaving
+the tab puts each back exactly as the person had it.
+
+*Justification.* The Modules tab is the one pane that is itself two columns — an
+outline and an editor — and with two menus beside them the editor was the
+narrowest thing on the screen. The collapse is temporary by design: it is not
+written to the saved preference, so it never turns into "my menu keeps closing
+itself". Both toggles still work inside the tab, for anyone who wants a menu
+back, and that too lasts only until they leave. The first-login tour can still
+open the main sidebar for its own steps.
+
+*Alternatives considered.* Collapsing only the editor's menu — rejected, the
+main sidebar is the wider of the two. Remembering the collapsed state — rejected,
+it would overwrite a choice the person made for every other tab.
+
+### Archive tab
+
+Version history first, then **Deleted items**: the models, sections and quizzes
+deleted from this lesson, each with when it was deleted, how long it has left,
+Restore, and a confirmed permanent delete.
+
+*Justification.* Something deleted from inside a course is looked for in that
+course. A deleted model lists the sections that went with it and says they come
+back with it, because restoring a model to find it empty reads as data loss. A
+deleted quiz is listed as the quiz, under the title of the section it was —
+that is what the author deleted, even though underneath it is a section.
+
+*Alternatives considered.* Keeping these in the admin recycle bin — rejected:
+the bin mixed three courses' sections in one list, and its Empty button
+destroyed parts of courses that were still live.
+
 ### Structure editor
 
-Drag-and-drop for modules and sections; numbers are derived, never typed.
+Two layers: models, and the sections inside them. A section is one piece of
+content, and **Add section asks for its type first** — Text, YouTube, Image,
+PDF, Canvas or Quiz — with no blank choice. In the outline each section is one
+row with a badge saying what it is; picking it opens the editor for that type.
+Drag-and-drop for models and sections; numbers are derived, never typed.
 
-*Justification.* Section `2.3` *means* "third section of the second module". Once
+*Justification.* There used to be a third layer — a section held a list of
+elements and quizzes — and an author had to make an empty section and then fill
+it, which left blank sections behind and two places to reorder. Choosing the
+type at creation means a section always is something, and the one outline is
+the whole order of the course, quizzes included.
+
+Section `2.3` *means* "third section of the second model". Once
 that is true, a free-text number field can only ever disagree with reality, so
 the field is read-only and dragging is the way to renumber. The UI renumbers
 optimistically so numbers change under the cursor rather than a round trip later.
@@ -223,6 +267,11 @@ Three panes, with the open pane in the URL (`?tab=`).
 
 *Justification.* A link to the recycle bin should be a link to the recycle bin,
 not to whatever the dashboard opens on.
+
+The recycle bin holds **courses and standalone quizzes only** (a quiz set is a
+course). Its header says so, Restore all is labelled for what it covers, and
+the Empty confirmation states that a live course's Archive is not affected.
+Models, sections and course quizzes are in their own course's Archive tab.
 
 *Alternatives considered.* Three separate routes — rejected, it triplicated the
 shell and the toast handling for no gain.

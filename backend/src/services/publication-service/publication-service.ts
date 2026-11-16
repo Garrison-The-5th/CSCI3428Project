@@ -14,8 +14,9 @@ import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import CourseMapService from '@/services/course-map-service/course-map-service';
 import { SnapshotMap } from '@/services/course-map-service/directed-path';
 import EditAttributionService from '@/services/edit-attribution-service/edit-attribution-service';
+import { upgradeSnapshot } from '@/services/publication-service/legacy-snapshot';
 
-import { CourseKind, Prisma, QuizType } from '../../../generated/prisma';
+import { CourseKind, Prisma, QuizType, SectionType } from '../../../generated/prisma';
 
 /**
  * Versioned publishing.
@@ -24,12 +25,12 @@ import { CourseKind, Prisma, QuizType } from '../../../generated/prisma';
  * snapshot taken the last time someone pressed publish. That one indirection is
  * what makes "nothing reaches a learner until it is published" true of edits as
  * well as additions: correcting a paragraph, reordering sections, changing a quiz
- * answer and adding a whole module are all just differences between the live
+ * answer and adding a whole model are all just differences between the live
  * rows and the snapshot, and none of them are visible until a new snapshot is
  * taken.
  *
- * It also means ids stay stable. Progress is recorded against element, section
- * and quiz ids, and publishing does not mint new ones — so a learner's history
+ * It also means ids stay stable. Progress is recorded against section and quiz
+ * ids, and publishing does not mint new ones — so a learner's history
  * survives every version.
  */
 
@@ -43,6 +44,7 @@ export interface SnapshotQuiz {
   description: string | null;
   type: QuizType;
   sectionId: string | null;
+  /** Unused for a quiz in a course — its place is its section's. Kept for old rows. */
   order: number;
   published: boolean;
   showResults: boolean;
@@ -67,16 +69,30 @@ export interface SnapshotQuiz {
   }>;
 }
 
+/**
+ * One section as a learner is served it: its heading, and the one piece of
+ * content it is.
+ */
 export interface SnapshotSection {
   id: string;
   courseId: string;
-  moduleId: string | null;
+  modelId: string | null;
   position: number;
   number: string;
   title: string;
   estimatedMinutes: number;
   color: string | null;
-  elements: Array<Record<string, unknown> & { id: string }>;
+  /** What the section holds. A QUIZ section's quiz is in `quizzes`. */
+  type: SectionType;
+  videoUrl: string | null;
+  imageUrl: string | null;
+  imageData: string | null;
+  imageType: string | null;
+  fileName: string | null;
+  textContent: string | null;
+  canvasData: unknown;
+  durationMinutes: number | null;
+  /** The one quiz of a QUIZ section; empty on every other type. */
   quizzes: SnapshotQuiz[];
 }
 
@@ -130,7 +146,7 @@ export interface CourseSnapshot {
   imageType: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
-  modules: Array<{
+  models: Array<{
     id: string;
     courseId: string;
     number: number;
@@ -143,84 +159,27 @@ export interface CourseSnapshot {
 
 /** What one version added over the one before it. */
 export interface NewIds {
-  newModuleIds: string[];
+  newModelIds: string[];
   newSectionIds: string[];
-  newElementIds: string[];
   newQuizIds: string[];
 }
 
 const EMPTY_NEW: NewIds = {
-  newModuleIds: [],
+  newModelIds: [],
   newSectionIds: [],
-  newElementIds: [],
   newQuizIds: [],
 };
 
 /**
- * Rewrites a snapshot written before the two container names traded places.
+ * A stored snapshot, read as the current shape.
  *
- * Versions published under the old naming carry `sections` for what is now a
- * module and `modules` for what is now a section, with `sectionId`/`moduleId`
- * pointing the wrong way to match. The tables were renamed by migration but the
- * snapshots are opaque JSON, and rewriting them in SQL would have meant
- * hand-editing every learner's live version — so they are remapped here instead,
- * on the one path everything reads them through.
- *
- * The tell is unambiguous: only an old snapshot has entries in `modules` that
- * carry elements, because under the new naming elements hang off sections. A
- * snapshot already in the new shape is handed straight back, and the next
- * publish retires the old one for good.
+ * Every read of `CoursePublication.snapshot` goes through here. Versions
+ * published before the course structure became two layers are stored in an
+ * older shape and are converted on the way out rather than rewritten in place —
+ * see `legacy-snapshot.ts` for the shapes and the rules.
  */
-function normaliseSnapshot(snapshot: CourseSnapshot | null): CourseSnapshot | null {
-  if (!snapshot) return null;
-
-  const outer = snapshot.modules as unknown as Array<Record<string, unknown>> | undefined;
-  const legacy = Array.isArray(outer) && outer.some((entry) => Array.isArray(entry?.elements));
-  if (!legacy) return snapshot;
-
-  const oldInner = snapshot.modules as unknown as Array<Record<string, unknown>>;
-  const oldOuter = snapshot.sections as unknown as Array<Record<string, unknown>>;
-
-  return {
-    ...snapshot,
-    // Neither existed before quiz sets did, and everything published then was a
-    // lesson with untinted sections.
-    kind: snapshot.kind ?? CourseKind.LESSON,
-    modules: oldOuter.map((entry) => ({
-      id: String(entry.id),
-      courseId: String(entry.courseId),
-      number: Number(entry.number),
-      title: String(entry.title),
-      color: (entry.color as string | null) ?? null,
-    })),
-    sections: oldInner.map((entry) => {
-      const { sectionId, quizzes, ...rest } = entry;
-      return {
-        ...(rest as unknown as SnapshotSection),
-        moduleId: (sectionId as string | null) ?? null,
-        color: (entry.color as string | null) ?? null,
-        quizzes: ((quizzes ?? []) as Array<Record<string, unknown>>).map((quiz) => {
-          const { moduleId, hintModuleNumber, questions, ...quizRest } = quiz;
-          void hintModuleNumber;
-          return {
-            ...(quizRest as unknown as SnapshotQuiz),
-            // Everything that predates the three kinds was an exam that showed
-            // its result, which is what those defaults mean.
-            type: (quiz.type as QuizType) ?? QuizType.EXAM,
-            showResults: (quiz.showResults as boolean) ?? true,
-            sectionId: (moduleId as string | null) ?? null,
-            questions: ((questions ?? []) as Array<Record<string, unknown>>).map((question) => {
-              const { hintModuleNumber: hintNumber, ...questionRest } = question;
-              return {
-                ...(questionRest as unknown as SnapshotQuiz['questions'][number]),
-                hintSectionNumber: (hintNumber as string | null) ?? null,
-              };
-            }),
-          };
-        }),
-      };
-    }),
-  };
+function normaliseSnapshot(snapshot: unknown): CourseSnapshot | null {
+  return upgradeSnapshot(snapshot);
 }
 
 /**
@@ -258,7 +217,7 @@ const VOLATILE_KEYS = new Set([
  *
  * Keys are sorted, because one side has been through JSON and back and the other
  * has not; dates are flattened to strings for the same reason. Array order is
- * kept — the order of sections and elements is content, not incidental.
+ * kept — the order of sections is content, not incidental.
  */
 function contentOnly(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString();
@@ -282,13 +241,8 @@ function fingerprint(snapshot: CourseSnapshot): string {
 /** Every id a snapshot contains, bucketed by kind, for diffing two versions. */
 function idsOf(snapshot: CourseSnapshot | null) {
   return {
-    modules: new Set((snapshot?.modules ?? []).map((module) => module.id)),
+    models: new Set((snapshot?.models ?? []).map((model) => model.id)),
     sections: new Set((snapshot?.sections ?? []).map((section) => section.id)),
-    elements: new Set(
-      (snapshot?.sections ?? []).flatMap((section) =>
-        (section.elements ?? []).map((element) => element.id),
-      ),
-    ),
     quizzes: new Set(
       (snapshot?.sections ?? []).flatMap((section) =>
         (section.quizzes ?? []).map((quiz) => quiz.id),
@@ -313,9 +267,8 @@ export interface VersionDiff {
   course: CourseSnapshot;
   /** Per-id verdicts, keyed the way the editor walks the tree. */
   status: {
-    modules: Record<string, DiffStatus>;
+    models: Record<string, DiffStatus>;
     sections: Record<string, DiffStatus>;
-    elements: Record<string, DiffStatus>;
     quizzes: Record<string, DiffStatus>;
     questions: Record<string, DiffStatus>;
   };
@@ -426,23 +379,34 @@ export default class PublicationService {
       imageType: course.imageType,
       createdAt: course.createdAt,
       updatedAt: course.updatedAt,
-      modules: course.modules.map((module) => ({
-        id: module.id,
-        courseId: module.courseId,
-        number: module.number,
-        title: module.title,
-        color: module.color,
+      models: course.models.map((model) => ({
+        id: model.id,
+        courseId: model.courseId,
+        number: model.number,
+        title: model.title,
+        color: model.color,
       })),
       sections: delivered.map((section) => ({
         id: section.id,
         courseId: section.courseId,
-        moduleId: section.moduleId,
+        modelId: section.modelId,
         position: section.position,
         number: section.number,
         title: section.title,
         estimatedMinutes: section.estimatedMinutes,
         color: section.color,
-        elements: section.elements as unknown as SnapshotSection['elements'],
+        // The content itself. Named field by field, like everything else on a
+        // section: a column added to Section does not reach a learner until it
+        // is added here.
+        type: section.type,
+        videoUrl: section.videoUrl,
+        imageUrl: section.imageUrl,
+        imageData: section.imageData,
+        imageType: section.imageType,
+        fileName: section.fileName,
+        textContent: section.textContent,
+        canvasData: section.canvasData,
+        durationMinutes: section.durationMinutes,
         // Every quiz in the course, not just the ones flagged published.
         //
         // A quiz used to carry its own publish state, which meant a course could
@@ -450,7 +414,7 @@ export default class PublicationService {
         // from it — the author had pressed the one Publish button they were
         // shown and had no way to know a second one existed. A course is now
         // published whole: what is in it at the moment of publishing is what
-        // learners get, exactly as it already worked for elements.
+        // learners get, exactly as it already worked for the rest of its content.
         quizzes: section.quizzes.map((quiz) => quiz as unknown as SnapshotQuiz),
       })),
       instructors: course.instructors as unknown as Array<Record<string, unknown>>,
@@ -463,7 +427,7 @@ export default class PublicationService {
     if (!course || !course.published || course.publishedVersion < 1) return null;
 
     const publication = await PublicationGateway.getLive(courseId, course.publishedVersion);
-    return normaliseSnapshot((publication?.snapshot as unknown as CourseSnapshot) ?? null);
+    return normaliseSnapshot(publication?.snapshot ?? null);
   }
 
   /**
@@ -536,14 +500,12 @@ export default class PublicationService {
      * opened. Reading the new section is the thing that makes it no longer new,
      * which is what a learner would expect.
      */
-    const [viewedSections, viewedElements, attempts] = await Promise.all([
+    const [viewedSections, attempts] = await Promise.all([
       CurriculumGateway.getViewedSectionIds(userId),
-      CurriculumGateway.getViewedElementIds(userId),
       QuizGateway.getAttemptsForUser(userId),
     ]);
 
     const seenSections = new Set(viewedSections.map((view) => view.sectionId));
-    const seenElements = new Set(viewedElements.map((view) => view.elementId));
     const seenQuizzes = new Set(attempts.map((attempt) => attempt.quizId));
 
     const unseen = (ids: string[], present: Set<string>, seen: Set<string>) =>
@@ -554,41 +516,36 @@ export default class PublicationService {
       present.sections,
       seenSections,
     );
-    const newElementIds = unseen(
-      since.flatMap((entry) => entry.newElementIds),
-      present.elements,
-      seenElements,
-    );
     const newQuizIds = unseen(
       since.flatMap((entry) => entry.newQuizIds),
       present.quizzes,
       seenQuizzes,
     );
 
-    // A new module stays marked until nothing inside it is outstanding — its
+    // A new model stays marked until nothing inside it is outstanding — its
     // heading stands in for its contents, so it cannot clear before they do.
-    const sectionsByModule = new Map<string, string[]>();
+    const sectionsByModel = new Map<string, string[]>();
     for (const section of live?.sections ?? []) {
-      if (!section.moduleId) continue;
-      sectionsByModule.set(section.moduleId, [
-        ...(sectionsByModule.get(section.moduleId) ?? []),
+      if (!section.modelId) continue;
+      sectionsByModel.set(section.modelId, [
+        ...(sectionsByModel.get(section.modelId) ?? []),
         section.id,
       ]);
     }
 
     /*
-      Modules are marked by their authored id, which a directed course no longer
-      has: the projection rewrites its modules into the map's nodes and layers,
-      so nothing here matches and no module heading is ever marked new. That is
+      Models are marked by their authored id, which a directed course no longer
+      has: the projection rewrites its models into the map's nodes and layers,
+      so nothing here matches and no model heading is ever marked new. That is
       the right answer rather than a gap — on a directed course the author's
-      modules are not what the learner reads, and the sections inside them are
+      models are not what the learner reads, and the sections inside them are
       marked individually either way.
     */
-    const newModuleIds = [...new Set(since.flatMap((entry) => entry.newModuleIds))]
-      .filter((id) => present.modules.has(id))
-      .filter((id) => (sectionsByModule.get(id) ?? []).some((m) => !seenSections.has(m)));
+    const newModelIds = [...new Set(since.flatMap((entry) => entry.newModelIds))]
+      .filter((id) => present.models.has(id))
+      .filter((id) => (sectionsByModel.get(id) ?? []).some((m) => !seenSections.has(m)));
 
-    return { newModuleIds, newSectionIds, newElementIds, newQuizIds };
+    return { newModelIds, newSectionIds, newQuizIds };
   }
 
   /**
@@ -617,8 +574,7 @@ export default class PublicationService {
     const previous =
       course.publishedVersion >= 1
         ? normaliseSnapshot(
-            ((await PublicationGateway.getLive(courseId, course.publishedVersion))
-              ?.snapshot as unknown as CourseSnapshot | undefined) ?? null,
+            (await PublicationGateway.getLive(courseId, course.publishedVersion))?.snapshot ?? null,
           )
         : null;
 
@@ -628,19 +584,14 @@ export default class PublicationService {
     const nextIds = idsOf(snapshot);
     const added = previous
       ? {
-          newModuleIds: [...nextIds.modules].filter((id) => !previousIds.modules.has(id)),
+          newModelIds: [...nextIds.models].filter((id) => !previousIds.models.has(id)),
           newSectionIds: [...nextIds.sections].filter((id) => !previousIds.sections.has(id)),
-          newElementIds: [...nextIds.elements].filter((id) => !previousIds.elements.has(id)),
           newQuizIds: [...nextIds.quizzes].filter((id) => !previousIds.quizzes.has(id)),
         }
       : EMPTY_NEW;
 
     const hasAdded =
-      added.newModuleIds.length +
-        added.newSectionIds.length +
-        added.newElementIds.length +
-        added.newQuizIds.length >
-      0;
+      added.newModelIds.length + added.newSectionIds.length + added.newQuizIds.length > 0;
 
     const version = course.publishedVersion + 1;
 
@@ -691,7 +642,7 @@ export default class PublicationService {
 
     // The "edited by" marks go with it. They mean "changed, and learners cannot
     // see it yet"; a publish is the moment that stops being true of anything in
-    // the course, so leaving them up would label every element with a change
+    // the course, so leaving them up would label every section with a change
     // that has already shipped.
     await EditAttributionService.clearForCourse(courseId);
 
@@ -738,7 +689,7 @@ export default class PublicationService {
 
     if (course.draftUpdatedAt.getTime() <= publication.publishedAt.getTime()) return false;
 
-    const live = normaliseSnapshot((publication.snapshot as unknown as CourseSnapshot) ?? null);
+    const live = normaliseSnapshot(publication.snapshot ?? null);
     if (!live) return true;
 
     // A failure here must not strand an author on "nothing to publish" — if the
@@ -772,9 +723,8 @@ export default class PublicationService {
     const draftIds = idsOf(draft);
 
     return {
-      newModuleIds: [...draftIds.modules].filter((id) => !liveIds.modules.has(id)),
+      newModelIds: [...draftIds.models].filter((id) => !liveIds.models.has(id)),
       newSectionIds: [...draftIds.sections].filter((id) => !liveIds.sections.has(id)),
-      newElementIds: [...draftIds.elements].filter((id) => !liveIds.elements.has(id)),
       newQuizIds: [...draftIds.quizzes].filter((id) => !liveIds.quizzes.has(id)),
     };
   }
@@ -848,11 +798,14 @@ export default class PublicationService {
     return PublicationGateway.listForCourse(courseId);
   }
 
-  /** One archived version's full tree, for the editor's read-only view. */
+  /**
+   * One archived version's full tree, for the editor's read-only view. The tree
+   * comes back in the current shape whatever shape it was stored in.
+   */
   static async getVersion(id: string) {
     const publication = await PublicationGateway.getById(id);
     if (!publication) throw new NotFoundError(`Version with ID ${id} not found`);
-    return publication;
+    return { ...publication, snapshot: normaliseSnapshot(publication.snapshot) };
   }
 
   /**
@@ -879,7 +832,7 @@ export default class PublicationService {
     // A version row always holds a tree; the null here is only the normaliser's
     // "nothing given", which cannot happen from a stored snapshot.
     const archived =
-      normaliseSnapshot(publication.snapshot as unknown as CourseSnapshot) ??
+      normaliseSnapshot(publication.snapshot) ??
       (publication.snapshot as unknown as CourseSnapshot);
 
     const course = await CurriculumGateway.getCourseById(publication.courseId);
@@ -894,10 +847,9 @@ export default class PublicationService {
     const liveQuestions = questionIdsOf(live);
     const archivedQuestions = questionIdsOf(archived);
 
-    // Sections carry their own elements and quizzes, so the merge runs a level
-    // at a time: sections first, then the contents of each section that both
-    // versions have. A section only one side has keeps its own contents, which
-    // are all `added` or all `removed` along with it.
+    // A section is its own content, so merging the sections merges the content
+    // with them. Only a QUIZ section has anything inside to merge a level
+    // further down: its quiz, and that quiz's questions.
     const sections: SnapshotSection[] = mergeById(
       live?.sections ?? [],
       archived.sections ?? [],
@@ -907,7 +859,6 @@ export default class PublicationService {
 
       return {
         ...section,
-        elements: mergeById(fromLive?.elements ?? [], fromArchived?.elements ?? []),
         quizzes: mergeById(fromLive?.quizzes ?? [], fromArchived?.quizzes ?? []).map((quiz) => {
           const liveQuiz = fromLive?.quizzes.find((entry) => entry.id === quiz.id);
           const archivedQuiz = fromArchived?.quizzes.find((entry) => entry.id === quiz.id);
@@ -922,13 +873,12 @@ export default class PublicationService {
     return {
       course: {
         ...base,
-        modules: mergeById(live?.modules ?? [], archived.modules ?? []),
+        models: mergeById(live?.models ?? [], archived.models ?? []),
         sections,
       },
       status: {
-        modules: verdicts(liveIds.modules, archivedIds.modules),
+        models: verdicts(liveIds.models, archivedIds.models),
         sections: verdicts(liveIds.sections, archivedIds.sections),
-        elements: verdicts(liveIds.elements, archivedIds.elements),
         quizzes: verdicts(liveIds.quizzes, archivedIds.quizzes),
         questions: verdicts(liveQuestions, archivedQuestions),
       },
@@ -958,7 +908,7 @@ export default class PublicationService {
    * with a two-week-old tree is not something a button labelled Restore should
    * do. The editor will report unpublished changes afterwards, which is true.
    *
-   * `newModuleIds` and friends are reset to empty rather than copied: they mean
+   * `newModelIds` and friends are reset to empty rather than copied: they mean
    * "what this publish added", and a rollback adds nothing a learner has not
    * already been shown. Copying them would re-mark old content as New.
    */

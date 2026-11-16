@@ -83,8 +83,8 @@ export type NewContentItem = {
   /** "2.3" for a section, or the number of the section a quiz sits in. */
   number: string;
   title: string;
-  /** The module it landed in, e.g. "2. Working safely". */
-  module: string;
+  /** The model it landed in, e.g. "2. Working safely". */
+  model: string;
 };
 
 type NewContentEmailRequest = {
@@ -272,9 +272,9 @@ function composeAssignmentEmail({
 /**
  * The "there is more to do" message.
  *
- * Names the module and the sections rather than saying "this course changed",
+ * Names the model and the sections rather than saying "this course changed",
  * because someone who has already finished a course needs to know what is left
- * for them, not that an edit happened. Items are grouped under their module
+ * for them, not that an edit happened. Items are grouped under their model
  * heading in the order the course reads.
  */
 function composeNewContentEmail({
@@ -286,15 +286,15 @@ function composeNewContentEmail({
   subject: string;
   body: string;
 } {
-  const byModule = new Map<string, NewContentItem[]>();
+  const byModel = new Map<string, NewContentItem[]>();
   for (const item of items) {
-    byModule.set(item.module, [...(byModule.get(item.module) ?? []), item]);
+    byModel.set(item.model, [...(byModel.get(item.model) ?? []), item]);
   }
 
-  const outline = [...byModule.entries()]
+  const outline = [...byModel.entries()]
     .map(
-      ([module, entries]) =>
-        `${module}\n` +
+      ([model, entries]) =>
+        `${model}\n` +
         entries
           .map(
             (entry) => `  - ${entry.kind === 'quiz' ? 'Quiz: ' : ''}${entry.number} ${entry.title}`,

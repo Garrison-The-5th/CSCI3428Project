@@ -18,10 +18,11 @@ import AssignmentGateway from '@/gateways/assignment-gateway/assignment-gateway'
 import CurriculumGateway, { CourseReach } from '@/gateways/curriculum-gateway/curriculum-gateway';
 import QuizGateway from '@/gateways/quiz-gateway/quiz-gateway';
 import CourseMapService from '@/services/course-map-service/course-map-service';
+import CurriculumService from '@/services/curriculum-service/curriculum-service';
 import EnrolmentService, { dueFor } from '@/services/enrolment-service/enrolment-service';
 import PublicationService from '@/services/publication-service/publication-service';
 
-import { CourseKind, QuizType } from '../../../generated/prisma';
+import { CourseKind, QuizType, SectionType } from '../../../generated/prisma';
 
 export interface OptionInput {
   text: string;
@@ -253,6 +254,27 @@ async function assertOneTimeIsAlone(sectionId: string): Promise<void> {
       'a one-time link has to be the only quiz in its set — remove the others, or make a new set ' +
         'for it',
     );
+  }
+}
+
+/**
+ * A quiz in a course is the whole of a QUIZ section, and that section's only
+ * quiz.
+ *
+ * Checked wherever a quiz is put into a section, so a quiz cannot be attached
+ * to a text or video section, and a QUIZ section cannot be handed a second
+ * quiz — either would leave a section holding two pieces of content, which is
+ * the thing the two-layer structure exists to rule out.
+ */
+async function assertQuizSectionIsFree(sectionId: string, exceptQuizId?: string): Promise<void> {
+  const section = await CurriculumGateway.getSectionById(sectionId);
+  if (!section) throw new NotFoundError(`Section with ID ${sectionId} not found`);
+
+  if (section.type !== SectionType.QUIZ) {
+    throw new Error('a quiz lives in a section of type QUIZ — add a quiz section for it');
+  }
+  if (await QuizGateway.sectionHasQuiz(sectionId, exceptQuizId)) {
+    throw new Error('that section already holds a quiz — a section is one piece of content');
   }
 }
 
@@ -494,9 +516,12 @@ export default class QuizService {
   }
 
   /** The quizzes in this person's recycle bin. */
-  static async getDeletedQuizzes(userId: number, isGlobalAuthor: CourseReach) {
-    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    return QuizGateway.getDeletedQuizzes(courseIds, Boolean(isGlobalAuthor));
+  static async getDeletedQuizzes(isGlobalAuthor: CourseReach) {
+    // A standalone quiz belongs to no course, so no course can say whose it is.
+    // Like an unowned course, it stays with the global authors rather than with
+    // nobody; anyone else has no standalone quizzes to see.
+    if (!isGlobalAuthor) return [];
+    return QuizGateway.getDeletedStandaloneQuizzes();
   }
 
   /** One quiz with its questions, straight from the live tables (author view unless `live`). */
@@ -595,6 +620,7 @@ export default class QuizService {
     );
 
     if (type === QuizType.ONE_TIME && sectionId) await assertOneTimeIsAlone(sectionId);
+    if (sectionId) await assertQuizSectionIsFree(sectionId);
 
     // Silent for the same reason section creation is: nothing an author writes
     // reaches a learner until the course is published, so the announcement waits
@@ -611,9 +637,6 @@ export default class QuizService {
       // trimmed query, a quiz standing on its own) do not treat a live quiz as
       // a draft.
       published: true,
-      // Elements and quizzes share one sequence, so append after whichever is
-      // last. A standalone quiz has no sequence to join.
-      order: sectionId ? (await CurriculumGateway.getLastContentOrder(sectionId)) + 1 : 0,
       timeLimitMinutes,
       dueDate:
         data.dueDate !== undefined
@@ -730,19 +753,17 @@ export default class QuizService {
       await assertOneTimeIsAlone(settled.sectionId);
     }
 
-    // A quiz moving into a section for the first time has to join that section's
-    // content sequence, or it lands at 0 and sits above everything.
-    const order =
-      settled.sectionId && settled.sectionId !== quiz.sectionId
-        ? (await CurriculumGateway.getLastContentOrder(settled.sectionId)) + 1
-        : undefined;
+    // A quiz moving into a section has to be moving into a QUIZ section with
+    // nothing in it yet — a section is one piece of content.
+    if (settled.sectionId && settled.sectionId !== quiz.sectionId) {
+      await assertQuizSectionIsFree(settled.sectionId, id);
+    }
 
     return QuizGateway.updateQuiz(id, {
       ...(nextTitle !== undefined ? { title: nextTitle } : {}),
       ...(data.description !== undefined ? { description: nextDescription ?? null } : {}),
       ...(data.type !== undefined ? { type } : {}),
       ...(settled.sectionId !== (quiz.sectionId ?? null) ? { sectionId: settled.sectionId } : {}),
-      ...(order !== undefined ? { order } : {}),
       ...(data.published !== undefined ? { published: data.published === true } : {}),
       ...(data.showResults !== undefined ? { showResults: data.showResults === true } : {}),
       ...(data.showAnswers !== undefined ? { showAnswers: data.showAnswers === true } : {}),
@@ -773,7 +794,15 @@ export default class QuizService {
     });
   }
 
-  /** Soft delete — recoverable from the recycle bin. Directed quizzes are refused. */
+  /**
+   * Soft delete. Directed quizzes are refused.
+   *
+   * Where it goes depends on whose it is. A standalone quiz belongs to no
+   * course and goes to the admin recycle bin. A quiz inside a course is the
+   * whole of its section, so the section goes with it — deleting the quiz and
+   * deleting its section are the same act — and both are found in that course's
+   * Archive tab.
+   */
   static async deleteQuiz(id: string) {
     const quiz = await QuizGateway.getQuizById(id);
     if (!quiz) {
@@ -789,15 +818,35 @@ export default class QuizService {
       );
     }
 
+    const section = quiz.sectionId ? await CurriculumGateway.getSectionById(quiz.sectionId) : null;
+    if (section?.type === SectionType.QUIZ) {
+      await CurriculumService.deleteSection(section.id);
+      return { ...quiz, deletedAt: new Date() };
+    }
+
     return QuizGateway.softDeleteQuiz(id);
   }
 
-  /** Restoring is guarded by requireAuthor, so it touches the draft itself. */
+  /**
+   * Restoring is guarded by requireAuthor, so it touches the draft itself. A
+   * quiz inside a course comes back with its section.
+   */
   static async restoreQuiz(id: string) {
+    const deleted = await QuizGateway.findDeletedQuiz(id);
+    const section = deleted?.sectionId
+      ? await CurriculumGateway.findSectionAnyState(deleted.sectionId)
+      : null;
+
+    if (section?.deletedAt) {
+      // Brings the quiz back with it, renumbers, and marks the draft changed.
+      await CurriculumService.restoreSection(section.id);
+      return { ...deleted!, deletedAt: null };
+    }
+
     const restored = await QuizGateway.restoreQuiz(id);
     if (restored.sectionId) {
-      const section = await CurriculumGateway.getSectionById(restored.sectionId);
-      if (section) await CurriculumGateway.touchDraft(section.courseId);
+      const live = await CurriculumGateway.getSectionById(restored.sectionId);
+      if (live) await CurriculumGateway.touchDraft(live.courseId);
     }
     return restored;
   }
@@ -805,28 +854,38 @@ export default class QuizService {
   /**
    * Permanently removes a single quiz from the recycle bin. Refuses anything that
    * is not already soft deleted, so a live quiz cannot be destroyed by calling
-   * this endpoint directly.
+   * this endpoint directly. A quiz inside a course takes its deleted section
+   * with it, so no empty QUIZ section is left behind in the Archive.
    */
   static async purgeQuiz(id: string) {
     const quiz = await QuizGateway.findDeletedQuiz(id);
     if (!quiz) throw new NotFoundError(`Quiz with ID ${id} is not in the recycle bin`);
+
+    const section = quiz.sectionId
+      ? await CurriculumGateway.findSectionAnyState(quiz.sectionId)
+      : null;
+    if (section?.deletedAt && section.type === SectionType.QUIZ) {
+      // The quiz goes with its section by cascade.
+      return CurriculumGateway.hardDeleteSection(section.id);
+    }
     return QuizGateway.hardDeleteQuiz(id);
   }
 
   /**
-   * "Restore all" for quizzes in this person's courses. Global authors also get
-   * the older quizzes with no section, which belong to no course.
+   * "Restore all" for the bin's quizzes, which are the standalone ones only —
+   * a quiz inside a course is restored from that course's Archive. Scoped like
+   * `getDeletedQuizzes`.
    */
-  static async restoreAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
-    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    const { count } = await QuizGateway.restoreAllQuizzes(courseIds, Boolean(isGlobalAuthor));
+  static async restoreAllQuizzes(isGlobalAuthor: CourseReach) {
+    if (!isGlobalAuthor) return 0;
+    const { count } = await QuizGateway.restoreAllStandaloneQuizzes();
     return count;
   }
 
-  /** "Empty bin" for quizzes, scoped the same way as restoreAllQuizzes. */
-  static async purgeAllQuizzes(userId: number, isGlobalAuthor: CourseReach) {
-    const courseIds = await CurriculumGateway.getAccessibleCourseIds(userId, isGlobalAuthor);
-    const { count } = await QuizGateway.purgeQuizzes(courseIds, Boolean(isGlobalAuthor));
+  /** "Empty recycle bin" for quizzes, scoped the same way as restoreAllQuizzes. */
+  static async purgeAllQuizzes(isGlobalAuthor: CourseReach) {
+    if (!isGlobalAuthor) return 0;
+    const { count } = await QuizGateway.purgeStandaloneQuizzes();
     return count;
   }
 

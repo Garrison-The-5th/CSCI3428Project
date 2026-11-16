@@ -11,7 +11,7 @@ import { firstName } from '@/services/edit-lease-service/edit-lease-service';
 import { prisma } from '../../../prisma/prisma-client';
 
 /** The kinds of row that carry an editor's name while a change is unpublished. */
-export type EditedKind = 'MODULE' | 'SECTION' | 'ELEMENT' | 'QUIZ' | 'QUESTION';
+export type EditedKind = 'MODEL' | 'SECTION' | 'QUIZ' | 'QUESTION';
 
 /**
  * Who last changed each piece of a course that learners cannot see yet.
@@ -42,9 +42,8 @@ export interface EditMark {
 }
 
 export interface EditMarks {
-  modules: Record<string, EditMark>;
+  models: Record<string, EditMark>;
   sections: Record<string, EditMark>;
-  elements: Record<string, EditMark>;
   quizzes: Record<string, EditMark>;
   questions: Record<string, EditMark>;
 }
@@ -85,14 +84,11 @@ export default class EditAttributionService {
       // updateMany rather than update: the row may have been deleted by the very
       // request being attributed, and a note about it must not raise.
       switch (kind) {
-        case 'MODULE':
-          await prisma.module.updateMany({ where: { id }, data });
+        case 'MODEL':
+          await prisma.model.updateMany({ where: { id }, data });
           return;
         case 'SECTION':
           await prisma.section.updateMany({ where: { id }, data });
-          return;
-        case 'ELEMENT':
-          await prisma.element.updateMany({ where: { id }, data });
           return;
         case 'QUIZ':
           await prisma.quiz.updateMany({ where: { id }, data });
@@ -117,23 +113,19 @@ export default class EditAttributionService {
    * change to publish.
    *
    * One flat map per kind, keyed by id, because that is how the editor asks: it
-   * is drawing a module and wants to know whether this one is marked.
+   * is drawing a model and wants to know whether this one is marked.
    */
   static async marksForCourse(courseId: string, readerId: number | null): Promise<EditMarks> {
     const editor = { select: { id: true, name: true, email: true } };
     const marked = { lastEditedById: { not: null } };
 
-    const [modules, sections, elements, quizzes, questions] = await Promise.all([
-      prisma.module.findMany({
+    const [models, sections, quizzes, questions] = await Promise.all([
+      prisma.model.findMany({
         where: { courseId, ...marked },
         select: { id: true, lastEditedAt: true, lastEditedBy: editor },
       }),
       prisma.section.findMany({
         where: { courseId, ...marked },
-        select: { id: true, lastEditedAt: true, lastEditedBy: editor },
-      }),
-      prisma.element.findMany({
-        where: { section: { courseId }, ...marked },
         select: { id: true, lastEditedAt: true, lastEditedBy: editor },
       }),
       prisma.quiz.findMany({
@@ -147,9 +139,8 @@ export default class EditAttributionService {
     ]);
 
     return {
-      modules: index(modules, readerId),
+      models: index(models, readerId),
       sections: index(sections, readerId),
-      elements: index(elements, readerId),
       quizzes: index(quizzes, readerId),
       questions: index(questions, readerId),
     };
@@ -159,16 +150,15 @@ export default class EditAttributionService {
    * Clears every mark on a course, which a publish does.
    *
    * At that moment there is no unpublished change left to attribute, so leaving
-   * the marks up would say something false about every element in the course.
+   * the marks up would say something false about every section in the course.
    */
   static async clearForCourse(courseId: string) {
     const data = { lastEditedById: null, lastEditedAt: null };
 
     try {
       await prisma.$transaction([
-        prisma.module.updateMany({ where: { courseId }, data }),
+        prisma.model.updateMany({ where: { courseId }, data }),
         prisma.section.updateMany({ where: { courseId }, data }),
-        prisma.element.updateMany({ where: { section: { courseId } }, data }),
         prisma.quiz.updateMany({ where: { section: { courseId } }, data }),
         prisma.question.updateMany({ where: { quiz: { section: { courseId } } }, data }),
       ]);
