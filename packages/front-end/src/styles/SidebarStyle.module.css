@@ -1,0 +1,14 @@
+.brand {
+  padding: var(--mantine-spacing-md);
+  border-bottom: 2px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+}
+
+.links {
+  flex: 1;
+  padding: var(--mantine-spacing-xs);
+}
+
+.link {
+  border-radius: var(--mantine-radius-md);
+  font-weight: 500;
+}

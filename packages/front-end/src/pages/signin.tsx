@@ -44,7 +44,7 @@ export function SigninPage() {
   }
 
   return (
-    <BackgroundImage src="/goat-island.jpg" h="100vh">
+    <BackgroundImage src="/goat-island.jpg" h="var(--app-height)">
       <Center pt={150}>
         <Paper withBorder shadow="sm" p="lg" w={500}>
           <Text size="lg" fw="bold" ta="center">

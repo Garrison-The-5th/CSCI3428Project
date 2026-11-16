@@ -26,9 +26,13 @@ import {toStorageUrl} from '@/utils'
 import {ColorSchemeToggle} from './ColorSchemeToggle'
 import {Flashcards} from './Flashcards'
 
-export function Dictionary() {
+/**
+ * Purpose: Searchable grid of every word in the dictionary, with a switch to
+ * practise them as flashcards. Used by the dictionary modal and the
+ * standalone dictionary page.
+ */
+export function DictionaryBrowser() {
   const {words} = useLoaderData<typeof wordsLoader>()
-  const [opened, {open, close}] = useDisclosure(false)
 
   const fuse = new Fuse(words, {
     keys: [
@@ -45,13 +49,63 @@ export function Dictionary() {
   const [query, setQuery] = useState('')
   const [showFlashcards, setShowFlashcards] = useState(false)
 
-  const onClose = () => {
-    close()
-    setShowFlashcards(false)
-  }
-
   const _words = query.length ? fuse.search(query).map(result => result.item) : words
   const wordCards = _words.map(word => <DictionaryCard key={word.id} word={word} />)
+
+  if (showFlashcards) {
+    return (
+      <Stack>
+        <Group>
+          <Button
+            variant="default"
+            leftSection={<ArrowLeftIcon size={16} />}
+            onClick={() => setShowFlashcards(false)}
+          >
+            Back to dictionary
+          </Button>
+        </Group>
+        <Flashcards words={words} />
+      </Stack>
+    )
+  }
+
+  return (
+    <Stack>
+      <Group wrap="nowrap">
+        <TextInput
+          placeholder="Search words..."
+          leftSection={<MagnifyingGlassIcon size={20} />}
+          value={query}
+          onChange={e => setQuery(e.currentTarget.value)}
+          aria-label="Search dictionary"
+          style={{flex: 1}}
+        />
+        <Button
+          variant="default"
+          leftSection={<CardsIcon size={20} />}
+          onClick={() => setShowFlashcards(true)}
+          h="auto"
+          p="4px 16px"
+        >
+          <Stack gap={0} align="center" p="2px">
+            {/* TODO: placeholder until an official Mi'kmaq translation is provided by a translator */}
+            <Text size="sm" fw={500}>
+              [Mi'kmaq translation needed]
+            </Text>
+            <Text size="12px" style={{opacity: 0.8}}>
+              Flashcards
+            </Text>
+          </Stack>
+        </Button>
+      </Group>
+      <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
+    </Stack>
+  )
+}
+
+export function Dictionary() {
+  const {words} = useLoaderData<typeof wordsLoader>()
+  const [opened, {open, close}] = useDisclosure(false)
 
   return (
     <>
@@ -68,9 +122,11 @@ export function Dictionary() {
           </Stack>
         </Group>
       </Button>
+      {/* The modal unmounts its content when closed, so reopening it always
+          starts back on the dictionary rather than the flashcards. */}
       <Modal
         opened={opened}
-        onClose={onClose}
+        onClose={close}
         title={
           <Group gap="sm">
             <ColorSchemeToggle />
@@ -83,51 +139,7 @@ export function Dictionary() {
         centered
         scrollAreaComponent={ScrollArea.Autosize}
       >
-        {showFlashcards ? (
-          <Stack>
-            <Group>
-              <Button
-                variant="default"
-                leftSection={<ArrowLeftIcon size={16} />}
-                onClick={() => setShowFlashcards(false)}
-              >
-                Back to dictionary
-              </Button>
-            </Group>
-            <Flashcards words={words} />
-          </Stack>
-        ) : (
-          <Stack>
-            <Group wrap="nowrap">
-              <TextInput
-                placeholder="Search words..."
-                leftSection={<MagnifyingGlassIcon size={20} />}
-                value={query}
-                onChange={e => setQuery(e.currentTarget.value)}
-                aria-label="Search dictionary"
-                style={{flex: 1}}
-              />
-              <Button
-                variant="default"
-                leftSection={<CardsIcon size={20} />}
-                onClick={() => setShowFlashcards(true)}
-                h="auto"
-                p="4px 16px"
-              >
-                <Stack gap={0} align="center" p="2px">
-                  {/* TODO: placeholder until an official Mi'kmaq translation is provided by a translator */}
-                  <Text size="sm" fw={500}>
-                    [Mi'kmaq translation needed]
-                  </Text>
-                  <Text size="12px" style={{opacity: 0.8}}>
-                    Flashcards
-                  </Text>
-                </Stack>
-              </Button>
-            </Group>
-            <SimpleGrid cols={{xl: 6, lg: 5, md: 4, sm: 3, base: 2}}>{wordCards}</SimpleGrid>
-          </Stack>
-        )}
+        <DictionaryBrowser />
       </Modal>
     </>
   )

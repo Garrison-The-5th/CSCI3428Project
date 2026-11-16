@@ -6,12 +6,29 @@
  * (Originally John's Code)
  */
 
+import {AppShell, Burger, Group, Text} from '@mantine/core'
+import {useDisclosure} from '@mantine/hooks'
+import {FeatherIcon} from '@phosphor-icons/react'
 import {createBrowserRouter, Outlet, RouterProvider} from 'react-router'
 
-import {Footer} from '@/components/Footer'
-import {Header} from '@/components/Header'
-import {AdminPage, ErrorPage, FAQ, HomePage, IslandGamePage, PrivacyPolicy, SentenceBuilderGame, SigninPage, WordMatchGame} from '@/pages'
+import {ColorSchemeToggle} from '@/components/ColorSchemeToggle'
+import {Sidebar} from '@/components/Sidebar'
+import {
+  AdminGameSettingsPage,
+  AdminPage,
+  DictionaryPage,
+  ErrorPage,
+  FAQ,
+  HomePage,
+  IslandGamePage,
+  NikanatutitewkPage,
+  PrivacyPolicy,
+  SentenceBuilderGame,
+  SigninPage,
+  WordMatchGame
+} from '@/pages'
 import {adminLoader} from './admin.loader'
+import {authLoader} from './auth.loader'
 import {signinLoader} from './signin.loader'
 import {wordsLoader} from './words.loader'
 
@@ -38,24 +55,38 @@ const router = createBrowserRouter([
         element: <SentenceBuilderGame />
       },
       {
+        path: '/dictionary',
+        loader: wordsLoader,
+        element: <DictionaryPage />
+      },
+      {
         path: '/faq',
         element: <FAQ />
       },
       {
         path: '/privacypolicy',
         element: <PrivacyPolicy />
+      },
+      {
+        path: '/nikanatutitewk',
+        element: <NikanatutitewkPage />
+      },
+      {
+        path: '/admin',
+        loader: adminLoader,
+        element: <AdminPage />
+      },
+      {
+        path: '/admin/signin',
+        loader: signinLoader,
+        element: <SigninPage />
+      },
+      {
+        path: '/admin/game-settings',
+        loader: authLoader,
+        element: <AdminGameSettingsPage />
       }
     ]
-  },
-  {
-    path: '/admin',
-    loader: adminLoader,
-    element: <AdminPage />
-  },
-  {
-    path: '/admin/signin',
-    loader: signinLoader,
-    element: <SigninPage />
   },
   {
     path: '*',
@@ -68,11 +99,32 @@ export function Router() {
 }
 
 function Layout() {
+  const [opened, {toggle, close}] = useDisclosure(false)
+
   return (
-    <>
-      <Header />
-      <Outlet />
-      <Footer />
-    </>
+    <AppShell
+      header={{height: {base: 56, sm: 0}}}
+      navbar={{width: 280, breakpoint: 'sm', collapsed: {mobile: !opened}}}
+      padding="md"
+    >
+      <AppShell.Header hiddenFrom="sm">
+        <Group h="100%" px="md" gap="sm">
+          <Burger opened={opened} onClick={toggle} size="sm" aria-label="Toggle navigation" />
+          <FeatherIcon size={28} weight="duotone" color="var(--mantine-color-yellow-6)" />
+          <Text fw="bold" fs="italic">
+            Mikwite'tmk+t Angie
+          </Text>
+          <Group ml="auto">
+            <ColorSchemeToggle />
+          </Group>
+        </Group>
+      </AppShell.Header>
+      <AppShell.Navbar>
+        <Sidebar onNavigate={close} />
+      </AppShell.Navbar>
+      <AppShell.Main>
+        <Outlet />
+      </AppShell.Main>
+    </AppShell>
   )
 }
