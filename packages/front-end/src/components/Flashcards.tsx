@@ -11,10 +11,12 @@ import {
   Container,
   Group,
   Image,
+  MultiSelect,
   Paper,
   Progress,
   SegmentedControl,
   Stack,
+  TagsInput,
   Text,
   Title
 } from '@mantine/core'
@@ -24,6 +26,7 @@ import {useState} from 'react'
 import AudioButton from '@/components/AudioButton'
 import {toStorageUrl} from '@/utils'
 import {dueWords, grade, loadProgress, nextDue, saveProgress} from '@/utils/srs'
+import {allTags, filterByTags, loadTags, saveTags, setWordTags, type Tags} from '@/utils/tags'
 
 const shuffle = <T,>(items: T[]) => {
   const copy = [...items]
@@ -41,7 +44,7 @@ function Card({word, flipped, onFlip}: {word: Word; flipped: boolean; onFlip: ()
       shadow="sm"
       p="xl"
       w="100%"
-      mih={320}
+      mih={380}
       onClick={onFlip}
       style={{
         cursor: 'pointer',
@@ -54,14 +57,14 @@ function Card({word, flipped, onFlip}: {word: Word; flipped: boolean; onFlip: ()
     >
       {flipped ? (
         <Stack align="center" gap="sm">
-          <Image src={toStorageUrl(word.imagePath)} alt={word.mikmaq} h={180} fit="contain" />
-          <Text fz={28} fw={700}>
+          <Image src={toStorageUrl(word.imagePath)} alt={word.mikmaq} h={220} fit="contain" />
+          <Text fz={32} fw={700}>
             {word.english}
           </Text>
         </Stack>
       ) : (
         <Stack align="center" gap="sm">
-          <Text fz={40} fw={700}>
+          <Text fz={46} fw={700}>
             {word.mikmaq}
           </Text>
           <div onClick={e => e.stopPropagation()}>
@@ -73,7 +76,31 @@ function Card({word, flipped, onFlip}: {word: Word; flipped: boolean; onFlip: ()
   )
 }
 
-function Browse({words}: {words: Word[]}) {
+function TagEditor({
+  word,
+  tags,
+  suggestions,
+  onChange
+}: {
+  word: Word
+  tags: Tags
+  suggestions: string[]
+  onChange: (tags: string[]) => void
+}) {
+  return (
+    <TagsInput
+      w="100%"
+      size="sm"
+      placeholder="Add a tag and press Enter"
+      aria-label="Tags"
+      data={suggestions}
+      value={tags[word.id] ?? []}
+      onChange={onChange}
+    />
+  )
+}
+
+function Browse({words, tags, onTag}: {words: Word[]; tags: Tags; onTag: (id: string, tags: string[]) => void}) {
   const [deck, setDeck] = useState(words)
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
@@ -97,6 +124,8 @@ function Browse({words}: {words: Word[]}) {
 
       <Card word={deck[index]} flipped={flipped} onFlip={() => setFlipped(f => !f)} />
 
+      <TagEditor word={deck[index]} tags={tags} suggestions={allTags(tags)} onChange={t => onTag(deck[index].id, t)} />
+
       <Progress value={((index + 1) / deck.length) * 100} w="100%" size="sm" />
       <Text size="sm">
         {index + 1} / {deck.length}
@@ -117,7 +146,7 @@ function Browse({words}: {words: Word[]}) {
   )
 }
 
-function Review({words}: {words: Word[]}) {
+function Review({words, tags, onTag}: {words: Word[]; tags: Tags; onTag: (id: string, tags: string[]) => void}) {
   const [progress, setProgress] = useState(loadProgress)
   const [queue, setQueue] = useState(() => dueWords(words, progress))
   const [total] = useState(queue.length)
@@ -155,6 +184,8 @@ function Review({words}: {words: Word[]}) {
 
       <Card word={queue[0]} flipped={flipped} onFlip={() => setFlipped(f => !f)} />
 
+      <TagEditor word={queue[0]} tags={tags} suggestions={allTags(tags)} onChange={t => onTag(queue[0].id, t)} />
+
       <Progress value={((total - queue.length) / total) * 100} w="100%" size="sm" />
       <Text size="sm">{queue.length} left</Text>
 
@@ -184,6 +215,18 @@ function Review({words}: {words: Word[]}) {
 
 export function Flashcards({words}: {words: Word[]}) {
   const [mode, setMode] = useState('browse')
+  const [tags, setTags] = useState(loadTags)
+  const [selected, setSelected] = useState<string[]>([])
+
+  const onTag = (id: string, wordTags: string[]) => {
+    const next = setWordTags(tags, id, wordTags)
+    setTags(next)
+    saveTags(next)
+    // drop filters for tags that no longer exist
+    setSelected(sel => sel.filter(tag => allTags(next).includes(tag)))
+  }
+
+  const filtered = filterByTags(words, tags, selected)
 
   if (!words.length) {
     return (
@@ -194,7 +237,7 @@ export function Flashcards({words}: {words: Word[]}) {
   }
 
   return (
-    <Container size="sm" py="xl">
+    <Container size="xl" py="xl">
       <Stack align="center" gap="md">
         <Title order={2}>Flashcards</Title>
         <SegmentedControl
@@ -205,7 +248,25 @@ export function Flashcards({words}: {words: Word[]}) {
             {label: 'Review', value: 'review'}
           ]}
         />
-        {mode === 'browse' ? <Browse words={words} /> : <Review words={words} />}
+        {allTags(tags).length > 0 && (
+          <MultiSelect
+            w="100%"
+            size="sm"
+            placeholder="Filter by tag"
+            aria-label="Filter by tag"
+            data={allTags(tags)}
+            value={selected}
+            onChange={setSelected}
+            clearable
+          />
+        )}
+        {!filtered.length ? (
+          <Text c="dimmed">No cards have those tags.</Text>
+        ) : mode === 'browse' ? (
+          <Browse key={`browse-${selected.join()}`} words={filtered} tags={tags} onTag={onTag} />
+        ) : (
+          <Review key={`review-${selected.join()}`} words={filtered} tags={tags} onTag={onTag} />
+        )}
       </Stack>
     </Container>
   )
