@@ -39,7 +39,7 @@ auth.post('/', async (req, res) => {
 
   // too many recent failures: block the attempt
   if (failCount >= MAX_ATTEMPTS) {
-    return res.status(429).json({error: 'Too many failed attempts, try again in 10 minutes'})
+    return res.status(429).json({error: 'Invalid username or password'})
   }
 
   // wrong password: record the failure and its time
