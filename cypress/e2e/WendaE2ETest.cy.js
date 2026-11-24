@@ -11,6 +11,18 @@
  * Wenda Tan
  */
 
+// Animals are randomized each game, so read the target from the quiz title
+// ("Taluisit wla waisis: <Name>?") and convert it to its image file name,
+// e.g. "Apli'kmuj" -> "aplikmuj".
+const withTargetImageName = callback => {
+  cy.contains('Taluisit wla waisis:')
+    .invoke('text')
+    .then(text => {
+      const name = text.replace('Taluisit wla waisis:', '').replace('?', '').trim()
+      callback(name.toLowerCase().replace(/'/g, ''))
+    })
+}
+
 describe('Goat Island Game E2E', () => {
   beforeEach(() => {
     // 1. Clear local storage to ensure we always start at the "Select Character" 
@@ -37,13 +49,15 @@ describe('Goat Island Game E2E', () => {
     // Find the character on the map and click to open quiz
     cy.get('img[src*="boy"]').should('be.visible').click({ force: true })
 
-    // 1. Verify Quiz Modal is open, target is Raccoon (Amaljikwej)
-    cy.contains('Taluisit wla waisis: Amaljikwej?').should('be.visible')
+    // 1. Verify Quiz Modal is open
+    cy.contains('Taluisit wla waisis:').should('be.visible')
 
     // 2. Click the CORRECT answer
-    // Even though options are randomized, we know the correct answer image 
-    // for Level 1 is 'amaljikwej.png'. We search for that specific image.
-    cy.get('img[src*="amaljikwej"]').click()
+    // The target animal is random, so we read its name from the quiz title
+    // and click the option image with the matching file name.
+    withTargetImageName(imageName => {
+      cy.get(`.mantine-Modal-body img[src*="${imageName}"]`).click()
+    })
 
     // 1. Verify Success Modal appears
     cy.contains('Tetpaqa\'q').should('be.visible') // "Correct!"
@@ -64,10 +78,12 @@ describe('Goat Island Game E2E', () => {
 
     // Click a wrong answer
     // We find all images in the quiz modal, filter OUT the correct one, and click the first wrong one.
-    cy.get('.mantine-Modal-body img')
-      .not('[src*="amaljikwej"]') // Exclude the raccoon
-      .first()
-      .click()
+    withTargetImageName(imageName => {
+      cy.get('.mantine-Modal-body img')
+        .not(`[src*="${imageName}"]`) // Exclude the correct animal
+        .first()
+        .click()
+    })
 
     // Verify "Try Again" text appears
     cy.contains("Kjinu'kwalsi Ap").should('be.visible')

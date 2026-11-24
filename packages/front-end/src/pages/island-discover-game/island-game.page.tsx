@@ -8,18 +8,22 @@
  */
 
 import {Box, Button, Container, Group, Image, Modal, SimpleGrid, Stack, Text, Title} from '@mantine/core'
-import {useMemo, useRef, useState} from 'react'
+import {useRef, useState} from 'react'
 
 import boyImg from '@/assets/images/island_game/boy.png'
 import girlImg from '@/assets/images/island_game/girl.png'
 import {ANIMALS, FINISH_MAP, GAME_LEVELS} from './island-data'
 import {IslandSuccessModal} from './IslandSuccessModal'
+import {generateAnimalGame} from './island-randomizer'
 
 // --- Types ---
 type CharacterType = 'boy' | 'girl' | null
 type GameState = 'select-char' | 'playing' | 'victory'
 
 const STORAGE_KEY = 'island_game_character'
+
+// Builds a fresh random set of answers and options for every level
+const newGame = () => generateAnimalGame(ANIMALS, GAME_LEVELS.length)
 
 /**
  * Main Component: IslandGamePage
@@ -36,6 +40,9 @@ export function IslandGamePage() {
 
   const [currentLevelIdx, setCurrentLevelIdx] = useState(0)
 
+  // Random answers/options for this play-through (regenerated on restart)
+  const [game, setGame] = useState(newGame)
+
   // Quiz & Modal States
   const [quizOpen, setQuizOpen] = useState(false)
   const [wrongAttempts, setWrongAttempts] = useState(0)
@@ -45,18 +52,10 @@ export function IslandGamePage() {
   const mapRef = useRef<HTMLDivElement>(null)
 
   const currentLevel = GAME_LEVELS[currentLevelIdx]
-  const isFinalLevel = currentLevelIdx >= GAME_LEVELS.length
+  const targetAnimal = game.correctAnswers[currentLevelIdx]
+  const quizOptions = game.levelOptions[currentLevelIdx] ?? []
 
   // --- LOGIC ---
-
-  const quizOptions = useMemo(() => {
-    if (isFinalLevel) return []
-    const correct = currentLevel.targetAnimal
-    const others = ANIMALS.filter(a => a.id !== correct.id)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 2)
-    return [correct, ...others].sort(() => Math.random() - 0.5)
-  }, [isFinalLevel, currentLevel])
 
   const handleCharacterSelect = (char: 'boy' | 'girl') => {
     localStorage.setItem(STORAGE_KEY, char)
@@ -68,6 +67,7 @@ export function IslandGamePage() {
     localStorage.removeItem(STORAGE_KEY)
     setCharacter(null)
     setGameState('select-char')
+    setGame(newGame())
     setCurrentLevelIdx(0)
     setWrongAttempts(0)
     setShowGameOver(false)
@@ -76,7 +76,7 @@ export function IslandGamePage() {
   }
 
   const handleOptionClick = (selectedId: string) => {
-    if (selectedId === currentLevel.targetAnimal.id) {
+    if (selectedId === targetAnimal.id) {
       // 1. Close the quiz
       setQuizOpen(false)
       // 2. Reset wrong attempts
@@ -105,6 +105,7 @@ export function IslandGamePage() {
   }
 
   const restartGame = () => {
+    setGame(newGame())
     setCurrentLevelIdx(0)
     setWrongAttempts(0)
     setShowGameOver(false)
@@ -190,9 +191,9 @@ export function IslandGamePage() {
             Try Again
           </Text>
           <Text ta="center">Tetpaqa'q:</Text>
-          <Image src={currentLevel?.targetAnimal.image} w={120} fit="contain" />
+          <Image src={targetAnimal?.image} w={120} fit="contain" />
           <Text fw={900} size="lg">
-            {currentLevel?.targetAnimal.mikmaq}
+            {targetAnimal?.mikmaq}
           </Text>
           <Button fullWidth onClick={restartGame} color="green">
             Almila'si
@@ -207,7 +208,7 @@ export function IslandGamePage() {
       <Modal
         opened={quizOpen}
         onClose={() => !wrongAttempts && setQuizOpen(false)}
-        title={`Taluisit wla waisis: ${currentLevel?.targetAnimal.mikmaq}?`}
+        title={`Taluisit wla waisis: ${targetAnimal?.mikmaq}?`}
         size="lg"
         centered
         styles={{content: {overflow: 'hidden'}}}

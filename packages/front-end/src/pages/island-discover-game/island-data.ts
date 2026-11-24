@@ -5,7 +5,8 @@
  * It serves three main purposes:
  * 1. Imports all necessary image assets (sprites and map backgrounds).
  * 2. Defines the dictionary of Animals (English -> Mik'maq).
- * 3. Configures the Level Progression (assigning maps, targets, and coordinates).
+ * 3. Configures the Level Progression (assigning maps and coordinates).
+ *    Target animals are randomized per game in island-randomizer.ts.
  *
  * Author: Wenda Tan
  */
@@ -57,11 +58,12 @@ export const ANIMALS: Animal[] = [
 
 /**
  * Defines the setup for a specific stage of the game.
+ * The animal for each level is NOT fixed here: it is picked randomly at the
+ * start of every game by generateAnimalGame() in island-randomizer.ts.
  */
 export interface Level {
   levelId: number
   mapImage: string
-  targetAnimal: Animal
   // These coordinates determine where the Boy/Girl stands on the map
   characterPos: { top: string; left: string }
 }
@@ -75,43 +77,36 @@ export const GAME_LEVELS: Level[] = [
   {
     levelId: 0,
     mapImage: islandStart,
-    targetAnimal: ANIMALS[0], // Raccoon
     characterPos: { top: '45%', left: '22%' }
   },
   {
     levelId: 1,
     mapImage: island1,
-    targetAnimal: ANIMALS[1], // Rabbit
     characterPos: { top: '65%', left: '22%' }
   },
   {
     levelId: 2,
     mapImage: island2,
-    targetAnimal: ANIMALS[2], // Beaver
     characterPos: { top: '42%', left: '35%' }
   },
   {
     levelId: 3,
     mapImage: island3,
-    targetAnimal: ANIMALS[3], // Deer
     characterPos: { top: '50%', left: '50%' }
   },
   {
     levelId: 4,
     mapImage: island4,
-    targetAnimal: ANIMALS[4], // Bear
     characterPos: { top: '30%', left: '80%' }
   },
   {
     levelId: 5,
     mapImage: island5,
-    targetAnimal: ANIMALS[5], // Moose
     characterPos: { top: '55%', left: '75%' }
   },
   {
     levelId: 6,
     mapImage: island6,
-    targetAnimal: ANIMALS[6], // Fox
     characterPos: { top: '55%', left: '72%' }
   }
 ]
