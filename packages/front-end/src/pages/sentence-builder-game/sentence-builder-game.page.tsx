@@ -1,11 +1,11 @@
 /**
  * Sentence Builder Game
  *
- * The player taps shuffled word tiles to build a very basic sentence in the
- * right order. Tiles are English translations of words from the other games.
+ * The player is shown a basic sentence in English and taps shuffled Mi'kmaq
+ * word tiles (from the other games) to build it in the right order.
+ * Tapping a tile plays its audio when a clip exists.
  *
  * Sentences are limited to the vocabulary learned up to the selected month.
- * TODO: Mik'maq display/audio on tiles.
  */
 
 import {BackgroundImage, Button, Group, Paper, Progress, Select, Stack, Text, Title} from '@mantine/core'
@@ -15,9 +15,9 @@ import MatchingGameBackground from '@/assets/images/items/MatchingGameBackground
 import {ScoreBeads} from '@/pages/matching-game/ScoreBeads'
 import congratulatory from '@/assets/audio/matching-game-audio/congratulatory.mp3'
 import tryAgain from '@/assets/audio/matching-game-audio/tryagain.mp3'
-import {LEVELS, SENTENCES, type Level} from './sentence-data'
+import {audioFor, LEVELS, SENTENCES, type Level, type Word} from './sentence-data'
 
-type Tile = {key: number; text: string}
+type Tile = Word & {key: number}
 
 // Fisher-Yates; `sort(() => Math.random() - 0.5)` is biased
 const shuffle = <T,>(items: T[]) => {
@@ -56,11 +56,11 @@ export function SentenceBuilderGame() {
   const sentence = order[Math.min(round, order.length - 1)]
 
   // Shuffled bank for the current round; `key` keeps duplicate words distinct
-  const bank = useMemo(() => shuffleTiles(sentence.tiles.map((text, key) => ({key, text}))), [sentence])
+  const bank = useMemo(() => shuffleTiles(sentence.tiles.map((word, key) => ({...word, key}))), [sentence])
   const remaining = bank.filter(t => !built.some(b => b.key === t.key))
 
   const check = () => {
-    const correct = built.every((t, i) => t.text === sentence.tiles[i])
+    const correct = built.every((t, i) => t.mikmaq === sentence.tiles[i].mikmaq)
     setResult(correct ? 'correct' : 'wrong')
     play(correct ? congratulatory : tryAgain)
     if (correct) setScore(score + 1)
@@ -68,10 +68,10 @@ export function SentenceBuilderGame() {
 
   // Place the next correct tile, first returning any wrongly placed tiles
   const hint = () => {
-    const correctPrefix = built.findIndex((t, i) => t.text !== sentence.tiles[i])
+    const correctPrefix = built.findIndex((t, i) => t.mikmaq !== sentence.tiles[i].mikmaq)
     const kept = correctPrefix === -1 ? built : built.slice(0, correctPrefix)
     const pool = bank.filter(t => !kept.some(k => k.key === t.key))
-    const nextTile = pool.find(t => t.text === sentence.tiles[kept.length])
+    const nextTile = pool.find(t => t.mikmaq === sentence.tiles[kept.length].mikmaq)
     if (!nextTile) return
     setBuilt([...kept, nextTile])
     setResult(null)
@@ -84,6 +84,8 @@ export function SentenceBuilderGame() {
   }
 
   const add = (tile: Tile) => {
+    const audio = audioFor(tile)
+    if (audio) play(audio)
     setBuilt([...built, tile])
     setResult(null)
   }
@@ -130,7 +132,7 @@ export function SentenceBuilderGame() {
               Sentence Builder
             </Title>
             <Text ta="center" c="dimmed" fs="italic">
-              {finished ? 'All done!' : 'Put the words in order'}
+              {finished ? 'All done!' : 'Build this sentence in Mi\'kmaq'}
             </Text>
             <Select
               aria-label="Vocabulary up to month"
@@ -168,6 +170,10 @@ export function SentenceBuilderGame() {
             <>
               {score > 0 && <ScoreBeads score={score} />}
 
+              <Title order={2} ta="center" data-cy="sentence-prompt">
+                {sentence.english}
+              </Title>
+
               {/* Answer area */}
               <Paper
                 withBorder
@@ -202,7 +208,7 @@ export function SentenceBuilderGame() {
                       disabled={result === 'correct'}
                       onClick={() => remove(t)}
                     >
-                      {t.text}
+                      {t.mikmaq}
                     </Button>
                   ))}
                 </Group>
@@ -212,7 +218,7 @@ export function SentenceBuilderGame() {
               <Group mih={76} gap="sm" justify="center" data-cy="sentence-bank">
                 {remaining.map(t => (
                   <Button key={t.key} radius="xl" variant="default" style={tileStyle} onClick={() => add(t)}>
-                    {t.text}
+                    {t.mikmaq}
                   </Button>
                 ))}
               </Group>
